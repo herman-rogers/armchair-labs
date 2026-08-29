@@ -116,6 +116,14 @@ def login(
                 channel="chrome",
                 headless=False,
                 viewport={"width": 1280, "height": 900},
+                # Playwright defaults this to False, which passes --no-sandbox and
+                # makes Chrome show a "stability and security will suffer" banner.
+                # Real credentials get typed into this window, so the sandbox stays on.
+                chromium_sandbox=True,
+                # Stops Chrome advertising navigator.webdriver, which some login
+                # widgets react badly to. This is an interactive sign-in by the account
+                # owner — the flag only keeps the form working, and nothing here
+                # automates the login itself.
                 args=["--disable-blink-features=AutomationControlled"],
             )
         except Exception as error:
@@ -142,8 +150,20 @@ def login(
                     elapsed_seconds=time.monotonic() - started,
                 )
 
+            # Land on the login form rather than the marketing page, so there is one
+            # less thing to hunt for. Best-effort: if the affordance moves, the status
+            # message below still explains what to do.
+            opened_form = False
+            try:
+                page.get_by_text("Log In", exact=True).first.click(timeout=8000)
+                opened_form = True
+            except Exception:  # noqa: BLE001 - purely a convenience
+                logger.debug("could not auto-open the login form", exc_info=True)
+
             status(
-                "Chrome is open. Sign in to ESPN in that window (click Log In, top right). Waiting…"
+                "Chrome is open at the ESPN sign-in form. Sign in there. Waiting…"
+                if opened_form
+                else "Chrome is open. Click 'Log In' (top right) and sign in. Waiting…"
             )
 
             deadline = time.monotonic() + timeout_seconds
