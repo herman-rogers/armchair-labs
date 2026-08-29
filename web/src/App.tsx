@@ -12,9 +12,27 @@ const VIEWS: { id: View; label: string; hint: string }[] = [
   { id: 'players', label: 'Players', hint: 'Every ranked player, cross-referenced' },
 ]
 
-const VERSION_HINTS: Record<MetricVersion, string> = {
-  v1: 'Historical production',
-  v2: 'Forward projection',
+/**
+ * The two metric generations, named by what they answer rather than by version.
+ *
+ * "v1" and "v2" are internal vocabulary; nobody choosing between them is asking which
+ * came first. Labelling them by season makes the choice self-evident — one is what
+ * happened, the other is what is expected — and the seasons come from config so the
+ * labels stay correct next year.
+ */
+function versionOptions(boardSeason?: number, draftSeason?: number) {
+  return [
+    {
+      id: 'v1' as MetricVersion,
+      label: boardSeason ? `${boardSeason} Actual` : 'Actual',
+      hint: 'What each player actually scored last season, under this league\u2019s scoring.',
+    },
+    {
+      id: 'v2' as MetricVersion,
+      label: draftSeason ? `${draftSeason} Projected` : 'Projected',
+      hint: 'What each player is expected to score, from role, team context, and age.',
+    },
+  ]
 }
 
 export default function App() {
@@ -46,19 +64,18 @@ export default function App() {
                 : 'Loading league configuration…'}
             </p>
           </div>
-          <div className="version-switch" role="tablist" aria-label="Metric version">
-            {(['v1', 'v2'] as MetricVersion[]).map((name) => (
+          <div className="metric-switch" role="tablist" aria-label="Metric basis">
+            {versionOptions(league?.board_season, league?.draft_season).map((option) => (
               <button
-                key={name}
+                key={option.id}
                 type="button"
                 role="tab"
-                aria-selected={version === name}
-                disabled={!status.data?.metric_versions[name]?.available}
-                onClick={() => setVersion(name)}
-                title={VERSION_HINTS[name]}
+                aria-selected={version === option.id}
+                disabled={!status.data?.metric_versions[option.id]?.available}
+                onClick={() => setVersion(option.id)}
+                title={option.hint}
               >
-                <span>{name.toUpperCase()}</span>
-                <small>{VERSION_HINTS[name]}</small>
+                {option.label}
               </button>
             ))}
           </div>

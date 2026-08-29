@@ -151,3 +151,35 @@ class TestSnapshotFrame:
         assert restored.players[0].player_display_name == "A"
         assert restored.teams[0].faab_remaining == 120
         assert restored.transactions[0].bid_amount == 17
+
+
+class TestTimestamps:
+    """ESPN's activity feed reports times as epoch milliseconds. Passed through as a
+    string it renders as "1787929226212" in the UI — technically the data, and useless
+    to read."""
+
+    def test_epoch_milliseconds_become_iso(self) -> None:
+        from patron.espn.sync import _epoch_ms_to_iso
+
+        assert _epoch_ms_to_iso(1787929226212) == "2026-08-28T15:00:26.212000+00:00"
+
+    def test_a_numeric_string_is_accepted(self) -> None:
+        from patron.espn.sync import _epoch_ms_to_iso
+
+        assert _epoch_ms_to_iso("1787929226212").startswith("2026-08-28")
+
+    def test_seconds_are_not_mistaken_for_milliseconds(self) -> None:
+        """Dividing a seconds value by 1000 would silently produce a date in 1970."""
+        from patron.espn.sync import _epoch_ms_to_iso
+
+        assert _epoch_ms_to_iso(1787929226).startswith("2026-08-28")
+
+    def test_none_stays_none(self) -> None:
+        from patron.espn.sync import _epoch_ms_to_iso
+
+        assert _epoch_ms_to_iso(None) is None
+
+    def test_an_already_formatted_string_passes_through(self) -> None:
+        from patron.espn.sync import _epoch_ms_to_iso
+
+        assert _epoch_ms_to_iso("2026-08-28T15:00:00Z") == "2026-08-28T15:00:00Z"

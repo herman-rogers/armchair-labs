@@ -276,6 +276,31 @@ def _remaining_faab(league: Any, team: Any) -> int | None:
         return None
 
 
+def _epoch_ms_to_iso(value: Any) -> str | None:
+    """ESPN timestamps to an ISO string.
+
+    The activity feed reports times as epoch milliseconds. Passed through as a string
+    it renders as "1787929226212" — technically the data, and useless to read. Doing
+    the conversion here rather than in the UI keeps every consumer, including a future
+    alerts feed, from having to know ESPN's encoding.
+    """
+    if value is None:
+        return None
+    try:
+        milliseconds = float(value)
+    except (TypeError, ValueError):
+        # Already a formatted string from some other code path; pass it through.
+        return str(value) or None
+
+    # Values below this are implausible as milliseconds and are almost certainly
+    # already seconds — guard rather than produce a date in 1970.
+    seconds = milliseconds / 1000 if milliseconds > 1e11 else milliseconds
+    try:
+        return datetime.fromtimestamp(seconds, tz=UTC).isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def _read_transactions(league: Any, size: int) -> list[TransactionState]:
     """Recent adds, drops, and waiver claims.
 
@@ -290,12 +315,12 @@ def _read_transactions(league: Any, size: int) -> list[TransactionState]:
 
     entries: list[TransactionState] = []
     for item in activity:
-        date = _attribute(item, "date")
+        date = _epoch_ms_to_iso(_attribute(item, "date"))
         for action in _attribute(item, "actions", default=[]) or []:
             team, kind, player, bid = (list(action) + [None] * 4)[:4]
             entries.append(
                 TransactionState(
-                    date=str(date) if date else None,
+                    date=date,
                     kind=str(kind) if kind else None,
                     team_name=str(getattr(team, "team_name", team)) if team else None,
                     player_name=str(getattr(player, "name", player)) if player else None,

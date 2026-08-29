@@ -2,6 +2,19 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchOpponents, fetchTransactions } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
 
+/** ESPN times arrive as ISO strings; render them the way a person reads a date. */
+function formatWhen(value: string | null): string {
+  if (!value) return '—'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 /**
  * Where every roster is thin, and what the league has been paying.
  *
@@ -89,11 +102,17 @@ export function TeamsPanel({
             <tbody>
               {transactions.data.transactions.slice(0, 25).map((entry, index) => (
                 <tr key={`${entry.date}-${entry.player_name}-${index}`}>
-                  <td className="left faint">{entry.date?.slice(0, 16) ?? '—'}</td>
+                  <td className="left faint">{formatWhen(entry.date)}</td>
                   <td className="left">{entry.team_name ?? '—'}</td>
                   <td className="left dim">{entry.kind ?? '—'}</td>
                   <td className="left name">{entry.player_name ?? '—'}</td>
-                  <td>{entry.bid_amount !== null ? `$${entry.bid_amount}` : <span className="faint">—</span>}</td>
+                  <td>
+                    {entry.bid_amount ? (
+                      `$${entry.bid_amount}`
+                    ) : (
+                      <span className="faint">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
