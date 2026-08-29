@@ -106,3 +106,132 @@ export interface Status {
   espn_connected: boolean
   phase: number
 }
+
+// ---------------------------------------------------------------- league state
+
+/** Whether ESPN says a player is owned, claimable, or was never mentioned. */
+export type Availability = 'rostered' | 'free_agent' | 'unknown'
+
+/** Freshness metadata on every league response.
+ *
+ * Attached to everything because data without its age is how a stale wire gets acted
+ * on. `stale` means the last refresh failed and this is the previous good snapshot.
+ */
+export interface Freshness {
+  age_seconds: number
+  stale: boolean
+  week: number
+  season: number
+}
+
+/** A board row cross-referenced with live league state. */
+export interface LeaguePlayer extends Player {
+  availability: Availability
+  is_free_agent: boolean
+  is_mine: boolean
+  owner_team_id: number | null
+  owner_team_name: string | null
+  espn_team: string | null
+  injury_status: string | null
+  percent_owned: number | null
+  percent_started: number | null
+  /** True when ESPN's current team disagrees with the team the metrics came from. */
+  changed_team: boolean
+  /** Value against the free-agent pool rather than the preseason board. Wire only. */
+  wire_vor?: number
+}
+
+export interface LeagueTeam {
+  team_id: number
+  team_name: string
+  owner: string | null
+  wins: number
+  losses: number
+  faab_remaining: number | null
+  is_mine: boolean
+}
+
+export interface LeagueResponse extends Freshness {
+  league_id: number
+  league_name: string
+  my_team_id: number | null
+  teams: LeagueTeam[]
+}
+
+export interface LeaguePlayersResponse extends Freshness {
+  total: number
+  offset: number
+  limit: number
+  players: LeaguePlayer[]
+}
+
+export interface RosterResponse extends Freshness {
+  team_id: number
+  team_name: string | null
+  players: LeaguePlayer[]
+}
+
+export interface WireResponse extends Freshness {
+  /** What replacement level actually is right now, given who is still free. */
+  replacement_levels: Record<string, number>
+  total: number
+  players: LeaguePlayer[]
+}
+
+export interface UnrankablePlayer {
+  player_display_name: string
+  position: string
+  espn_team: string | null
+  percent_owned: number | null
+  owner_team_name: string | null
+  injury_status: string | null
+}
+
+export interface UnrankableResponse extends Freshness {
+  total: number
+  players: UnrankablePlayer[]
+}
+
+export interface OpponentRow {
+  owner_team_name: string
+  position: string
+  best_vor: number
+  best_player: string
+  depth: number
+}
+
+export interface OpponentsResponse extends Freshness {
+  teams: OpponentRow[]
+}
+
+export interface Transaction {
+  date: string | null
+  kind: string | null
+  team_name: string | null
+  player_name: string | null
+  bid_amount: number | null
+}
+
+export interface TransactionsResponse extends Freshness {
+  total: number
+  transactions: Transaction[]
+}
+
+export interface LeagueStatus {
+  authenticated: boolean
+  synced: boolean
+  age_seconds: number | null
+  stale: boolean
+  ttl_seconds: number
+  league_name?: string
+  season?: number
+  week?: number
+  my_team_id?: number | null
+  join?: {
+    matched: number
+    total: number
+    match_rate: number
+    unmatched: number
+    not_ranked: number
+  }
+}

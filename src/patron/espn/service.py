@@ -84,9 +84,15 @@ class LeagueService:
         self._settings = settings or get_settings()
         self._config = config or get_league()
         self._ttl = ttl_seconds
-        self._state: LeagueState | None = None
+        self._snapshot: sync.LeagueSnapshot | None = None
+        self._fetched_at: float = 0.0
+        self._stale = False
         self._lock = threading.Lock()
-        self._board_cache: tuple[float, pl.DataFrame] | None = None
+        # Derived state is per metric version: the snapshot is ESPN data and version
+        # independent, but the board it joins against is not. Keyed by (version,
+        # board mtime) so a `patron board` run is picked up without a restart.
+        self._states: dict[str, LeagueState] = {}
+        self._board_cache: dict[tuple[str, float], pl.DataFrame] = {}
 
     @property
     def snapshot_path(self) -> Path:
@@ -119,12 +125,15 @@ class LeagueService:
         if not path.exists():
             raise FileNotFoundError(f"No board at {path}. Run `patron board` to build one.")
 
-        mtime = path.stat().st_mtime
-        if self._board_cache and self._board_cache[0] == mtime:
-            return self._board_cache[1]
+        key = (version, path.stat().st_mtime)
+        cached = self._board_cache.get(key)
+        if cached is not None:
+            return cached
 
         board = pl.read_json(path)
-        self._board_cache = (mtime, board)
+        # Bounded: one entry per version per board build, and old mtimes are dropped.
+        self._board_cache = {k: v for k, v in self._board_cache.items() if k[0] != version}
+        self._board_cache[key] = board
         return board
 
     def _build_state(self, snapshot: sync.LeagueSnapshot, version: str) -> LeagueState:
@@ -143,38 +152,57 @@ class LeagueService:
             fetched_at=time.monotonic(),
         )
 
-    def _restore_from_disk(self, version: str) -> LeagueState | None:
+    def _restore_from_disk(self) -> bool:
+        """Load the persisted snapshot, aged by the file's real mtime.
+
+        Aging it matters: resetting the clock would let a day-old snapshot masquerade
+        as fresh and never trigger a refresh.
+        """
         if not self.snapshot_path.exists():
-            return None
+            return False
         try:
             snapshot = sync.LeagueSnapshot.read(self.snapshot_path)
         except (OSError, ValueError, TypeError):
             logger.warning("could not read the persisted snapshot", exc_info=True)
-            return None
+            return False
 
-        state = self._build_state(snapshot, version)
-        # Age it by the file's real age so a restart does not pretend to be fresh.
         file_age = time.time() - self.snapshot_path.stat().st_mtime
-        state.fetched_at = time.monotonic() - file_age
+        self._snapshot = snapshot
+        self._fetched_at = time.monotonic() - file_age
+        self._states.clear()
         logger.info("restored snapshot from disk, %.0fs old", file_age)
+        return True
+
+    def _derive(self, version: str) -> LeagueState:
+        """Join the current snapshot to `version`'s board, caching per version."""
+        assert self._snapshot is not None
+        cached = self._states.get(version)
+        if cached is not None and cached.fetched_at == self._fetched_at:
+            return cached
+
+        state = self._build_state(self._snapshot, version)
+        state.fetched_at = self._fetched_at
+        state.stale = self._stale
+        self._states[version] = state
         return state
 
     def get(self, version: str = "v1", force: bool = False) -> LeagueState:
         """Current league state, refreshing it if stale.
 
         Args:
-            version: Metric generation whose board to join against.
+            version: Metric generation whose board to join against. The snapshot is
+                shared across versions; only the join is redone.
             force: Refresh regardless of age.
 
         Raises:
             NotAuthenticatedError: if no credentials are stored and nothing is cached.
         """
-        if self._state is None:
-            self._state = self._restore_from_disk(version)
+        if self._snapshot is None:
+            self._restore_from_disk()
 
-        fresh_enough = self._state is not None and not force and self._state.age_seconds < self._ttl
-        if fresh_enough:
-            return self._state  # type: ignore[return-value]
+        age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
+        if self._snapshot is not None and not force and age is not None and age < self._ttl:
+            return self._derive(version)
 
         # Recorded before queueing on the lock. A refresh that completed after this
         # point is newer than the request, and satisfies it.
@@ -184,47 +212,52 @@ class LeagueService:
         if not acquired:
             # Another request is already fetching and is taking a long time. Serving
             # what we have beats piling a second request onto ESPN.
-            if self._state is not None:
+            if self._snapshot is not None:
                 logger.warning("refresh still in flight; serving the cached snapshot")
-                return self._state
+                return self._derive(version)
             raise TimeoutError("Timed out waiting for the in-flight ESPN refresh.")
 
         try:
-            # Re-check under the lock: whoever held it may have just refreshed.
+            # Re-check under the lock.
             #
             # `force` means "do not serve me data older than my request" — it does not
             # mean "always issue a network call". Without this second clause, ten
             # concurrent refreshes produced ten ESPN fetches: they serialised on the
             # lock but every one of them still went out. Someone leaning on a Refresh
             # button would hammer an unofficial, free API.
-            if self._state is not None and self._state.fetched_at >= requested_at:
+            if self._snapshot is not None and self._fetched_at >= requested_at:
                 logger.debug("a concurrent refresh already satisfied this request")
-                return self._state
-            if self._state is not None and not force and self._state.age_seconds < self._ttl:
-                return self._state
+                return self._derive(version)
+            age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
+            if self._snapshot is not None and not force and age is not None and age < self._ttl:
+                return self._derive(version)
 
             try:
                 snapshot = sync.fetch_snapshot(self._credentials(), self._config.draft_season)
                 snapshot.write(self.snapshot_path)
-                self._state = self._build_state(snapshot, version)
+                self._snapshot = snapshot
+                self._fetched_at = time.monotonic()
+                self._stale = False
+                self._states.clear()
             except NotAuthenticatedError:
                 raise
             except Exception as error:  # noqa: BLE001 - unofficial API, many failure modes
-                if self._state is None:
+                if self._snapshot is None:
                     raise
                 # Stale-if-error: an old wire beats no wire.
                 logger.warning("ESPN refresh failed, serving stale state: %s", error)
-                self._state.stale = True
-                return self._state
+                self._stale = True
+                for state in self._states.values():
+                    state.stale = True
 
-            return self._state
+            return self._derive(version)
         finally:
             self._lock.release()
 
     def status(self) -> dict[str, object]:
         """What the UI needs to describe freshness and join health honestly."""
         authenticated = self.is_authenticated()
-        if self._state is None:
+        if self._snapshot is None:
             return {
                 "authenticated": authenticated,
                 "synced": False,
@@ -233,25 +266,29 @@ class LeagueService:
                 "ttl_seconds": self._ttl,
             }
 
-        state = self._state
-        return {
+        snapshot = self._snapshot
+        report = next(iter(self._states.values()), None)
+        payload: dict[str, object] = {
             "authenticated": authenticated,
             "synced": True,
-            "age_seconds": round(state.age_seconds),
-            "stale": state.stale,
+            "age_seconds": round(time.monotonic() - self._fetched_at),
+            "stale": self._stale,
             "ttl_seconds": self._ttl,
-            "league_name": state.snapshot.league_name,
-            "season": state.snapshot.season,
-            "week": state.snapshot.week,
-            "my_team_id": state.snapshot.my_team_id,
-            "join": {
-                "matched": state.join_report.matched_by_id + state.join_report.matched_by_name,
-                "total": state.join_report.total,
-                "match_rate": round(state.join_report.match_rate, 3),
-                "unmatched": len(state.join_report.unmatched),
-                "not_ranked": state.join_report.not_ranked,
-            },
+            "league_name": snapshot.league_name,
+            "season": snapshot.season,
+            "week": snapshot.week,
+            "my_team_id": snapshot.my_team_id,
         }
+        if report is not None:
+            join = report.join_report
+            payload["join"] = {
+                "matched": join.matched_by_id + join.matched_by_name,
+                "total": join.total,
+                "match_rate": round(join.match_rate, 3),
+                "unmatched": len(join.unmatched),
+                "not_ranked": join.not_ranked,
+            }
+        return payload
 
 
 _service: LeagueService | None = None

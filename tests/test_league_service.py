@@ -103,7 +103,7 @@ class TestFetching:
             lambda *a, **k: (calls.append(1), make_snapshot())[1],
         )
         service.get()
-        service._state.fetched_at = time.monotonic() - 10_000
+        service._fetched_at = time.monotonic() - 10_000
         service.get()
 
         assert len(calls) == 2
@@ -259,10 +259,8 @@ class TestPersistence:
         os.utime(service.snapshot_path, (old, old))
 
         restarted = LeagueService(settings=service._settings, ttl_seconds=600)
-        restored = restarted._restore_from_disk("v1")
-
-        assert restored is not None
-        assert restored.age_seconds > 3000
+        assert restarted._restore_from_disk() is True
+        assert time.monotonic() - restarted._fetched_at > 3000
 
 
 class TestStatus:
@@ -291,3 +289,66 @@ class TestStatus:
 
         assert join["matched"] == 2
         assert join["match_rate"] == pytest.approx(1.0)
+
+
+class TestVersionIsolation:
+    """The snapshot is ESPN data and version-independent; the board it joins against
+    is not. Caching the derived state without regard to version made a v2 request
+    silently return v1 numbers."""
+
+    def _write_v2(self, service: LeagueService) -> None:
+        pl.DataFrame(
+            {
+                "player_id": ["g1", "g2"],
+                "player_display_name": ["Owned Guy", "Free Guy"],
+                "position": ["RB", "WR"],
+                "team": ["SF", "SEA"],
+                "ppg": [18.0, 9.0],
+                "adj_vor": [6.0, -1.0],
+                "flags": ["", ""],
+                "v2_score": [11.5, 2.5],
+            }
+        ).write_json(service._settings.outputs_dir / "board_v2.json")
+
+    def test_each_version_joins_against_its_own_board(
+        self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_v2(service)
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+
+        v1 = service.get(version="v1")
+        v2 = service.get(version="v2")
+
+        assert "v2_score" not in v1.tagged_board.columns
+        assert "v2_score" in v2.tagged_board.columns, "v2 must not silently serve the v1 board"
+
+    def test_switching_versions_does_not_refetch(
+        self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One ESPN snapshot serves every version. Re-fetching per version would
+        triple the load on an unofficial API for no new information."""
+        self._write_v2(service)
+        calls = []
+        monkeypatch.setattr(
+            service_module.sync,
+            "fetch_snapshot",
+            lambda *a, **k: (calls.append(1), make_snapshot())[1],
+        )
+        service.get(version="v1")
+        service.get(version="v2")
+        service.get(version="v1")
+
+        assert len(calls) == 1
+
+    def test_a_refresh_invalidates_every_version(
+        self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_v2(service)
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot(1))
+        service.get(version="v1")
+        service.get(version="v2")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot(7))
+        service.get(version="v1", force=True)
+
+        assert service.get(version="v2").snapshot.week == 7, "stale derived state was reused"
