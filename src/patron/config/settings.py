@@ -60,6 +60,19 @@ class Settings(BaseSettings):
         return self.data_dir / "outputs"
 
     @property
+    def env_path(self) -> Path:
+        """Where `patron auth login` writes the ESPN cookies."""
+        return REPO_ROOT / ".env"
+
+    @property
+    def browser_profile_dir(self) -> Path:
+        """Persisted Chrome profile for the auth flow, so re-auth stays cheap.
+
+        Gitignored: it holds a live ESPN session.
+        """
+        return self.data_dir / ".browser-profile"
+
+    @property
     def static_dir(self) -> Path:
         return self.data_dir / "static"
 

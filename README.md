@@ -49,8 +49,24 @@ DataFrames, touching neither network nor disk. All loading lives in `data/`, all
 writing in `cli.py`. That is what lets the unit suite run offline in milliseconds.
 Tests that hit live nflverse are marked `@pytest.mark.network` and excluded by default.
 
-## Secrets
+## ESPN sign-in
 
-ESPN private-league access needs the `SWID` and `espn_s2` cookies from a logged-in
-browser session. They go in `.env` (gitignored) — never in the repo. Copy
-`.env.example` to get started. Phase 1 does not read them.
+ESPN's fantasy API has no token flow; access rides on two session cookies. Rather than
+copying them out of devtools:
+
+```bash
+uv run patron auth login     # opens Chrome, you sign in, it captures the session
+uv run patron auth status    # check the stored session still works
+uv run patron auth logout    # forget it
+```
+
+It drives the Chrome you already have (`channel="chrome"` — no 150MB browser download)
+and keeps a browser profile in `data/.browser-profile/`, so signing in again later is
+usually instant. Nothing is typed into the login form on your behalf: you sign in
+normally, in a real browser, and the flow only watches for the resulting session.
+
+Once signed in it lists the leagues on your account and writes the chosen one, plus
+both cookies, into `.env` at mode 600. `.env` is gitignored and must stay that way —
+those cookies grant full access to your league. On a machine with no browser, set
+`ESPN_S2` / `ESPN_SWID` as environment variables instead; they take precedence over
+the file.

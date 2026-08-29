@@ -20,3 +20,6 @@ web/dist/
 
 # macos
 .DS_Store
+
+# persisted browser profile from `patron auth login` — holds a live ESPN session
+data/.browser-profile/

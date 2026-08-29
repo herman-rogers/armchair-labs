@@ -8,6 +8,7 @@ import polars as pl
 import typer
 
 from patron import pipeline
+from patron.cli_auth import app as auth_app
 from patron.config.league import get_league
 from patron.config.settings import get_settings
 from patron.data.derived import clear as clear_derived
@@ -16,6 +17,7 @@ app = typer.Typer(
     add_completion=False,
     help="Patron Saints analytics engine — league-exact valuation for Sweaty Plays.",
 )
+app.add_typer(auth_app, name="auth")
 
 
 def _configure_logging(verbose: bool) -> None:

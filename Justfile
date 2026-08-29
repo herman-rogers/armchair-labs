@@ -32,6 +32,14 @@ fmt:
 typecheck:
     uv run mypy
 
+# Sign in to ESPN. Opens Chrome; sign in there and it captures the session.
+auth-login *ARGS:
+    uv run patron auth login {{ARGS}}
+
+# Check the stored ESPN session still works.
+auth-status:
+    uv run patron auth status
+
 # Build the draft board into data/outputs/.
 board *ARGS:
     uv run patron board {{ARGS}}
