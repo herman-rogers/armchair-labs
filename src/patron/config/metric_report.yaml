@@ -5,11 +5,134 @@
 # retained as a pending prospective forecast. Add or remove metric entries here to
 # change the report without changing the analysis engine.
 title: V2 Metric Report
-forecast_seasons: [2023, 2024, 2025, 2026]
+# Player stats and play-by-play inputs begin in 2001. With a three-season history,
+# 2004 is the first uniform forecast. The final season remains prospective.
+forecast_start: 2004
+forecast_end: 2026
 history_seasons: 3
 depth_chart_cutoff: "08-31"
+depth_chart_start_season: 2004
 minimum_sample: 20
 baseline_metric: historical_ppg_prior
+
+# Every result is calculated independently in each window. This keeps a large sample
+# available for stability checks without pretending the 2004 NFL is the 2026 NFL.
+analysis_windows:
+  - {key: long_horizon, label: Long horizon, start: 2004, end: 2025}
+  - {key: modern, label: Modern enriched, start: 2019, end: 2025}
+  - {key: recent, label: Recent era, start: 2020, end: 2025}
+  - {key: market, label: Market archive, start: 2021, end: 2025}
+
+# The question the whole report exists to answer: in each backtested year, did our
+# ranking put the players who actually finished best at the top, and did it do so
+# better than the model-free baselines? Baselines are rankings anyone could produce
+# from past production alone; candidates are the model outputs. Each is evaluated on
+# the same top-K slice per position (the starters a ten-team league drafts) and on a
+# draftable pool, so the score reflects the top of the board rather than the ability
+# to separate starters from players who leave the league.
+ranking:
+  # Target-matched: the season-points outcome is also compared against last season's
+  # points, the model-free ranking anyone would use for that outcome.
+  baselines:
+    default: [historical_ppg_prior, ppg, market_ecr_score]
+    actual_season_points: [historical_ppg_prior, ppg, season_pts, market_ecr_score]
+  candidates: [v2_score, proj_ppg, expected_season_points, prior_branch_ppg, component_proj_ppg, fitted_ppg, fitted_season_points, fitted_season_points_direct, fitted_two_stage, fitted_opportunity_ppg, fitted_qb_process_ppg, fitted_team_tendency_ppg, fitted_ngs_ppg, fitted_research_ppg, fitted_research_season_points]
+  targets: [actual_season_points, actual_ppg]
+  top_k: {QB: 12, RB: 24, WR: 36, TE: 12}
+  pool: {QB: 24, RB: 60, WR: 80, TE: 24}
+  # Cross-position draft value. Each ranker becomes per-game VOR against its own
+  # positional replacement (season-scale keys divided by 17, as the live board does),
+  # then one top-K across every position is scored against availability-adjusted
+  # actual VOR. This is the test the overall board order has to pass.
+  overall:
+    k: 60
+    pool: 120
+    target: actual_availability_value
+    replacement_ranks: {QB: 12, RB: 25, WR: 35, TE: 12}
+    min_games: 8
+    season_games: 17
+
+# Walk-forward fitted rankers. For each forecast season a per-position ridge
+# regression is fitted on every completed fold strictly before it, with the ridge
+# strength chosen by nested walk-forward validation on the last training seasons; the
+# fitted outputs then compete in the ranking table above. Learned weights and their
+# spread across refits are reported so that a weight that flips from year to year is
+# visible. `product` models multiply earlier outputs, so availability is modelled
+# once rather than fed into the per-game fit and multiplied in again.
+fit:
+  min_train_folds: 3
+  min_position_rows: 40
+  per_position: true
+  inner_validation_folds: 3
+  models:
+    # Per-active-game PPG. No availability input: that belongs to the games models.
+    - name: fitted_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg]
+      lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
+    # Calibrated games on the full population (absent players count as zero games).
+    - name: fitted_games
+      target: actual_games
+      features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
+      absent_as_zero: true
+      clip: [0, 17]
+    # (a) PPG x calibrated availability.
+    - name: fitted_season_points
+      kind: product
+      factors: [fitted_ppg, fitted_games]
+    # (b) Season points fitted directly, absent players scored as zero.
+    - name: fitted_season_points_direct
+      target: actual_season_points
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, expected_games, season_pts]
+      absent_as_zero: true
+      clip: [0, null]
+    # (c) Two-stage: P(appears) x games given appearance x PPG.
+    - name: fitted_return_prob
+      target: actual_played
+      features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
+      absent_as_zero: true
+      clip: [0, 1]
+    - name: fitted_games_if_played
+      target: actual_games
+      features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
+      played_only: true
+      clip: [1, 17]
+    - name: fitted_two_stage
+      kind: product
+      factors: [fitted_return_prob, fitted_games_if_played, fitted_ppg]
+    # Staged report-only challengers make each research family independently
+    # falsifiable before the surviving signals are combined.
+    - name: fitted_opportunity_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, xfp_pg, expected_first_downs_pg, expected_yards_pg, expected_tds_pg]
+      lambda_grid: [0.1, 0.3, 1.0, 3.0, 10.0]
+      apply_live: false
+    - name: fitted_qb_process_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, passing_epa_per_attempt, passing_cpoe, passing_first_down_rate, rushing_first_down_rate, scramble_carries, designed_carries]
+      lambda_grid: [0.1, 0.3, 1.0, 3.0, 10.0]
+      apply_live: false
+    - name: fitted_team_tendency_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, neutral_pass_rate, neutral_early_down_pass_rate, neutral_plays_pg, neutral_epa_per_play, neutral_pass_oe]
+      lambda_grid: [0.1, 0.3, 1.0, 3.0, 10.0]
+      apply_live: false
+    - name: fitted_ngs_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, ngs_cpoe, ngs_time_to_throw, ngs_qb_air_yards, ngs_aggressiveness, ngs_separation, ngs_yac_oe, ngs_target_air_yards, ngs_ryoe_per_att, ngs_rush_pct_over_expected, ngs_box_rate]
+      lambda_grid: [0.1, 0.3, 1.0, 3.0, 10.0]
+      apply_live: false
+    # Survivor-only combination from the raw ablations: xFP for receivers, scramble
+    # and neutral tendency for QBs, NGS YAC-OE for receivers, and RYOE for backs.
+    - name: fitted_research_ppg
+      target: actual_ppg
+      features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, xfp_pg, scramble_carries, neutral_pass_oe, ngs_yac_oe, ngs_ryoe_per_att]
+      lambda_grid: [0.1, 0.3, 1.0, 3.0, 10.0]
+      apply_live: false
+    - name: fitted_research_season_points
+      kind: product
+      factors: [fitted_research_ppg, fitted_games]
+      apply_live: false
 
 targets:
   - key: actual_ppg
@@ -22,11 +145,11 @@ targets:
     missing_as_zero: false
   - key: actual_availability_value
     label: Availability-adjusted VOR
-    description: Actual VOR scaled by games played; absent players count as zero value.
+    description: Positive actual VOR scaled by active games; absent players count as zero value.
     missing_as_zero: true
   - key: actual_games
     label: Games played
-    description: Games with scored usage in the forecast season; absent players count as zero.
+    description: Games with offensive participation in the forecast season; absent players count as zero.
     missing_as_zero: true
   - key: actual_season_points
     label: Season points
@@ -34,25 +157,38 @@ targets:
     missing_as_zero: true
 
 metrics:
+  - {key: market_ecr_score, label: Preseason market ECR, group: Market baseline, description: Negative positional FantasyPros ECR from the latest archived snapshot on or before August 31; higher is better., targets: [actual_ppg, actual_vor, actual_availability_value, actual_season_points], available_from_forecast: 2021}
   - {key: historical_ppg_prior, label: Historical PPG prior, group: Baseline, description: Recency- and games-weighted multi-year PPG., targets: [actual_ppg, actual_vor, actual_availability_value]}
   - {key: individual_prior_ppg, label: Shrunk individual prior, group: Baseline, description: Historical PPG shrunk toward the rosterable positional prior., targets: [actual_ppg, actual_vor, actual_availability_value]}
   - {key: prior_branch_ppg, label: Prior branch PPG, group: Model branches, description: Historical branch after TD bonus age team and role adjustments., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
   - {key: component_proj_ppg, label: Component projection PPG, group: Model branches, description: Bottom-up projected stat line scored under league rules., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
   - {key: proj_ppg, label: Combined projected PPG, group: Model outputs, description: Configured blend of the prior and component branches., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
   - {key: proj_vor, label: Projected VOR, group: Model outputs, description: Combined projected PPG above projected replacement., targets: [actual_vor, actual_availability_value], prediction_target: actual_vor}
-  - {key: v2_score, label: V2 score, group: Model outputs, description: Availability-scaled expected floor and ceiling VOR blend., targets: [actual_vor, actual_availability_value]}
-  - {key: availability_adjusted_vor, label: Availability-adjusted projected VOR, group: Model outputs, description: Projected VOR scaled by expected availability., targets: [actual_availability_value], prediction_target: actual_availability_value}
   - {key: expected_games, label: Expected games, group: Availability, description: Injury- and participation-based games projection., targets: [actual_games, actual_availability_value], prediction_target: actual_games}
-  - {key: expected_season_points, label: Expected season points, group: Availability, description: Projected PPG multiplied by expected games., targets: [actual_season_points, actual_availability_value], prediction_target: actual_season_points}
   - {key: projected_availability, label: Projected availability, group: Availability, description: Expected share of the season available., targets: [actual_games, actual_availability_value]}
-  - {key: historical_injury_report_weeks, label: Injury report weeks, group: Availability, description: Recency-weighted historical injury-report burden., targets: [actual_games, actual_availability_value]}
-  - {key: injury_missed_equivalents, label: Injury missed equivalents, group: Availability, description: Weighted OUT doubtful and questionable history., targets: [actual_games, actual_availability_value]}
+  - {key: historical_injury_report_weeks, label: Injury report weeks, group: Availability, description: Recency-weighted historical injury-report burden., targets: [actual_games, actual_availability_value], available_from_forecast: 2012, expected_sign: negative}
+  - {key: injury_missed_equivalents, label: Injury missed equivalents, group: Availability, description: Weighted OUT doubtful and questionable history., targets: [actual_games, actual_availability_value], available_from_forecast: 2012, expected_sign: negative}
   - {key: projection_confidence, label: Projection confidence, group: Confidence, description: Support supplied by the effective production sample., targets: [actual_ppg, actual_availability_value]}
   - {key: availability_confidence, label: Availability confidence, group: Confidence, description: Support supplied by the availability sample., targets: [actual_games, actual_availability_value]}
   - {key: ppg, label: Latest-season PPG, group: Historical production, description: Actual league-scored PPG in the season immediately before the forecast., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: xfp_pg, label: Expected fantasy points/game, group: Expected opportunity, description: ffopportunity expected PPR points from source-season usage per regular-season game., targets: [actual_ppg, actual_vor, actual_availability_value], available_from_forecast: 2007}
+  - {key: expected_first_downs_pg, label: Expected first downs/game, group: Expected opportunity, description: Modelled passing rushing and receiving first downs from source-season opportunities., targets: [actual_ppg, actual_vor], available_from_forecast: 2007}
+  - {key: passing_epa_per_attempt, label: Passing EPA/attempt, group: QB process, description: Source-season passing EPA divided by official pass attempts., targets: [actual_ppg, actual_vor], positions: [QB]}
+  - {key: passing_cpoe, label: Passing CPOE, group: QB process, description: Attempt-weighted source-season completion percentage over expectation., targets: [actual_ppg, actual_vor], positions: [QB]}
+  - {key: passing_first_down_rate, label: Passing first-down rate, group: First downs, description: Passing first downs per attempt., targets: [actual_ppg, actual_vor], positions: [QB]}
+  - {key: rushing_first_down_rate, label: Rushing first-down rate, group: First downs, description: Rushing first downs per carry., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
+  - {key: receiving_first_down_rate, label: Receiving first-down rate, group: First downs, description: Receiving first downs per target., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: scramble_carries, label: QB scrambles, group: QB process, description: Source-season quarterback scramble attempts separated from designed carries., targets: [actual_ppg, actual_vor], positions: [QB]}
+  - {key: neutral_pass_rate, label: Neutral pass rate, group: Team tendency, description: Team dropback rate in quarters 1-3 within eight points., targets: [actual_ppg, actual_vor]}
+  - {key: neutral_plays_pg, label: Neutral plays/game, group: Team tendency, description: Situation-neutral offensive plays per observed game., targets: [actual_ppg, actual_vor]}
+  - {key: neutral_pass_oe, label: Neutral pass over expected, group: Team tendency, description: Mean nflverse pass-over-expected in neutral situations., targets: [actual_ppg, actual_vor], available_from_forecast: 2007}
+  - {key: ngs_cpoe, label: NGS CPOE, group: Next Gen Stats, description: Official season completion percentage above expectation., targets: [actual_ppg, actual_vor], positions: [QB], available_from_forecast: 2017}
+  - {key: ngs_separation, label: NGS separation, group: Next Gen Stats, description: Average receiver separation at target arrival., targets: [actual_ppg, actual_vor], positions: [WR, TE], available_from_forecast: 2017}
+  - {key: ngs_yac_oe, label: NGS YAC over expected, group: Next Gen Stats, description: Receiving yards after catch above expectation., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE], available_from_forecast: 2017}
+  - {key: ngs_ryoe_per_att, label: NGS RYOE/attempt, group: Next Gen Stats, description: Rushing yards over expectation per attempt., targets: [actual_ppg, actual_vor], positions: [QB, RB], available_from_forecast: 2017}
   - {key: games, label: Latest-season games, group: Historical production, description: Games in the season immediately before the forecast., targets: [actual_games, actual_availability_value]}
   - {key: floor, label: Historical floor, group: Weekly distribution, description: Prior-season 25th-percentile weekly score., targets: [actual_ppg, actual_availability_value]}
-  - {key: volatility, label: Historical volatility, group: Weekly distribution, description: Prior-season weekly scoring standard deviation., targets: [actual_ppg, actual_availability_value]}
+  - {key: volatility, label: Historical volatility, group: Weekly distribution, description: Prior-season weekly scoring standard deviation., targets: [actual_ppg, actual_availability_value], expected_sign: either}
   - {key: projected_floor, label: Projected floor, group: Weekly distribution, description: Projected 25th-percentile weekly score., targets: [actual_ppg, actual_vor, actual_availability_value]}
   - {key: projected_ceiling, label: Projected ceiling, group: Weekly distribution, description: Projected 75th-percentile weekly score., targets: [actual_ppg, actual_vor, actual_availability_value]}
   - {key: wtd_opp, label: Weighted opportunity, group: Opportunity, description: Latest carries plus 2.2 times targets., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
@@ -62,28 +198,25 @@ metrics:
   - {key: projected_carry_share, label: Projected carry share, group: Opportunity, description: Shrunk rushing share after backfield and role adjustments., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [QB, RB]}
   - {key: projected_targets_pg, label: Projected targets/game, group: Opportunity, description: Combined route and team-share target projection., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
   - {key: projected_carries_pg, label: Projected carries/game, group: Opportunity, description: Team-share and historical carry projection., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [QB, RB]}
-  - {key: projected_route_participation, label: Route-opportunity participation, group: Routes, description: Projected share of team dropbacks with an eligible-player route opportunity., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
-  - {key: projected_targets_per_route_opportunity, label: Targets per route opportunity, group: Routes, description: Shrunk target rate on route opportunities., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
-  - {key: projected_wopr, label: Projected WOPR, group: Routes, description: Projected weighted opportunity rating., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
-  - {key: projected_air_yards_share, label: Projected air-yards share, group: Routes, description: Shrunk share of team air yards., targets: [actual_ppg, actual_vor], positions: [WR, TE]}
+  - {key: projected_route_participation, label: Route-opportunity participation, group: Routes, description: Projected share of team dropbacks with an eligible-player route opportunity., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE], available_from_forecast: 2019}
+  - {key: projected_targets_per_route_opportunity, label: Targets per route opportunity, group: Routes, description: Shrunk target rate on route opportunities., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE], available_from_forecast: 2019}
+  - {key: projected_wopr, label: Projected WOPR, group: Routes, description: Projected weighted opportunity rating., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE], available_from_forecast: 2019}
+  - {key: projected_air_yards_share, label: Projected air-yards share, group: Routes, description: Shrunk share of team air yards., targets: [actual_ppg, actual_vor], positions: [WR, TE], available_from_forecast: 2019}
   - {key: projected_receptions_pg, label: Projected receptions/game, group: Efficiency, description: Targets multiplied by projected catch rate., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
   - {key: projected_receiving_yards_pg, label: Projected receiving yards/game, group: Efficiency, description: Targets multiplied by projected yards per target., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
   - {key: projected_rushing_yards_pg, label: Projected rushing yards/game, group: Efficiency, description: Carries multiplied by projected yards per carry., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
   - {key: projected_passing_yards_pg, label: Projected passing yards/game, group: Efficiency, description: Attempts multiplied by projected yards per attempt., targets: [actual_ppg, actual_vor], positions: [QB]}
-  - {key: td_over_exp, label: TDs over expectation, group: Touchdowns, description: Latest rushing and receiving TDs above the positional touch-rate expectation., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
-  - {key: td_regression_adjustment, label: TD regression adjustment, group: Touchdowns, description: Bounded PPG adjustment applied for latest TD over- or under-performance., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: td_over_exp, label: TDs over expectation, group: Touchdowns, description: Latest rushing and receiving TDs above the positional touch-rate expectation., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE], expected_sign: negative}
   - {key: projected_receiving_tds_pg, label: Projected receiving TDs/game, group: Touchdowns, description: High-value and general receiving TD-rate projection., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
   - {key: projected_rushing_tds_pg, label: Projected rushing TDs/game, group: Touchdowns, description: Goal-line and general rushing TD-rate projection., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
   - {key: projected_end_zone_targets_pg, label: Projected end-zone targets/game, group: High-value usage, description: Projected targets reaching the end zone., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
   - {key: projected_goal_line_carries_pg, label: Projected goal-line carries/game, group: High-value usage, description: Projected carries from inside the five., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
-  - {key: bonus_regression_adjustment, label: Big-play regression adjustment, group: Big plays, description: Historical bonus rate regression toward position., targets: [actual_ppg, actual_vor]}
   - {key: projected_bonus_pg, label: Projected bonus points/game, group: Big plays, description: Opportunity-regressed long-touchdown bonus projection., targets: [actual_ppg, actual_vor]}
   - {key: age_factor, label: Age factor, group: Context, description: Bounded position-specific age-curve multiplier., targets: [actual_ppg, actual_vor, actual_availability_value]}
-  - {key: team_context_factor, label: Team context factor, group: Context, description: Bounded change for projected team volume scoring quarterback and competition., targets: [actual_ppg, actual_vor]}
   - {key: qb_context, label: Quarterback context, group: Context, description: Projected team passing fantasy environment., targets: [actual_ppg, actual_vor], positions: [WR, TE]}
   - {key: team_scoring_context, label: Team scoring context, group: Context, description: Projected offensive touchdowns per game., targets: [actual_ppg, actual_vor]}
   - {key: team_pass_volume, label: Team pass volume, group: Context, description: Projected official pass attempts per game., targets: [actual_ppg, actual_vor]}
   - {key: team_rush_volume, label: Team rush volume, group: Context, description: Projected official carries per game., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
   - {key: teammate_competition, label: Teammate competition, group: Context, description: Availability of receiving or backfield role after strongest teammate., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
-  - {key: depth_role_factor, label: Depth-chart role factor, group: Depth chart, description: Bounded opportunity multiplier derived from preseason depth rank., targets: [actual_ppg, actual_vor, actual_availability_value]}
-  - {key: depth_chart_rank, label: Depth-chart rank, group: Depth chart, description: Last published offensive depth rank before the configured cutoff., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: depth_role_factor, label: Depth-chart role factor, group: Depth chart, description: Bounded opportunity multiplier from timestamped preseason depth rank or the legacy Week 1 proxy., targets: [actual_ppg, actual_vor, actual_availability_value], available_from_forecast: 2004}
+  - {key: depth_chart_rank, label: Depth-chart rank, group: Depth chart, description: Last preseason rank before cutoff; 2004–2024 uses the published Week 1 proxy., targets: [actual_ppg, actual_vor, actual_availability_value], available_from_forecast: 2004, expected_sign: negative}

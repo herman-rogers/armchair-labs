@@ -306,7 +306,7 @@ class TestVersionIsolation:
                 "ppg": [18.0, 9.0],
                 "adj_vor": [6.0, -1.0],
                 "flags": ["", ""],
-                "v2_score": [11.5, 2.5],
+                "v2_overall_vor": [11.5, 2.5],
             }
         ).write_json(service._settings.outputs_dir / "board_v2.json")
 
@@ -319,8 +319,10 @@ class TestVersionIsolation:
         v1 = service.get(version="v1")
         v2 = service.get(version="v2")
 
-        assert "v2_score" not in v1.tagged_board.columns
-        assert "v2_score" in v2.tagged_board.columns, "v2 must not silently serve the v1 board"
+        assert "v2_overall_vor" not in v1.tagged_board.columns
+        assert "v2_overall_vor" in v2.tagged_board.columns, (
+            "v2 must not silently serve the v1 board"
+        )
 
     def test_switching_versions_does_not_refetch(
         self, service: LeagueService, monkeypatch: pytest.MonkeyPatch

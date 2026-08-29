@@ -1,0 +1,661 @@
+"""Walk-forward fitted rankers: learn feature weights from completed backtest folds.
+
+v2's hand-set constants (season decay, branch blend, shrinkage samples, caps) cannot be
+validated individually by the metric report; the report can only say whether the final
+number beats the naive baseline.  This stage closes the loop the way the review asked
+for: it takes the small set of signals that survived the ablations, fits per-position
+ridge weights on every completed fold *strictly before* the forecast season, and
+emits each fitted projection as one more candidate ranker.  The fitted blend then has
+to win the same top-K test as everything else.
+
+Walk-forward means the 2019 forecast is fitted on 2004–2018 outcomes, the 2020 forecast
+on 2004–2019, and so on; the pending forecast uses every completed fold.  No row is
+ever scored by a model that saw its own outcome.  Ridge strength is chosen the same
+way: for each refit, candidates from ``lambda_grid`` are scored on the last few
+training seasons (fitted on the seasons before those), and the winner is refitted on
+the whole training window.
+
+Models are declared as specs (``config/metric_report.yaml`` → ``fit.models``).  A
+``ridge`` spec names a target and features; a ``product`` spec multiplies earlier
+outputs, which is how season-point projections are composed from a per-game model and
+an availability model without feeding availability into the per-game fit twice.  The
+fit is deliberately small and linear so the learned weights are readable and their
+year-to-year stability is itself evidence.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+import numpy as np
+import polars as pl
+
+FITTED_PPG = "fitted_ppg"
+FITTED_SEASON_POINTS = "fitted_season_points"
+ACTUAL_PLAYED = "actual_played"
+ARTIFACT_SCHEMA_VERSION = 2
+MODEL_VERSION = "ridge-walk-forward-2"
+
+_CORE_FEATURES = (
+    "historical_ppg_prior",
+    "ppg",
+    "age_factor",
+    "depth_role_factor",
+    "component_proj_ppg",
+)
+_DEFAULT_GRID = (0.01, 0.03, 0.1, 0.3, 1.0, 3.0)
+_AVAILABILITY_FEATURES = (
+    "expected_games",
+    "projected_availability",
+    "games",
+    "age_factor",
+    "historical_ppg_prior",
+    "depth_role_factor",
+)
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """One fitted output column.
+
+    ``ridge``: regress ``target`` on ``features``.  ``absent_as_zero`` trains on every
+    row of a completed fold, scoring players who never appeared as zero (the honest
+    season-points population); ``played_only`` trains only on players who did appear.
+    ``product``: multiply the named earlier outputs.  ``clip`` bounds the prediction.
+    """
+
+    name: str
+    kind: str = "ridge"
+    target: str = "actual_ppg"
+    features: tuple[str, ...] = _CORE_FEATURES
+    absent_as_zero: bool = False
+    played_only: bool = False
+    clip: tuple[float | None, float | None] = (None, None)
+    lambda_grid: tuple[float, ...] = _DEFAULT_GRID
+    factors: tuple[str, ...] = ()
+    apply_live: bool = True
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any]) -> ModelSpec:
+        clip = raw.get("clip") or (None, None)
+        return cls(
+            name=str(raw["name"]),
+            kind=str(raw.get("kind") or "ridge"),
+            target=str(raw.get("target") or "actual_ppg"),
+            features=tuple(raw.get("features") or _CORE_FEATURES),
+            absent_as_zero=bool(raw.get("absent_as_zero", False)),
+            played_only=bool(raw.get("played_only", False)),
+            clip=(
+                None if clip[0] is None else float(clip[0]),
+                None if clip[1] is None else float(clip[1]),
+            ),
+            lambda_grid=tuple(float(v) for v in (raw.get("lambda_grid") or _DEFAULT_GRID)),
+            factors=tuple(raw.get("factors") or ()),
+            apply_live=bool(raw.get("apply_live", True)),
+        )
+
+
+def default_model_specs() -> tuple[ModelSpec, ...]:
+    """The comparison the review asked for, as named candidate rankers.
+
+    - ``fitted_ppg``: per-active-game PPG *without* availability as an input.
+    - ``fitted_games``: calibrated games projection on the full population.
+    - ``fitted_season_points`` = ``fitted_ppg × fitted_games`` (PPG × calibrated
+      availability).
+    - ``fitted_season_points_direct``: season points fitted directly with absent
+      players scored as zero.
+    - ``fitted_two_stage``: P(appears) × games given appearance × PPG.
+    """
+    return (
+        ModelSpec(name=FITTED_PPG),
+        ModelSpec(
+            name="fitted_games",
+            target="actual_games",
+            features=_AVAILABILITY_FEATURES,
+            absent_as_zero=True,
+            clip=(0.0, 17.0),
+        ),
+        ModelSpec(name=FITTED_SEASON_POINTS, kind="product", factors=(FITTED_PPG, "fitted_games")),
+        ModelSpec(
+            name="fitted_season_points_direct",
+            target="actual_season_points",
+            features=(*_CORE_FEATURES, "expected_games", "season_pts"),
+            absent_as_zero=True,
+            clip=(0.0, None),
+        ),
+        ModelSpec(
+            name="fitted_return_prob",
+            target=ACTUAL_PLAYED,
+            features=_AVAILABILITY_FEATURES,
+            absent_as_zero=True,
+            clip=(0.0, 1.0),
+        ),
+        ModelSpec(
+            name="fitted_games_if_played",
+            target="actual_games",
+            features=_AVAILABILITY_FEATURES,
+            played_only=True,
+            clip=(1.0, 17.0),
+        ),
+        ModelSpec(
+            name="fitted_two_stage",
+            kind="product",
+            factors=("fitted_return_prob", "fitted_games_if_played", FITTED_PPG),
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class FitConfig:
+    models: tuple[ModelSpec, ...] = field(default_factory=default_model_specs)
+    min_train_folds: int = 3
+    min_position_rows: int = 40
+    per_position: bool = True
+    positions: tuple[str, ...] = ("QB", "RB", "WR", "TE")
+    inner_validation_folds: int = 3
+    # Backward-compatible shorthand: a bare feature list configures ``fitted_ppg`` only.
+    features: tuple[str, ...] | None = None
+    target: str = "actual_ppg"
+    ridge_lambda: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.features is not None or self.ridge_lambda is not None:
+            grid = (self.ridge_lambda,) if self.ridge_lambda is not None else _DEFAULT_GRID
+            spec = ModelSpec(
+                name=FITTED_PPG,
+                target=self.target,
+                features=self.features or _CORE_FEATURES,
+                lambda_grid=grid,
+            )
+            games = ModelSpec(
+                name="fitted_games",
+                target="actual_games",
+                features=("expected_games",),
+                absent_as_zero=True,
+                clip=(0.0, 17.0),
+                lambda_grid=grid,
+            )
+            product = ModelSpec(
+                name=FITTED_SEASON_POINTS, kind="product", factors=(FITTED_PPG, "fitted_games")
+            )
+            object.__setattr__(self, "models", (spec, games, product))
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any] | None) -> FitConfig:
+        if not raw:
+            return cls()
+        defaults = cls()
+        shared = {
+            "min_train_folds": int(raw.get("min_train_folds", defaults.min_train_folds)),
+            "min_position_rows": int(raw.get("min_position_rows", defaults.min_position_rows)),
+            "per_position": bool(raw.get("per_position", defaults.per_position)),
+            "positions": tuple(raw.get("positions") or defaults.positions),
+        }
+        if raw.get("models"):
+            return cls(
+                models=tuple(ModelSpec.from_raw(entry) for entry in raw["models"]),
+                inner_validation_folds=int(
+                    raw.get("inner_validation_folds", defaults.inner_validation_folds)
+                ),
+                **shared,
+            )
+        return cls(
+            features=tuple(raw["features"]) if raw.get("features") else None,
+            target=str(raw.get("target") or "actual_ppg"),
+            ridge_lambda=float(raw["ridge_lambda"])
+            if raw.get("ridge_lambda") is not None
+            else None,
+            **shared,
+        )
+
+    @property
+    def output_columns(self) -> tuple[str, ...]:
+        return tuple(spec.name for spec in self.models)
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if math.isfinite(result) else None
+
+
+@dataclass
+class RidgeModel:
+    features: tuple[str, ...]
+    means: list[float]
+    scales: list[float]
+    coefficients: list[float]
+    intercept: float
+    n_train: int
+    ridge_lambda: float = 1.0
+    clip: tuple[float | None, float | None] = (None, None)
+
+    def predict(self, row: dict[str, Any]) -> float:
+        total = self.intercept
+        for index, feature in enumerate(self.features):
+            value = _number(row.get(feature))
+            if value is None:
+                value = self.means[index]
+            total += self.coefficients[index] * (value - self.means[index]) / self.scales[index]
+        low, high = self.clip
+        if low is not None:
+            total = max(total, low)
+        if high is not None:
+            total = min(total, high)
+        return total
+
+    def record(self) -> dict[str, Any]:
+        """Everything needed to re-apply the model to new rows (e.g. the live board)."""
+        return {
+            "n_train": self.n_train,
+            "ridge_lambda": self.ridge_lambda,
+            "clip": list(self.clip),
+            # Full precision: these are re-applied to the live board, not just displayed.
+            "intercept": self.intercept,
+            "coefficients": dict(zip(self.features, self.coefficients, strict=True)),
+            "standardization": {
+                feature: {"mean": mean, "scale": scale}
+                for feature, mean, scale in zip(self.features, self.means, self.scales, strict=True)
+            },
+        }
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> RidgeModel:
+        features = tuple(record["coefficients"])
+        standardization = record.get("standardization") or {}
+        clip = record.get("clip") or [None, None]
+        return cls(
+            features=features,
+            means=[float(standardization.get(f, {}).get("mean", 0.0)) for f in features],
+            scales=[float(standardization.get(f, {}).get("scale", 1.0)) or 1.0 for f in features],
+            coefficients=[float(record["coefficients"][f]) for f in features],
+            intercept=float(record["intercept"]),
+            n_train=int(record.get("n_train", 0)),
+            ridge_lambda=float(record.get("ridge_lambda", 1.0)),
+            clip=(clip[0], clip[1]),
+        )
+
+
+def _training_target(row: dict[str, Any], spec: ModelSpec) -> float | None:
+    """The outcome a row contributes to training, or None to exclude it."""
+    if spec.played_only and not (_number(row.get("actual_games")) or 0.0) > 0:
+        return None
+    value = _number(row.get(spec.target))
+    if value is None and spec.absent_as_zero:
+        return 0.0
+    return value
+
+
+def fit_ridge(
+    rows: list[dict[str, Any]],
+    features: tuple[str, ...],
+    target: str,
+    ridge_lambda: float,
+    spec: ModelSpec | None = None,
+) -> RidgeModel | None:
+    """Ridge on standardized features; intercept is the target mean and unpenalized.
+
+    Missing feature values are imputed with the training mean, so a signal absent for
+    a whole era (route data before 2016, say) simply carries no weight there.
+    """
+    spec = spec or ModelSpec(name=target, target=target, features=features)
+    samples = [(row, y) for row in rows if (y := _training_target(row, spec)) is not None]
+    if len(samples) <= len(features) + 1:
+        return None
+    matrix = np.array(
+        [
+            [np.nan if (v := _number(row.get(f))) is None else v for f in features]
+            for row, _ in samples
+        ],
+        dtype=float,
+    )
+    targets = np.array([y for _, y in samples], dtype=float)
+    present = np.sum(~np.isnan(matrix), axis=0)
+    means = np.divide(
+        np.nansum(matrix, axis=0),
+        present,
+        out=np.zeros(matrix.shape[1], dtype=float),
+        where=present > 0,
+    )
+    filled = np.where(np.isnan(matrix), means, matrix)
+    scales = filled.std(axis=0)
+    scales = np.where(scales > 1e-6, scales, 1.0)
+    standardized = (filled - means) / scales
+    intercept = float(targets.mean())
+    centered = targets - intercept
+    gram = standardized.T @ standardized + ridge_lambda * len(samples) * np.eye(len(features))
+    moment = standardized.T @ centered
+    try:
+        coefficients = np.linalg.solve(gram, moment)
+    except np.linalg.LinAlgError:
+        return None
+    return RidgeModel(
+        features=features,
+        means=[float(v) for v in means],
+        scales=[float(v) for v in scales],
+        coefficients=[float(v) for v in coefficients],
+        intercept=intercept,
+        n_train=len(samples),
+        ridge_lambda=ridge_lambda,
+        clip=spec.clip,
+    )
+
+
+def _select_lambda(
+    train_by_season: dict[int, list[dict[str, Any]]],
+    spec: ModelSpec,
+    features: tuple[str, ...],
+    inner_folds: int,
+) -> float:
+    """Nested walk-forward: score each λ on the last training seasons, fitted before them."""
+    if len(spec.lambda_grid) == 1:
+        return spec.lambda_grid[0]
+    seasons = sorted(train_by_season)
+    validation = seasons[-inner_folds:] if len(seasons) > inner_folds else seasons[-1:]
+    fitting = [s for s in seasons if s < validation[0]]
+    if not fitting:
+        return spec.lambda_grid[len(spec.lambda_grid) // 2]
+    fit_rows = [row for s in fitting for row in train_by_season[s]]
+    check_rows = [row for s in validation for row in train_by_season[s]]
+    best_lambda, best_error = spec.lambda_grid[0], math.inf
+    for candidate in spec.lambda_grid:
+        model = fit_ridge(fit_rows, features, spec.target, candidate, spec)
+        if model is None:
+            continue
+        errors = [
+            abs(model.predict(row) - y)
+            for row in check_rows
+            if (y := _training_target(row, spec)) is not None
+        ]
+        if not errors:
+            continue
+        error = sum(errors) / len(errors)
+        if error < best_error - 1e-12:
+            best_lambda, best_error = candidate, error
+    return best_lambda
+
+
+def _with_played_flag(predictions: pl.DataFrame) -> pl.DataFrame:
+    if "actual_games" not in predictions.columns or ACTUAL_PLAYED in predictions.columns:
+        return predictions
+    return predictions.with_columns(
+        pl.when(pl.col("outcome_complete"))
+        .then((pl.col("actual_games").fill_null(0) > 0).cast(pl.Float64))
+        .otherwise(None)
+        .alias(ACTUAL_PLAYED)
+    )
+
+
+def fit_walk_forward(
+    predictions: pl.DataFrame,
+    config: FitConfig,
+) -> tuple[pl.DataFrame, list[dict[str, Any]]]:
+    """Add every configured fitted output to every forecast row, walk-forward.
+
+    Returns the augmented frame and one record per (model, forecast season, position)
+    with the learned standardized coefficients and the λ chosen for that refit.
+    """
+    predictions = _with_played_flag(predictions)
+    records = predictions.to_dicts()
+    seasons = sorted({int(row["forecast_season"]) for row in records})
+    completed_by_season: dict[int, list[dict[str, Any]]] = {}
+    for row in records:
+        if row.get("outcome_complete"):
+            completed_by_season.setdefault(int(row["forecast_season"]), []).append(row)
+
+    outputs: dict[str, list[float | None]] = {}
+    models: list[dict[str, Any]] = []
+    for spec in config.models:
+        if spec.kind == "product":
+            continue
+        features = tuple(f for f in spec.features if f in predictions.columns)
+        if not features or spec.target not in predictions.columns:
+            continue
+        fitted: list[float | None] = [None] * len(records)
+        for season in seasons:
+            train_seasons = [s for s in completed_by_season if s < season]
+            if len(train_seasons) < config.min_train_folds:
+                continue
+            train_by_season = {s: completed_by_season[s] for s in train_seasons}
+            train = [row for s in train_seasons for row in completed_by_season[s]]
+            pooled_lambda = _select_lambda(
+                train_by_season, spec, features, config.inner_validation_folds
+            )
+            pooled = fit_ridge(train, features, spec.target, pooled_lambda, spec)
+            by_position: dict[str, RidgeModel | None] = {}
+            for position in config.positions:
+                model = None
+                if config.per_position:
+                    subset_by_season = {
+                        s: [row for row in rows if row.get("position") == position]
+                        for s, rows in train_by_season.items()
+                    }
+                    subset = [row for rows in subset_by_season.values() for row in rows]
+                    if len(subset) >= config.min_position_rows:
+                        chosen_lambda = _select_lambda(
+                            subset_by_season, spec, features, config.inner_validation_folds
+                        )
+                        model = fit_ridge(subset, features, spec.target, chosen_lambda, spec)
+                by_position[position] = model or pooled
+                chosen = by_position[position]
+                if chosen is not None:
+                    models.append(
+                        {
+                            "model": spec.name,
+                            "forecast_season": season,
+                            "position": position,
+                            "scope": "position" if model is not None else "pooled",
+                            "train_seasons": [min(train_seasons), max(train_seasons)],
+                            **chosen.record(),
+                        }
+                    )
+            for index, row in enumerate(records):
+                if int(row["forecast_season"]) != season:
+                    continue
+                model = by_position.get(str(row.get("position")), pooled)
+                if model is not None:
+                    fitted[index] = model.predict(row)
+        outputs[spec.name] = fitted
+        for index, row in enumerate(records):
+            row[spec.name] = fitted[index]
+
+    frame = predictions
+    for name, values in outputs.items():
+        frame = frame.with_columns(pl.Series(name, values, dtype=pl.Float64))
+    return _apply_products(frame, config), models
+
+
+def _apply_products(frame: pl.DataFrame, config: FitConfig) -> pl.DataFrame:
+    for spec in config.models:
+        if spec.kind != "product":
+            continue
+        if not all(factor in frame.columns for factor in spec.factors):
+            continue
+        expression = pl.lit(1.0)
+        for factor in spec.factors:
+            expression = expression * pl.col(factor)
+        frame = frame.with_columns(expression.alias(spec.name))
+    return frame
+
+
+def summarize_fitted_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Latest weights per (model, position) plus the spread of each coefficient."""
+    summary: list[dict[str, Any]] = []
+    keys = sorted({(m.get("model", FITTED_PPG), m["position"]) for m in models})
+    for name, position in keys:
+        history = sorted(
+            (m for m in models if m.get("model", FITTED_PPG) == name and m["position"] == position),
+            key=lambda m: m["forecast_season"],
+        )
+        latest = history[-1]
+        stability: dict[str, float] = {}
+        for feature in latest["coefficients"]:
+            values = [m["coefficients"].get(feature) for m in history]
+            values = [v for v in values if v is not None]
+            if len(values) > 1:
+                mean = sum(values) / len(values)
+                stability[feature] = round(
+                    math.sqrt(sum((v - mean) ** 2 for v in values) / len(values)), 4
+                )
+        lambdas = sorted({m.get("ridge_lambda") for m in history if m.get("ridge_lambda")})
+        summary.append(
+            {
+                "model": name,
+                "position": position,
+                "latest_forecast_season": latest["forecast_season"],
+                "scope": latest["scope"],
+                "n_train": latest["n_train"],
+                "ridge_lambda": latest.get("ridge_lambda"),
+                "lambdas_chosen": lambdas,
+                "intercept": round(latest["intercept"], 4),
+                "coefficients": {k: round(v, 4) for k, v in latest["coefficients"].items()},
+                "coefficient_sd_across_refits": stability,
+                "refits": len(history),
+            }
+        )
+    return summary
+
+
+def models_for_season(
+    models: list[dict[str, Any]], forecast_season: int
+) -> dict[str, dict[str, RidgeModel]]:
+    """Per-model, per-position models fitted for one forecast season."""
+    result: dict[str, dict[str, RidgeModel]] = {}
+    for record in models:
+        if int(record["forecast_season"]) != forecast_season or not record.get("standardization"):
+            continue
+        result.setdefault(record.get("model", FITTED_PPG), {})[record["position"]] = (
+            RidgeModel.from_record(record)
+        )
+    return result
+
+
+def apply_fitted_models(
+    board: pl.DataFrame,
+    models: dict[str, dict[str, RidgeModel]],
+    config: FitConfig,
+) -> pl.DataFrame:
+    """Score a live board with previously fitted models, ridge outputs then products.
+
+    Rows whose position has no model receive nulls, so a missing fit degrades to the
+    configured fallback sort key rather than a silent zero.
+    """
+    rows = board.to_dicts()
+    frame = board
+    for spec in config.models:
+        if spec.kind == "product":
+            continue
+        if not spec.apply_live:
+            frame = frame.with_columns(pl.lit(None, dtype=pl.Float64).alias(spec.name))
+            continue
+        by_position = models.get(spec.name, {})
+        values = [
+            (model.predict(row) if (model := by_position.get(str(row.get("position")))) else None)
+            for row in rows
+        ]
+        frame = frame.with_columns(pl.Series(spec.name, values, dtype=pl.Float64))
+        for row, value in zip(rows, values, strict=True):
+            row[spec.name] = value
+    return _apply_products(frame, config)
+
+
+def fit_fingerprint(config: FitConfig) -> str:
+    """Stable digest of everything that changes what a fitted model means."""
+    payload = {
+        "model_version": MODEL_VERSION,
+        "models": [asdict(spec) for spec in config.models],
+        "min_train_folds": config.min_train_folds,
+        "min_position_rows": config.min_position_rows,
+        "per_position": config.per_position,
+        "positions": list(config.positions),
+        "inner_validation_folds": config.inner_validation_folds,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode())
+    return digest.hexdigest()[:16]
+
+
+def build_fit_artifact(
+    config: FitConfig,
+    predictions: pl.DataFrame,
+    depth_chart_cutoff: str,
+) -> dict[str, Any]:
+    """Provenance the live board checks before applying a fitted model.
+
+    A same-season artifact fitted with different specs or a different depth-chart
+    cutoff or snapshot must be rejected, not silently applied.
+    """
+    pending = predictions.filter(~pl.col("outcome_complete"))
+    pending_season = int(pending["forecast_season"].max()) if pending.height else None
+    depth_latest = None
+    if pending.height and "depth_chart_date" in pending.columns:
+        depth_latest = pending["depth_chart_date"].cast(pl.String).max()
+    completed = predictions.filter(pl.col("outcome_complete"))["forecast_season"]
+    return {
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "model_version": MODEL_VERSION,
+        "fingerprint": fit_fingerprint(config),
+        "fit_config": {
+            "models": [asdict(spec) for spec in config.models],
+            "min_train_folds": config.min_train_folds,
+            "min_position_rows": config.min_position_rows,
+            "per_position": config.per_position,
+            "positions": list(config.positions),
+            "inner_validation_folds": config.inner_validation_folds,
+        },
+        "outputs": list(config.output_columns),
+        "created_at": datetime.now(UTC).isoformat(),
+        "pending_forecast_season": pending_season,
+        "pending_rows": pending.height,
+        "completed_forecast_seasons": [int(completed.min()), int(completed.max())]
+        if completed.len()
+        else [],
+        "depth_chart_cutoff": depth_chart_cutoff,
+        "depth_chart_latest": depth_latest,
+    }
+
+
+class FittedArtifactError(ValueError):
+    """The stored fitted models cannot be applied to this board."""
+
+
+def check_fit_artifact(
+    artifact: dict[str, Any] | None,
+    config: FitConfig,
+    forecast_season: int,
+    depth_chart_cutoff: str,
+    live_depth_latest: str | None,
+) -> None:
+    """Raise unless the artifact was fitted for this season, config, and inputs."""
+    if not artifact:
+        raise FittedArtifactError("metric report carries no fitted-model artifact")
+    if artifact.get("schema_version") != ARTIFACT_SCHEMA_VERSION:
+        raise FittedArtifactError(
+            f"artifact schema {artifact.get('schema_version')} != {ARTIFACT_SCHEMA_VERSION}"
+        )
+    if artifact.get("fingerprint") != fit_fingerprint(config):
+        raise FittedArtifactError(
+            "fitted-model fingerprint does not match the current fit configuration; "
+            "run `patron metric-report`"
+        )
+    if artifact.get("pending_forecast_season") != forecast_season:
+        raise FittedArtifactError(
+            f"artifact was fitted for {artifact.get('pending_forecast_season')}, "
+            f"board is for {forecast_season}"
+        )
+    if artifact.get("depth_chart_cutoff") != depth_chart_cutoff:
+        raise FittedArtifactError(
+            f"artifact depth-chart cutoff {artifact.get('depth_chart_cutoff')} != "
+            f"live cutoff {depth_chart_cutoff}"
+        )
+    stored = artifact.get("depth_chart_latest")
+    if stored and live_depth_latest and str(stored)[:10] != str(live_depth_latest)[:10]:
+        raise FittedArtifactError(
+            f"live depth chart snapshot {str(live_depth_latest)[:10]} differs from the "
+            f"snapshot the pending fold was scored on ({str(stored)[:10]}); refit"
+        )

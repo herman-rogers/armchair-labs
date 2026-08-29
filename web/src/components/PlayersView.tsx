@@ -2,6 +2,13 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchBoard, fetchLeaguePlayers } from '../api/client'
 import type { LeaguePlayer, MetricVersion, Position } from '../api/types'
+import {
+  OVERALL_VOR_TITLE,
+  POSITION_RANK_TITLE,
+  SEASON_EQUIVALENT_TITLE,
+  rankBasis,
+  rankBasisTitle,
+} from '../metricPresentation'
 import { BoardTable } from './BoardTable'
 import { Freshness } from './Freshness'
 import {
@@ -48,7 +55,7 @@ const LEAGUE_COLUMNS: PlayerColumn[] = [
     key: 'td_over_exp',
     label: 'TDOE',
     title:
-      'Touchdowns above or below what the volume implies. Positive is luck that will not repeat; negative with volume is a buy.',
+      'Touchdowns above or below a volume-only expectation. Useful as a regression signal, but high-value usage may repeat.',
     render: (p) => (
       <span
         style={{
@@ -74,28 +81,46 @@ const V2_LEAGUE_COLUMNS: PlayerColumn[] = [
     render: (p) => <span className="team">{p.projected_team ?? p.team}</span>,
   },
   {
-    key: 'v2_score',
-    label: 'V2 Score',
-    title: 'Availability-scaled blend of expected, floor, and ceiling VOR, plus manual overrides.',
-    render: (p) => <span className="strong">{number(p.v2_score, 2)}</span>,
+    key: 'v2_overall_vor',
+    label: 'Overall VOR',
+    title: OVERALL_VOR_TITLE,
+    render: (p) => <span className="strong">{number(p.v2_overall_vor, 2)}</span>,
+  },
+  {
+    key: 'v2_position_rank',
+    label: 'Pos Rk',
+    title: POSITION_RANK_TITLE,
+    render: (p) => <span className="dim">{p.v2_position_rank ?? '—'}</span>,
+  },
+  {
+    key: 'v2_rank_value',
+    label: 'Rank basis',
+    title: 'The configured projection and raw value used for this player’s position rank.',
+    render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
   },
   {
     key: 'proj_ppg',
-    label: 'V2 PPG',
-    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
+    label: 'Proj PPG',
+    title: 'V2 projection per active game (history and stat-line branches); a fitted-ranker input, not the sort.',
     render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'season_equivalent_ppg',
+    label: 'Avail PPG',
+    title: SEASON_EQUIVALENT_TITLE,
+    render: (p) => <span className="dim">{number(p.season_equivalent_ppg)}</span>,
   },
   {
     key: 'expected_games',
     label: 'Exp G',
-    title: 'Expected games from nflverse participation and injury-report history.',
+    title: 'Expected active games from participation and injury-report history, shrunk toward the league prior.',
     render: (p) => <span className="dim">{number(p.expected_games)}</span>,
   },
   {
-    key: 'availability_adjusted_vor',
-    label: 'Season VOR',
-    title: 'Projected VOR scaled by expected games.',
-    render: (p) => <span className="dim">{number(p.availability_adjusted_vor, 2)}</span>,
+    key: 'ppg',
+    label: 'Actual PPG',
+    title: 'Most recent season’s PPG, retained because it is the strongest naive baseline at some positions.',
+    render: (p) => <span className="dim">{number(p.ppg)}</span>,
   },
   {
     key: 'projected_targets_pg',
@@ -110,16 +135,16 @@ const V2_LEAGUE_COLUMNS: PlayerColumn[] = [
     render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
   },
   {
-    key: 'projected_route_participation',
-    label: 'Route%',
-    title: 'Projected eligible-player participation on team dropbacks; blocking cannot be separated.',
-    render: (p) => <span className="dim">{percent(p.projected_route_participation)}</span>,
-  },
-  {
     key: 'depth_chart_rank',
     label: 'Depth',
     title: 'Latest published nflverse NFL depth-chart rank.',
     render: (p) => <span className="dim">{p.depth_chart_rank ?? '—'}</span>,
+  },
+  {
+    key: 'projection_confidence',
+    label: 'Conf',
+    title: 'Sample support for the projection. This is confidence in the inputs, not a probability that the rank is correct.',
+    render: (p) => <span className="dim">{percent(p.projection_confidence)}</span>,
   },
   FLAGS_COLUMN,
   ROSTERED_PERCENT,
@@ -251,7 +276,7 @@ export function PlayersView({ version }: { version: MetricVersion }) {
         <PlayerTable
           players={filtered}
           columns={version === 'v2' ? V2_LEAGUE_COLUMNS : LEAGUE_COLUMNS}
-          defaultSort={version === 'v2' ? 'v2_score' : 'adj_vor'}
+          defaultSort={version === 'v2' ? 'v2_overall_vor' : 'adj_vor'}
         />
       ) : (
         <BoardTable players={filtered} version={version} />
@@ -262,7 +287,8 @@ export function PlayersView({ version }: { version: MetricVersion }) {
         <p className="legend tight faint">
           V2 football metrics come from nflverse. ESPN contributes ownership, fantasy
           lineup, transactions, and the live injury badge only; ESPN projected points do
-          not affect the rank.
+          not affect player ranks. The separate league power simulation may use them as
+          a labeled fallback for players the board cannot project.
         </p>
       )}
     </>

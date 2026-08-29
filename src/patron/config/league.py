@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import functools
-from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from patron.config.settings import load_league_config
 
@@ -20,29 +19,35 @@ class MetricsConfig(BaseModel):
     td_rate_window: str = Field(pattern="^(all|season)$")
     projection_season_decay: float = Field(default=0.55, gt=0, le=1)
     projection_shrinkage_games: float = Field(default=8.0, gt=0)
-    projection_td_regression: float = Field(default=0.5, ge=0, le=1)
-    projection_bonus_retention: float = Field(default=0.35, ge=0, le=1)
-    projection_team_context_cap: float = Field(default=0.18, ge=0, le=0.5)
     projection_component_weight: float = Field(default=0.65, ge=0, le=1)
-    projection_mean_weight: float = Field(default=0.75, ge=0, le=1)
-    projection_floor_weight: float = Field(default=0.15, ge=0, le=1)
-    projection_ceiling_weight: float = Field(default=0.10, ge=0, le=1)
     projection_season_games: int = Field(default=17, ge=1, le=25)
     projection_availability_prior: float = Field(default=0.94, ge=0.5, le=1)
     projection_availability_shrinkage_games: float = Field(default=17.0, gt=0)
     projection_route_weight: float = Field(default=0.55, ge=0, le=1)
     projection_depth_chart_cap: float = Field(default=0.18, ge=0, le=0.5)
-
-    @model_validator(mode="after")
-    def score_weights_have_mass(self) -> Self:
-        total = (
-            self.projection_mean_weight
-            + self.projection_floor_weight
-            + self.projection_ceiling_weight
-        )
-        if total <= 0:
-            raise ValueError("at least one v2 score weight must be greater than zero")
-        return self
+    projection_prior_pool: str = Field(default="all", pattern="^(all|rosterable)$")
+    # Per-position v2 sort key, chosen from the metric report's ranking table. Any
+    # position not listed, or whose key is unavailable on the board, uses the fallback.
+    projection_rank_key: dict[str, str] = Field(default_factory=dict)
+    projection_rank_fallback: str = "adj_proj_vor"
+    # Cross-position order: one key for every position, expressed as per-game VOR
+    # against its own positional replacement (season-scale keys are divided by the
+    # season length). Chosen by the metric report's OVERALL ranking test.
+    projection_overall_key: str = "fitted_season_points"
+    # Roster simulation inputs (League team strength, lineup scans). Every roster-level
+    # number is built from these three per-player fields, so they must be the outputs
+    # the backtest chose — not the hand-built v2 fields the ranking no longer uses.
+    # Each entry lists fallbacks in order; the first column present on the board wins.
+    roster_mean_columns: list[str] = Field(
+        default_factory=lambda: ["fitted_ppg", "proj_ppg", "ppg"]
+    )
+    roster_games_columns: list[str] = Field(default_factory=lambda: ["fitted_games"])
+    roster_availability_columns: list[str] = Field(
+        default_factory=lambda: ["projected_availability"]
+    )
+    roster_volatility_columns: list[str] = Field(
+        default_factory=lambda: ["projected_volatility", "volatility"]
+    )
 
 
 class LeagueConfig(BaseModel):

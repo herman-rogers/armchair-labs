@@ -110,6 +110,31 @@ def load_team_weeks(seasons: list[int], season_type: str = "REG") -> pl.DataFram
     return frame.filter(pl.col("season_type") == season_type).select(TEAM_VOLUME_COLUMNS)
 
 
+def load_expected_opportunity(seasons: list[int]) -> pl.DataFrame:
+    """ffopportunity's weekly expected-stat model output.
+
+    The source estimates the value of a player's recorded opportunities; downstream
+    code aggregates only source-season rows, so the next-season backtest target is
+    never visible to this feature.
+    """
+    configure_cache()
+    return nfl.load_ff_opportunity(seasons, stat_type="weekly")
+
+
+def load_nextgen_stats(seasons: list[int], stat_type: str) -> pl.DataFrame:
+    """Official season/week Next Gen Stats for passing, receiving, or rushing."""
+    configure_cache()
+    if stat_type not in {"passing", "receiving", "rushing"}:
+        raise ValueError(f"unsupported Next Gen Stats type: {stat_type}")
+    return nfl.load_nextgen_stats(seasons, stat_type=stat_type)
+
+
+def load_fantasy_rankings() -> pl.DataFrame:
+    """The dated FantasyPros ECR archive used as a preseason market baseline."""
+    configure_cache()
+    return nfl.load_ff_rankings(type="all")
+
+
 def load_participation(seasons: list[int]) -> pl.DataFrame:
     """Play-level offensive participation used to derive route opportunities."""
     configure_cache()
@@ -118,12 +143,43 @@ def load_participation(seasons: list[int]) -> pl.DataFrame:
     return frame.select(PARTICIPATION_COLUMNS)
 
 
+def canonicalize_depth_charts(frame: pl.DataFrame) -> pl.DataFrame:
+    """Normalize timestamped ESPN and legacy weekly nflverse depth-chart schemas.
+
+    Legacy data has no publication timestamp. Week 1 is the closest reproducible
+    preseason boundary and is assigned an August 31 proxy date so the backtest cutoff
+    can treat every season consistently. The report labels this approximation.
+    """
+    if set(DEPTH_CHART_COLUMNS).issubset(frame.columns):
+        return frame.select(DEPTH_CHART_COLUMNS)
+
+    legacy = (
+        "season",
+        "week",
+        "game_type",
+        "club_code",
+        "gsis_id",
+        "position",
+        "depth_position",
+        "depth_team",
+    )
+    require_columns(frame.columns, legacy, "legacy nflverse depth charts")
+    week_one = frame.filter((pl.col("game_type") == "REG") & (pl.col("week") == 1))
+    return week_one.select(
+        pl.concat_str(pl.col("season").cast(pl.String), pl.lit("-08-31T00:00:00Z")).alias("dt"),
+        pl.col("club_code").alias("team"),
+        "gsis_id",
+        pl.col("position").alias("pos_abb"),
+        pl.col("depth_position").alias("pos_name"),
+        pl.col("depth_team").cast(pl.Int32, strict=False).alias("pos_rank"),
+    )
+
+
 def load_depth_charts(seasons: list[int]) -> pl.DataFrame:
-    """Published nflverse depth-chart snapshots, including GSIS identifiers."""
+    """Published nflverse depth charts normalized across the 2025 source change."""
     configure_cache()
     frame = nfl.load_depth_charts(seasons)
-    require_columns(frame.columns, DEPTH_CHART_COLUMNS, "nflverse depth charts")
-    return frame.select(DEPTH_CHART_COLUMNS)
+    return canonicalize_depth_charts(frame)
 
 
 def load_injuries(seasons: list[int]) -> pl.DataFrame:

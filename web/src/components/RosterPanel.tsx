@@ -2,6 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchRoster } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
 import {
+  OVERALL_VOR_TITLE,
+  POSITION_RANK_TITLE,
+  SEASON_EQUIVALENT_TITLE,
+  rankBasis,
+  rankBasisTitle,
+} from '../metricPresentation'
+import {
   FLAGS_COLUMN,
   IDENTITY,
   PlayerTable,
@@ -26,7 +33,7 @@ const COLUMNS: PlayerColumn[] = [
   {
     key: 'floor',
     label: 'Floor',
-    title: '25th-percentile weekly score. What decides who you start.',
+    title: 'Historical 25th-percentile weekly score; descriptive, not a guaranteed floor.',
     render: (p) => <span className="dim">{number(p.floor)}</span>,
   },
   {
@@ -47,16 +54,34 @@ const COLUMNS: PlayerColumn[] = [
 const V2_COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
   {
-    key: 'v2_score',
-    label: 'V2 Score',
-    title: 'Availability-aware projected value over replacement.',
-    render: (p) => <span className="strong">{number(p.v2_score, 2)}</span>,
+    key: 'v2_overall_vor',
+    label: 'Overall VOR',
+    title: OVERALL_VOR_TITLE,
+    render: (p) => <span className="strong">{number(p.v2_overall_vor, 2)}</span>,
+  },
+  {
+    key: 'v2_position_rank',
+    label: 'Pos Rk',
+    title: POSITION_RANK_TITLE,
+    render: (p) => <span className="dim">{p.v2_position_rank ?? '—'}</span>,
+  },
+  {
+    key: 'v2_rank_value',
+    label: 'Rank basis',
+    title: 'The configured projection and raw value used for this player’s position rank.',
+    render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
   },
   {
     key: 'proj_ppg',
-    label: 'V2 PPG',
-    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
+    label: 'Proj PPG',
+    title: 'V2 projection per active game (history and stat-line branches); a fitted-ranker input, not the sort.',
     render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'season_equivalent_ppg',
+    label: 'Avail PPG',
+    title: SEASON_EQUIVALENT_TITLE,
+    render: (p) => <span className="dim">{number(p.season_equivalent_ppg)}</span>,
   },
   {
     key: 'expected_games',
@@ -70,7 +95,12 @@ const V2_COLUMNS: PlayerColumn[] = [
     title: 'Projected 25th-percentile weekly score when active.',
     render: (p) => <span className="dim">{number(p.projected_floor)}</span>,
   },
-  FLAGS_COLUMN,
+  {
+    key: 'ppg',
+    label: 'Actual PPG',
+    title: 'Most recent season’s PPG, shown as baseline evidence.',
+    render: (p) => <span className="dim">{number(p.ppg)}</span>,
+  },
   {
     key: 'percent_started',
     label: '%Start',
@@ -120,7 +150,7 @@ export function RosterPanel({
       <PlayerTable
         players={roster.data.players}
         columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
-        defaultSort={version === 'v2' ? 'v2_score' : 'adj_vor'}
+        defaultSort={version === 'v2' ? 'v2_overall_vor' : 'adj_vor'}
         emptyMessage="No ranked players on this roster."
       />
       <p className="legend tight faint">

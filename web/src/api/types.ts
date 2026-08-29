@@ -10,7 +10,7 @@ export interface Player {
   player_display_name: string
   position: Position
   team: string
-  /** VOR after manual overrides — what the board actually sorts by. */
+  /** Historical VOR after manual overrides — the v1 sort key. */
   adj_vor: number
   /** VOR as computed from the tape, before any manual judgement. */
   vor: number
@@ -38,7 +38,24 @@ export interface Player {
   depth_chart_position_group?: string | null
   depth_chart_date?: string | null
   depth_role_factor?: number
-  v2_score?: number
+  /** Per-position sort key chosen from the metric report (docs/v2_metrics_review.md §8). */
+  /** Overall board order: fitted_ppg above its positional replacement (one scale for all positions). */
+  v2_overall_vor?: number | null
+  /** Order within the position by the position's own key. */
+  v2_position_rank?: number
+  v2_rank_key?: string
+  /** The key's per-game equivalent value. */
+  v2_rank_value?: number | null
+  /** Per-game value above the positional replacement of the same key, plus overrides. Sorts within position. */
+  v2_rank_vor?: number | null
+  /** Walk-forward fitted ranker outputs; null when no fitted model exists for the season. */
+  fitted_ppg?: number | null
+  fitted_games?: number | null
+  fitted_season_points?: number | null
+  fitted_season_points_direct?: number | null
+  fitted_return_prob?: number | null
+  fitted_games_if_played?: number | null
+  fitted_two_stage?: number | null
   adj_proj_vor?: number
   proj_vor?: number
   proj_ppg?: number
@@ -50,23 +67,15 @@ export interface Player {
   projected_floor?: number
   projected_ceiling?: number
   projected_volatility?: number
-  floor_vor?: number
-  ceiling_vor?: number
   projection_confidence?: number
   availability_confidence?: number
   projected_availability?: number
-  availability_factor?: number
   expected_games?: number
-  expected_season_points?: number
   season_equivalent_ppg?: number
-  availability_adjusted_vor?: number
   historical_injury_report_weeks?: number
   injury_missed_equivalents?: number
   effective_games?: number
   age_factor?: number
-  td_regression_adjustment?: number
-  bonus_regression_adjustment?: number
-  team_context_factor?: number
   qb_context?: number
   team_scoring_context?: number
   team_pass_volume?: number
@@ -133,7 +142,14 @@ export interface Status {
 
 // ---------------------------------------------------------------- metric report
 
-export type MetricAssessment = 'strong' | 'useful' | 'redundant' | 'weak' | 'mixed' | 'insufficient'
+export type MetricAssessment =
+  | 'strong'
+  | 'useful'
+  | 'harmful'
+  | 'redundant'
+  | 'weak'
+  | 'mixed'
+  | 'insufficient'
 
 export interface MetricCatalogEntry {
   key: string
@@ -143,6 +159,8 @@ export interface MetricCatalogEntry {
   targets: string[]
   positions: string[]
   prediction_target: string | null
+  available_from_forecast: number | null
+  expected_sign: 'positive' | 'negative' | 'either'
   available: boolean
   coverage: number | null
 }
@@ -157,6 +175,8 @@ export interface MetricBacktestResult {
   metric: string
   label: string
   group: string
+  window: string
+  window_label: string
   target: string
   target_label: string
   position: string
@@ -177,6 +197,8 @@ export interface MetricBacktestResult {
 export interface MetricModelResult {
   metric: string
   label: string
+  window: string
+  window_label: string
   target: string
   target_label: string
   position: string
@@ -185,6 +207,48 @@ export interface MetricModelResult {
   rmse: number
   bias: number
   spearman: number | null
+}
+
+export interface MetricRankingFoldResult {
+  forecast_season: number
+  n: number
+  hit_rate: number
+  ndcg: number | null
+  pool_spearman: number | null
+  top_k_actual_mean: number
+  ideal_top_k_actual_mean: number
+}
+
+export interface MetricRankingResult {
+  ranker: string
+  role: 'baseline' | 'candidate'
+  window: string
+  window_label: string
+  target: string
+  position: Position
+  k: number
+  pool: number
+  folds: number
+  hit_rate: number
+  ndcg: number | null
+  pool_spearman: number | null
+  top_k_actual_mean: number
+  ideal_top_k_actual_mean: number
+  best_baseline: string | null
+  best_ndcg_baseline: string | null
+  /** The best baseline's hit rate on the candidate's own folds. */
+  baseline_hit_rate: number | null
+  hit_rate_lift: number | null
+  hit_rate_lift_se: number | null
+  hit_rate_lift_ci_low: number | null
+  hit_rate_lift_ci_high: number | null
+  folds_won: number | null
+  folds_tied: number | null
+  folds_lost: number | null
+  ndcg_lift: number | null
+  folds_beating_baseline: number | null
+  beats_baseline: boolean | null
+  fold_results: MetricRankingFoldResult[]
 }
 
 export interface MetricReport {
@@ -196,8 +260,24 @@ export interface MetricReport {
     input_seasons: number[]
     history_seasons: number
     depth_chart_cutoff: string
+    depth_chart_start_season: number
     minimum_sample: number
     baseline_metric: string
+    analysis_windows: Array<{ key: string; label: string; start: number; end: number }>
+    ranking: {
+      baselines: string[]
+      baselines_by_target: Record<string, string[]>
+      candidates: string[]
+      targets: string[]
+      top_k: Record<Position, number>
+      pool: Record<Position, number>
+    }
+    fit?: {
+      models: Array<Record<string, unknown>>
+      outputs: string[]
+      min_train_folds: number
+      inner_validation_folds: number
+    }
   }
   data_summary: {
     completed_forecasts: number[]
@@ -217,6 +297,51 @@ export interface MetricReport {
   metrics: MetricCatalogEntry[]
   results: MetricBacktestResult[]
   model_results: MetricModelResult[]
+  ranking_results: MetricRankingResult[]
+  fitted_models: FittedModelRecord[]
+  fitted_model_summary: FittedModelSummary[]
+  fitted_artifact: FittedArtifact | Record<string, never>
+}
+
+export interface FittedModelRecord {
+  model: string
+  forecast_season: number
+  position: Position
+  scope: 'position' | 'pooled'
+  train_seasons: [number, number]
+  n_train: number
+  ridge_lambda: number
+  clip: [number | null, number | null]
+  intercept: number
+  coefficients: Record<string, number>
+  standardization: Record<string, { mean: number; scale: number }>
+}
+
+export interface FittedArtifact {
+  schema_version: number
+  model_version: string
+  fingerprint: string
+  fit_config: Record<string, unknown>
+  created_at: string
+  pending_forecast_season: number | null
+  pending_rows: number
+  completed_forecast_seasons: number[]
+  depth_chart_cutoff: string
+  depth_chart_latest: string | null
+}
+
+export interface FittedModelSummary {
+  model: string
+  position: Position
+  latest_forecast_season: number
+  scope: 'position' | 'pooled'
+  n_train: number
+  ridge_lambda: number | null
+  lambdas_chosen: number[]
+  intercept: number
+  coefficients: Record<string, number>
+  coefficient_sd_across_refits: Record<string, number>
+  refits: number
 }
 
 // ---------------------------------------------------------------- league state
@@ -386,11 +511,11 @@ export interface LineupSlot {
 export interface TeamStrength {
   team_id: number
   team_name: string
-  /** Which metric the values came from, e.g. adj_proj_vor. */
+  /** Which board value the comparison uses, e.g. v2_overall_vor. */
   metric: string
   total: number
   by_position: Record<string, number>
-  /** Rostered skill players with no prior tape, so the total understates this team. */
+  /** Rostered skill players with no board value, so the total understates this team. */
   unranked_starters: number
   starters: LineupSlot[]
   bench: LineupSlot[]
@@ -409,21 +534,6 @@ export interface MatchupsResponse extends Freshness {
   regular_season_weeks: number
   my_team_id: number | null
   matchups: Matchup[]
-}
-
-export interface ScheduleEntry {
-  week: number
-  opponent_team_id: number
-  opponent_team_name: string | null
-  score: number
-  outcome: string
-  played: boolean
-}
-
-export interface ScheduleResponse extends Freshness {
-  regular_season_weeks: number
-  my_team_id: number | null
-  teams: { team_id: number; team_name: string; schedule: ScheduleEntry[] }[]
 }
 
 export interface CompareResponse extends Freshness {

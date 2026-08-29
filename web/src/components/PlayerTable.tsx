@@ -29,7 +29,7 @@ export const IDENTITY: PlayerColumn[] = [
   {
     key: 'rank',
     label: '#',
-    title: 'Overall rank in the selected V1 or V2 model.',
+    title: 'Overall board rank. V1 uses adjusted historical VOR; V2 uses the common-scale overall projection VOR.',
     initial: 'asc',
     render: (p) => <span className="rank">{p.rank}</span>,
   },
@@ -89,7 +89,7 @@ export const ROSTERED_PERCENT: PlayerColumn = {
 export const FLAGS_COLUMN: PlayerColumn = {
   key: 'flags',
   label: 'Flags',
-  title: 'Model opinions. Hover any chip for what it means.',
+  title: 'Historical heuristics and sample warnings. Hover any chip for its limits.',
   align: 'left',
   initial: 'asc',
   render: (p) => <Flags value={p.flags} />,
@@ -132,6 +132,7 @@ export function PlayerTable({
       const right = b[sortKey]
       // Nulls sort last in both directions: an unknown value is not a small one, and
       // floating them to the top would misrepresent the ranking.
+      if (left == null && right == null) return 0
       if (left === null || left === undefined) return 1
       if (right === null || right === undefined) return -1
 

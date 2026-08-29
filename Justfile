@@ -70,12 +70,19 @@ web:
 
 # Backend and frontend together.
 dev:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    trap 'kill 0' EXIT
-    uv run patron serve --reload &
-    (cd web && npm run dev) &
-    wait
+    uv run patron dev
+
+# Stop supervised services and reclaim project-owned orphans from the old shell recipe.
+stop:
+    uv run patron dev-stop
+
+# Safely replace any recorded or legacy API/Vite processes, then run in the foreground.
+restart:
+    uv run patron dev --restart
+
+# Show the supervisor PID, ports, and live children.
+dev-status:
+    uv run patron dev-status
 
 # Everything CI would run.
 check: lint typecheck test

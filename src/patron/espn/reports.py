@@ -33,6 +33,7 @@ from patron.espn.crosswalk import (
     OWNER_TEAM_NAME,
     PERCENT_OWNED,
 )
+from patron.metrics.projection import ADJUSTED_PROJECTED_VOR
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,10 @@ def _projection_ppg_column(frame: pl.DataFrame) -> str:
 
 
 def _board_value_column(frame: pl.DataFrame) -> str:
-    return "v2_score" if "v2_score" in frame.columns else ADJUSTED_VOR
+    for candidate in ("v2_overall_vor", "v2_rank_vor", ADJUSTED_PROJECTED_VOR):
+        if candidate in frame.columns:
+            return candidate
+    return ADJUSTED_VOR
 
 
 def wire_replacement_levels(
@@ -205,8 +209,7 @@ def _lineup_requirements(espn_players: pl.DataFrame) -> LineupRequirements:
     """Infer this league's starting shape from ESPN's populated lineup slots."""
     positions = ("QB", "RB", "WR", "TE")
     owners = sorted(
-        int(value)
-        for value in espn_players[OWNER_TEAM_ID].drop_nulls().unique().to_list()
+        int(value) for value in espn_players[OWNER_TEAM_ID].drop_nulls().unique().to_list()
     )
     counts: dict[int, Counter[str]] = {owner: Counter() for owner in owners}
     for row in espn_players.filter(pl.col(OWNER_TEAM_ID).is_not_null()).iter_rows(named=True):
@@ -250,9 +253,7 @@ def _best_lineup(
     flex = [
         index
         for index, player in enumerate(players)
-        if active[index]
-        and index not in selected
-        and player.position in {"RB", "WR", "TE"}
+        if active[index] and index not in selected and player.position in {"RB", "WR", "TE"}
     ][: requirements.flex]
     selected.update(flex)
     complete = complete and len(flex) == requirements.flex
@@ -279,6 +280,39 @@ def _position_volatility_ratios(tagged_board: pl.DataFrame) -> dict[str, float]:
     }
 
 
+@dataclass(frozen=True)
+class RosterProjectionColumns:
+    """Which per-player fields feed roster-level numbers; first present column wins.
+
+    ``mean`` is per-active-game points.  Availability is ``games / season_games`` when
+    a games column is present, else the availability column.  Volatility is rescaled to
+    the chosen mean by the ratio ``volatility / volatility_mean`` so a fitted mean keeps
+    the historical weekly shape rather than the hand-built projection's level.
+    """
+
+    mean: tuple[str, ...] = ("fitted_ppg", "proj_ppg", "ppg")
+    games: tuple[str, ...] = ("fitted_games",)
+    availability: tuple[str, ...] = ("projected_availability",)
+    volatility: tuple[str, ...] = ("projected_volatility", "volatility")
+    volatility_mean: tuple[str, ...] = ("proj_ppg", "ppg")
+
+    @staticmethod
+    def _first(frame: pl.DataFrame, candidates: tuple[str, ...]) -> str | None:
+        for name in candidates:
+            if name in frame.columns and frame[name].is_not_null().any():
+                return name
+        return None
+
+    def resolve(self, frame: pl.DataFrame) -> dict[str, str | None]:
+        return {
+            "mean": self._first(frame, self.mean),
+            "games": self._first(frame, self.games),
+            "availability": self._first(frame, self.availability),
+            "volatility": self._first(frame, self.volatility),
+            "volatility_mean": self._first(frame, self.volatility_mean),
+        }
+
+
 def team_strengths(
     tagged_board: pl.DataFrame,
     espn_players: pl.DataFrame,
@@ -286,6 +320,7 @@ def team_strengths(
     *,
     season_games: int = 17,
     fallback_availability: float = 0.94,
+    columns: RosterProjectionColumns | None = None,
 ) -> dict[int, dict[str, int | float]]:
     """Simulate each roster's best active lineup and rank expected weekly production.
 
@@ -294,9 +329,11 @@ def team_strengths(
     conditional means and variances. The law of total variance then combines ordinary
     scoring volatility with the extra risk created by absences and weaker replacements.
 
-    ``team_score`` is a league-relative 0–10 index of expected weekly points centered at
-    5.0. Weekly risk is deliberately separate: volatility describes uncertainty and
-    must not quietly replace the mean outcome in the team rank.
+    The per-player inputs come from ``columns`` (config ``roster_*_columns``), so the
+    roster-level numbers follow whichever projection the backtest chose rather than a
+    hard-wired field.  ``team_score`` is a league-relative 0–10 index of expected weekly
+    points centered at 5.0. Weekly risk is deliberately separate: volatility describes
+    uncertainty and must not quietly replace the mean outcome in the team rank.
     """
 
     ids = [int(team_id) for team_id in team_ids]
@@ -317,42 +354,55 @@ def team_strengths(
             for rank, team_id in enumerate(ids, start=1)
         }
 
-    mean_column = "proj_ppg" if "proj_ppg" in tagged_board.columns else "ppg"
-    volatility_column = (
-        "projected_volatility" if "projected_volatility" in tagged_board.columns else "volatility"
-    )
-    availability_column = (
-        "projected_availability" if "projected_availability" in tagged_board.columns else None
-    )
+    resolved = (columns or RosterProjectionColumns()).resolve(tagged_board)
+    mean_column = resolved["mean"] or "ppg"
+    games_column = resolved["games"]
+    availability_column = resolved["availability"]
+    volatility_column = resolved["volatility"]
+    volatility_mean_column = resolved["volatility_mean"]
     board_players: dict[int, TeamPlayerProjection] = {}
-    if ESPN_ID in tagged_board.columns:
-        columns = [ESPN_ID, "player_display_name", "position", mean_column]
-        if volatility_column in tagged_board.columns:
-            columns.append(volatility_column)
-        if availability_column:
-            columns.append(availability_column)
-        for row in tagged_board.select(columns).iter_rows(named=True):
+    if ESPN_ID in tagged_board.columns and mean_column in tagged_board.columns:
+        wanted = [ESPN_ID, "player_display_name", "position", mean_column]
+        wanted += [
+            c
+            for c in (games_column, availability_column, volatility_column, volatility_mean_column)
+            if c and c in tagged_board.columns
+        ]
+        for row in tagged_board.select(list(dict.fromkeys(wanted))).iter_rows(named=True):
             espn_id = row.get(ESPN_ID)
             mean = row.get(mean_column)
             if espn_id is None or not isinstance(mean, int | float) or not math.isfinite(mean):
                 continue
-            volatility = row.get(volatility_column, 0.0)
-            availability = row.get(availability_column, 1.0) if availability_column else 1.0
+            mean = max(float(mean), 0.0)
+            volatility = 0.0
+            raw_volatility = row.get(volatility_column) if volatility_column else None
+            if isinstance(raw_volatility, int | float) and math.isfinite(raw_volatility):
+                volatility = max(float(raw_volatility), 0.0)
+                # Keep the weekly shape (volatility relative to its own mean) but scale
+                # it to the mean the roster is actually valued on.
+                shape_mean = row.get(volatility_mean_column) if volatility_mean_column else None
+                if (
+                    volatility_mean_column != mean_column
+                    and isinstance(shape_mean, int | float)
+                    and math.isfinite(shape_mean)
+                    and shape_mean > 0
+                ):
+                    volatility = volatility / float(shape_mean) * mean
+            availability = 1.0
+            games = row.get(games_column) if games_column else None
+            if isinstance(games, int | float) and math.isfinite(games):
+                availability = float(games) / float(season_games)
+            else:
+                raw_availability = row.get(availability_column) if availability_column else None
+                if isinstance(raw_availability, int | float) and math.isfinite(raw_availability):
+                    availability = float(raw_availability)
             board_players[int(espn_id)] = TeamPlayerProjection(
                 player_id=int(espn_id),
                 name=str(row.get("player_display_name") or ""),
                 position=str(row.get("position") or "").upper(),
-                mean=max(float(mean), 0.0),
-                volatility=(
-                    max(float(volatility), 0.0)
-                    if isinstance(volatility, int | float) and math.isfinite(volatility)
-                    else 0.0
-                ),
-                availability=(
-                    max(0.0, min(1.0, float(availability)))
-                    if isinstance(availability, int | float) and math.isfinite(availability)
-                    else 1.0
-                ),
+                mean=mean,
+                volatility=volatility,
+                availability=max(0.0, min(1.0, availability)),
                 fallback=False,
             )
 
@@ -406,7 +456,7 @@ def team_strengths(
             active = [rng.random() < player.availability for player in players]
             selected, complete = _best_lineup(players, active, requirements)
             conditional_mean = sum(players[index].mean for index in selected)
-            conditional_variance = sum(players[index].volatility**2 for index in selected)
+            conditional_variance = sum(players[index].volatility ** 2 for index in selected)
             conditional_mean_sum += conditional_mean
             conditional_mean_square_sum += conditional_mean**2
             conditional_variance_sum += conditional_variance

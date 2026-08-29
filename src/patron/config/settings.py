@@ -60,6 +60,11 @@ class Settings(BaseSettings):
         return self.data_dir / "outputs"
 
     @property
+    def runtime_dir(self) -> Path:
+        """Ephemeral PID/state files for project-owned local services."""
+        return self.data_dir / ".runtime"
+
+    @property
     def env_path(self) -> Path:
         """Where `patron auth login` writes the ESPN cookies."""
         return REPO_ROOT / ".env"
@@ -82,6 +87,7 @@ class Settings(BaseSettings):
             self.nflverse_cache_dir,
             self.derived_cache_dir,
             self.outputs_dir,
+            self.runtime_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MetricVersion, Player } from '../api/types'
+import {
+  OVERALL_VOR_TITLE,
+  POSITION_RANK_TITLE,
+  SEASON_EQUIVALENT_TITLE,
+  rankBasis,
+  rankBasisTitle,
+} from '../metricPresentation'
 import { Flags } from './Flags'
 
 type SortKey = keyof Player
@@ -29,7 +36,7 @@ const IDENTITY_COLUMNS: Column[] = [
   {
     key: 'rank',
     label: '#',
-    title: 'Board rank, after manual overrides.',
+    title: 'Overall board rank, after manual overrides where present.',
     align: 'left',
     initial: 'asc',
     render: (p) => <span className="rank">{p.rank}</span>,
@@ -97,7 +104,7 @@ const V1_COLUMNS: Column[] = [
   {
     key: 'flags',
     label: 'Flags',
-    title: 'Model opinions. Hover any chip for what it means.',
+    title: 'Historical heuristics and sample warnings. Hover any chip for its limits.',
     align: 'left',
     initial: 'asc',
     render: (p) => <Flags value={p.flags} />,
@@ -111,7 +118,7 @@ const V1_COLUMNS: Column[] = [
   {
     key: 'floor',
     label: 'Floor',
-    title: '25th-percentile weekly score. What decides who you start.',
+    title: 'Historical 25th-percentile weekly score; a noisy lineup descriptor, especially in small samples.',
     render: (p) => <span className="dim">{number(p.floor)}</span>,
   },
   {
@@ -125,14 +132,14 @@ const V1_COLUMNS: Column[] = [
     key: 'wtd_opp',
     label: 'Opp',
     title:
-      'Weighted opportunity: carries + 2.2 x targets. Volume is the sticky, predictive stat; efficiency regresses.',
+      'Weighted opportunity: carries + 2.2 × targets. A compact historical volume measure, not a role projection.',
     render: (p) => <span className="dim">{number(p.wtd_opp, 0)}</span>,
   },
   {
     key: 'td_over_exp',
     label: 'TDOE',
     title:
-      'Touchdowns above or below what the volume implies. Positive is luck that will not repeat; negative with volume is a buy.',
+      'Touchdowns above or below a volume-only expectation. Useful as a regression signal, but high-value usage may repeat.',
     render: (p) => (
       <span style={{ color: p.td_over_exp > 2 ? 'var(--sell)' : p.td_over_exp < -2 ? 'var(--buy)' : undefined }}>
         {p.td_over_exp > 0 ? '+' : ''}
@@ -180,57 +187,51 @@ const V2_COLUMNS: Column[] = [
     render: (p) => <span className="team">{p.projected_team ?? p.team}</span>,
   },
   {
-    key: 'v2_score',
-    label: 'V2 Score',
-    title: 'Balanced draft score: 75% expected VOR, 15% floor VOR, and 10% ceiling VOR, plus manual overrides. This sorts v2.',
-    render: (p) => <span className="strong">{number(p.v2_score)}</span>,
+    key: 'v2_overall_vor',
+    label: 'Overall VOR',
+    title: OVERALL_VOR_TITLE,
+    render: (p) => <span className="strong">{number(p.v2_overall_vor)}</span>,
   },
   {
-    key: 'adj_proj_vor',
-    label: 'V2 Mean VOR',
-    title: 'V2 combined mean points per game above replacement, including manual overrides.',
-    render: (p) => <span className="dim">{number(p.adj_proj_vor)}</span>,
+    key: 'v2_position_rank',
+    label: 'Pos Rk',
+    title: POSITION_RANK_TITLE,
+    render: (p) => <span className="dim">{p.v2_position_rank ?? '—'}</span>,
   },
   {
-    key: 'availability_adjusted_vor',
-    label: 'Season VOR',
-    title: 'Projected VOR scaled by expected games. This is the availability-aware expected-value input to the V2 rank.',
-    render: (p) => <span className="dim">{number(p.availability_adjusted_vor)}</span>,
+    key: 'v2_rank_value',
+    label: 'Rank basis',
+    title: 'The configured projection and raw value used for this player’s position rank.',
+    render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
+  },
+  {
+    key: 'proj_ppg',
+    label: 'Proj PPG',
+    title: 'V2 projection per active game (history and stat-line branches); a fitted-ranker input, not the sort.',
+    render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'season_equivalent_ppg',
+    label: 'Avail PPG',
+    title: SEASON_EQUIVALENT_TITLE,
+    render: (p) => <span className="dim">{number(p.season_equivalent_ppg)}</span>,
   },
   {
     key: 'expected_games',
     label: 'Exp G',
-    title: 'Expected games from nflverse participation and injury-report history, shrunk toward the league availability prior.',
+    title: 'Expected active games, estimated from participation and injury-report history and shrunk toward the league prior.',
     render: (p) => <span className="dim">{number(p.expected_games)}</span>,
   },
   {
-    key: 'expected_season_points',
+    key: 'fitted_season_points',
     label: 'Season Pts',
-    title: 'Projected points per active game multiplied by expected games.',
-    render: (p) => <span className="dim">{number(p.expected_season_points, 0)}</span>,
-  },
-  {
-    key: 'projected_floor',
-    label: 'Floor',
-    title: 'Projected 25th-percentile score using the shrunk historical floor profile.',
-    render: (p) => <span className="dim">{number(p.projected_floor)}</span>,
-  },
-  {
-    key: 'projected_ceiling',
-    label: 'Ceil',
-    title: 'Projected 75th-percentile score from the shrunk weekly volatility profile.',
-    render: (p) => <span className="dim">{number(p.projected_ceiling)}</span>,
-  },
-  {
-    key: 'proj_ppg',
-    label: 'V2 PPG',
-    title: 'Combined V2 PPG: 35% normalized historical branch plus 65% bottom-up stat-line forecast.',
-    render: (p) => number(p.proj_ppg),
+    title: 'Fitted season points: fitted PPG multiplied by the fitted games projection.',
+    render: (p) => <span className="dim">{number(p.fitted_season_points, 0)}</span>,
   },
   {
     key: 'ppg',
     label: 'Actual PPG',
-    title: 'Most recent season’s actual league-scored PPG; evidence, not the v2 sort key.',
+    title: 'Most recent season’s league-scored PPG. A strong naive baseline and supporting evidence, not the overall V2 sort.',
     render: (p) => <span className="dim">{number(p.ppg)}</span>,
   },
   {
@@ -238,24 +239,6 @@ const V2_COLUMNS: Column[] = [
     label: 'Conf',
     title: 'Sample support for the projection. Team moves and manual role assumptions reduce it.',
     render: (p) => <span className="dim">{percent(p.projection_confidence)}</span>,
-  },
-  {
-    key: 'team_context_factor',
-    label: 'Team x',
-    title: 'Projected-team environment relative to the contexts already embedded in the player history.',
-    render: (p) => <span className="dim">{number(p.team_context_factor, 2)}x</span>,
-  },
-  {
-    key: 'qb_context',
-    label: 'QB Ctx',
-    title: 'Team passing fantasy environment per game: pass yards and TDs, less interceptions.',
-    render: (p) => <span className="dim">{number(p.qb_context)}</span>,
-  },
-  {
-    key: 'teammate_competition',
-    label: 'Comp',
-    title: 'Largest teammate’s share of target opportunity (or RB backfield opportunity). Lower means more available role.',
-    render: (p) => <span className="dim">{percent(p.teammate_competition)}</span>,
   },
   {
     key: 'depth_chart_rank',
@@ -282,12 +265,6 @@ const V2_COLUMNS: Column[] = [
     render: (p) => <span className="dim">{percent(p.projected_route_participation)}</span>,
   },
   {
-    key: 'projected_targets_per_route_opportunity',
-    label: 'TPRR',
-    title: 'Projected targets per route opportunity, regressed by nflverse participation sample.',
-    render: (p) => <span className="dim">{percent(p.projected_targets_per_route_opportunity)}</span>,
-  },
-  {
     key: 'projected_end_zone_targets_pg',
     label: 'EZ Tgt/G',
     title: 'Projected end-zone targets per game from nflverse play-by-play usage.',
@@ -298,36 +275,6 @@ const V2_COLUMNS: Column[] = [
     label: 'GL Car/G',
     title: 'Projected carries from the opponent five-yard line or closer per game.',
     render: (p) => <span className="dim">{number(p.projected_goal_line_carries_pg, 2)}</span>,
-  },
-  {
-    key: 'projected_pass_attempts_pg',
-    label: 'Att/G',
-    title: 'Projected official pass attempts per game for quarterbacks.',
-    render: (p) => <span className="dim">{number(p.projected_pass_attempts_pg)}</span>,
-  },
-  {
-    key: 'projected_target_share',
-    label: 'Tgt%',
-    title: 'Projected target share, shrunk and blended with WOPR before team competition.',
-    render: (p) => <span className="dim">{percent(p.projected_target_share)}</span>,
-  },
-  {
-    key: 'projected_air_yards_share',
-    label: 'AY%',
-    title: 'Projected air-yards share; used to adjust yards per target and long-touchdown bonus expectation.',
-    render: (p) => <span className="dim">{percent(p.projected_air_yards_share)}</span>,
-  },
-  {
-    key: 'projected_wopr',
-    label: 'WOPR',
-    title: 'Projected WOPR role signal. It contributes 25% of projected target share rather than being added again at full weight.',
-    render: (p) => <span className="dim">{number(p.projected_wopr, 2)}</span>,
-  },
-  {
-    key: 'projected_bonus_pg',
-    label: 'Bonus/G',
-    title: 'Projected long-touchdown bonus points per game, regressed by opportunity and adjusted for air-yard role.',
-    render: (p) => <span className="dim">{number(p.projected_bonus_pg, 2)}</span>,
   },
   {
     key: 'flags',
@@ -363,6 +310,7 @@ export function BoardTable({ players, version }: { players: Player[]; version: M
 
       // Nulls always sort last, whichever direction is active — an unknown value is
       // not a small one, and letting it float to the top would be misleading.
+      if (left == null && right == null) return 0
       if (left === null || left === undefined) return 1
       if (right === null || right === undefined) return -1
 

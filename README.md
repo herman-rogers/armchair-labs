@@ -6,7 +6,9 @@ the league's own scoring rules, ranks by value over replacement, and joins that 
 against live ESPN league state for ownership and waiver decisions.
 
 See [`docs/metrics.md`](docs/metrics.md) for the reviewed v1 catalog and v2 forward
-projection model, `docs/fantasy_engine_implementation_plan.md` for the full system
+projection model, [`docs/v2_metrics_review.md`](docs/v2_metrics_review.md) for the
+2026-08-29 backtest-driven review of v2 and its open issues,
+`docs/fantasy_engine_implementation_plan.md` for the full system
 design, and `docs/saints_metrics_example.py` for the original draft-prep script.
 
 ## Status
@@ -15,9 +17,9 @@ design, and `docs/saints_metrics_example.py` for the original draft-prep script.
 validated against the Aug 2026 fixture. V2 blends a normalized multi-year PPG prior
 with projected player stat lines driven by role, efficiency, age, team/QB context,
 teammate competition, route opportunities/TPRR, official attempts, high-value usage,
-current depth charts, and injury-based expected games. The availability-aware score
-balances expected/floor/ceiling VOR. The API and dashboard can switch between both
-versions.
+current depth charts, and injury-based expected games. Walk-forward fitted rankers
+learned from 22 seasons of backtest folds set the board order (`docs/v2_metrics_review.md`).
+The API and dashboard can switch between both versions.
 
 nflverse is the football-statistics source. ESPN is deliberately limited to private-
 league state such as ownership, free agency, fantasy lineups, transactions, and a live
@@ -29,9 +31,20 @@ injury display; ESPN projections and lineup slots do not feed V2 player value.
 uv sync                  # install deps into .venv
 just test                # fast offline unit suite
 just board               # build the board -> data/outputs/
+just metric-report       # rebuild rolling v2 backtests, metric evidence, and the fitted ranker
 just api                 # serve it at :8000
 just web                 # React dev server at :5173
+just dev                 # run both under one Ctrl+C-safe supervisor
+just restart             # reclaim project orphans, then restart both
+just stop                # stop both from another terminal
 ```
+
+Use `just dev` for normal local work. It records the exact API and Vite process groups
+under `data/.runtime/`, forwards INT/TERM/HUP into a graceful shutdown, and force-kills
+only those recorded groups if they ignore the grace period. `just restart` also
+reclaims listeners on ports 8000 and 5173 left by the former shell launcher, but only
+after verifying their command paths belong to this repository. `just dev-status`
+reports the supervisor and child state.
 
 Without `just`, every recipe is a plain command — see the `Justfile`.
 
@@ -43,11 +56,22 @@ Without `just`, every recipe is a plain command — see the `Justfile`.
 | `src/patron/data/` | nflverse statistical loading and the derived-artifact cache |
 | `src/patron/scoring/` | League scorer, big-play bonuses, kickers, DST |
 | `src/patron/metrics/` | PPG, VOR, opportunity, TD-over-expectation, age, floor/volatility |
+| `src/patron/config/metric_report.yaml` | Backtest seasons, outcomes, and swappable metric catalog |
 | `src/patron/board/` | Board assembly, flags, override application |
 | `src/patron/api/` | FastAPI read API |
 | `web/` | React frontend |
 | `data/static/` | Committed reference data, including the draft-board fixture |
 | `data/cache/`, `data/outputs/` | Generated, gitignored |
+
+The **Metric Report** frontend tab reads the last generated
+`data/outputs/metric_report.json`. Run `just metric-report` whenever the metric catalog,
+v2 formulas, or historical data changes. The same report carries the walk-forward
+fitted ranker's per-position weights, which `just board` applies to the live v2 board
+(`league.yaml` → `projection_rank_key` / `projection_overall_key`). The board applies a
+stored model only when its artifact matches the current fit config, season, and
+depth-chart snapshot, so refit before rebuilding: `just metric-report && just board`
+(`just metric-report --reanalyze` re-scores from the retained folds without a rebuild). The same run retains detailed player/fold
+predictions in Parquet and writes a compact Markdown summary for offline review.
 
 ## Design note
 

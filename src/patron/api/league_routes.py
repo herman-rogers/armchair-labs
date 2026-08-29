@@ -105,6 +105,12 @@ def league(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
         (team.team_id for team in snapshot.teams),
         season_games=config.metrics.projection_season_games,
         fallback_availability=config.metrics.projection_availability_prior,
+        columns=reports.RosterProjectionColumns(
+            mean=tuple(config.metrics.roster_mean_columns),
+            games=tuple(config.metrics.roster_games_columns),
+            availability=tuple(config.metrics.roster_availability_columns),
+            volatility=tuple(config.metrics.roster_volatility_columns),
+        ),
     )
 
     return {

@@ -83,19 +83,19 @@ class TestRankedWire:
                     "player_display_name": "Durable",
                     "ppg": 8.0,
                     "season_equivalent_ppg": 14.0,
-                    "v2_score": 5.0,
+                    "v2_overall_vor": 5.0,
                 },
                 {
                     "player_display_name": "Fragile",
                     "ppg": 20.0,
                     "season_equivalent_ppg": 9.0,
-                    "v2_score": 3.0,
+                    "v2_overall_vor": 3.0,
                 },
                 {
                     "player_display_name": "Bar",
                     "ppg": 5.0,
                     "season_equivalent_ppg": 5.0,
-                    "v2_score": 0.0,
+                    "v2_overall_vor": 0.0,
                 },
             ),
             {"RB": 3},
@@ -183,19 +183,19 @@ class TestRankedWire:
 
 
 class TestRosterHealth:
-    def test_v2_roster_sorts_on_v2_score(self) -> None:
+    def test_v2_roster_sorts_on_overall_vor(self) -> None:
         health = roster_health(
             tagged(
                 {
                     "player_display_name": "Historical",
                     "adj_vor": 10.0,
-                    "v2_score": 1.0,
+                    "v2_overall_vor": 1.0,
                     IS_MINE: True,
                 },
                 {
                     "player_display_name": "Projected",
                     "adj_vor": 1.0,
-                    "v2_score": 10.0,
+                    "v2_overall_vor": 10.0,
                     IS_MINE: True,
                 },
             ),

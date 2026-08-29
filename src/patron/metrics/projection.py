@@ -56,6 +56,26 @@ def _bounded(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+GAMES_PLAYED = "ppg_denominator_games"
+
+
+def _games_played(row: dict[str, Any]) -> float:
+    """Games the player was actually active for, not games with a stat line.
+
+    nflverse weekly stats omit dressed players with no box-score event, so ``games``
+    undercounts appearances for low-usage players (three games for a typical TE).
+    v2's PPG already divides by participation-observed games; every other per-game
+    rate must use the same denominator or the component branch projects targets per
+    stat-game while being scored per active game.
+    """
+    played = _number(row.get(GAMES_PLAYED))
+    return played if played > 0 else _number(row.get("games"))
+
+
+def _games_column(frame: pl.DataFrame) -> str:
+    return GAMES_PLAYED if GAMES_PLAYED in frame.columns else "games"
+
+
 def _ratio(current: float, historical: float) -> float:
     """A guarded context ratio; sparse team rows must not create huge projections."""
     if current <= 0 or historical <= 0:
@@ -236,11 +256,13 @@ def _rosterable_rows(
     seasons: pl.DataFrame,
     config: LeagueConfig,
 ) -> dict[str, pl.DataFrame]:
+    """Top 2x-baseline-rank players with a full-enough season, by position."""
     pools: dict[str, pl.DataFrame] = {}
     for position, baseline_rank in config.vor_baseline_rank.items():
         pools[position] = (
             seasons.filter(
-                (pl.col("position") == position) & (pl.col("games") >= config.min_games_baseline)
+                (pl.col("position") == position)
+                & (pl.col(_games_column(seasons)) >= config.min_games_baseline)
             )
             .sort(["season", "ppg"], descending=[True, True])
             .group_by("season", maintain_order=True)
@@ -249,10 +271,39 @@ def _rosterable_rows(
     return pools
 
 
+def _all_player_rows(
+    seasons: pl.DataFrame,
+    config: LeagueConfig,
+) -> dict[str, pl.DataFrame]:
+    """Every player-season at the position that reached the board."""
+    return {
+        position: seasons.filter(
+            (pl.col("position") == position)
+            & (pl.col(_games_column(seasons)) >= config.min_games_board)
+        )
+        for position in config.vor_baseline_rank
+    }
+
+
+def _prior_rows(seasons: pl.DataFrame, config: LeagueConfig) -> dict[str, pl.DataFrame]:
+    """The player-seasons that define positional priors.
+
+    Shrinkage pulls a small sample toward this pool's mean, so the pool must describe
+    what a player with little evidence actually tends to become.  The rosterable pool
+    (top starters only) says "a starter", which inflates every fringe player toward
+    starter production; the all-player pool, weighted by games, says "an ordinary
+    player at the position", which is the honest expectation.  Rosterable is retained
+    as a configurable alternative for comparison.
+    """
+    if config.metrics.projection_prior_pool == "rosterable":
+        return _rosterable_rows(seasons, config)
+    return _all_player_rows(seasons, config)
+
+
 def _position_means(
     pools: dict[str, pl.DataFrame],
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Rosterable-player PPG and bonus/game priors by position."""
+    """Games-weighted PPG and bonus/game priors by position from the prior pool."""
     ppg: dict[str, float] = {}
     bonus: dict[str, float] = {}
     for position, rows in pools.items():
@@ -260,7 +311,7 @@ def _position_means(
             ppg[position] = 0.0
             bonus[position] = 0.0
             continue
-        weighted_games = rows["games"].cast(pl.Float64)
+        weighted_games = rows[_games_column(rows)].cast(pl.Float64)
         game_total = float(weighted_games.sum())
         ppg[position] = float((rows["ppg"] * weighted_games).sum()) / game_total
         bonus[position] = float(rows["bonus_pts"].sum()) / game_total
@@ -325,7 +376,7 @@ def _component_priors(
             decay = config.metrics.projection_season_decay ** max(
                 config.board_season - int(row["season"]), 0
             )
-            games = max(_number(row.get("games")), 1.0)
+            games = max(_games_played(row), 1.0)
             game_weight = games * decay
             totals["games"] += game_weight
             for column in (
@@ -507,8 +558,8 @@ def build_projection_board(
     assumptions = assumptions or ProjectionAssumptions.from_config()
     metrics = config.metrics
     profiles = _team_profiles(player_seasons)
-    pools = _rosterable_rows(player_seasons, config)
-    position_ppg, position_bonus = _position_means(pools)
+    pools = _prior_rows(player_seasons, config)
+    position_ppg, _position_bonus = _position_means(pools)
     component_priors = _component_priors(pools, profiles, config)
     current_by_player = (
         {str(row["player_id"]): row for row in current_players.iter_rows(named=True)}
@@ -554,9 +605,7 @@ def build_projection_board(
         weighted: list[tuple[dict[str, Any], float]] = []
         for row in history:
             years_old = max(config.board_season - int(row["season"]), 0)
-            weight = metrics.projection_season_decay**years_old * max(
-                _number(row.get("games")), 1.0
-            )
+            weight = metrics.projection_season_decay**years_old * max(_games_played(row), 1.0)
             weighted.append((row, weight))
         total_weight = sum(weight for _, weight in weighted) or 1.0
         historical_ppg = (
@@ -564,7 +613,7 @@ def build_projection_board(
         )
         effective_games = sum(
             metrics.projection_season_decay ** max(config.board_season - int(row["season"]), 0)
-            * _number(row.get("games"))
+            * _games_played(row)
             for row in history
         )
         reliability = effective_games / (effective_games + metrics.projection_shrinkage_games)
@@ -573,28 +622,13 @@ def build_projection_board(
         )
 
         latest = max(history, key=lambda row: int(row["season"]))
-        latest_games = max(_number(latest.get("games")), 1.0)
-        td_adjustment = 0.0
-        if position != "QB":
-            td_adjustment = (
-                -_number(latest.get("td_over_exp"))
-                * 6.0
-                / latest_games
-                * metrics.projection_td_regression
-            )
-            td_adjustment = _bounded(td_adjustment, -2.5, 2.5)
-
         historical_bonus_pg = (
             sum(
-                (_number(row.get("bonus_pts")) / max(_number(row.get("games")), 1.0)) * weight
+                (_number(row.get("bonus_pts")) / max(_games_played(row), 1.0)) * weight
                 for row, weight in weighted
             )
             / total_weight
         )
-        bonus_adjustment = (position_bonus.get(position, 0.0) - historical_bonus_pg) * (
-            1.0 - metrics.projection_bonus_retention
-        )
-        bonus_adjustment = _bounded(bonus_adjustment, -1.5, 1.5)
 
         source_context = {
             "qb_context": 0.0,
@@ -682,34 +716,14 @@ def build_projection_board(
             _number(latest.get("carries")) / latest_team_carries if latest_team_carries else None
         )
 
-        if position in {"WR", "TE"}:
-            context_delta = (
-                0.40 * (_ratio(target["qb_context"], source_context["qb_context"]) - 1.0)
-                + 0.20 * (_ratio(target["pass_volume"], source_context["pass_volume"]) - 1.0)
-                + 0.20 * (_ratio(target["scoring"], source_context["scoring"]) - 1.0)
-                + 0.20 * (_ratio(target_availability, source_context["target_availability"]) - 1.0)
-            )
-        elif position == "RB":
-            context_delta = (
-                0.30 * (_ratio(target["scoring"], source_context["scoring"]) - 1.0)
-                + 0.25 * (_ratio(target["rush_volume"], source_context["rush_volume"]) - 1.0)
-                + 0.15 * (_ratio(target["pass_volume"], source_context["pass_volume"]) - 1.0)
-                + 0.30
-                * (_ratio(backfield_availability, source_context["backfield_availability"]) - 1.0)
-            )
-        else:  # QB: pass volume and team scoring stand in for supporting environment.
-            context_delta = 0.50 * (
-                _ratio(target["pass_volume"], source_context["pass_volume"]) - 1.0
-            ) + 0.50 * (_ratio(target["scoring"], source_context["scoring"]) - 1.0)
-
-        cap = metrics.projection_team_context_cap
-        team_context_factor = 1.0 + _bounded(context_delta, -cap, cap)
         manual_role_multiplier = override.opportunity_multiplier if override else 1.0
         role_multiplier = manual_role_multiplier * depth_role_factor
         age = base.get("age_at_season")
         age_factor = _age_factor(position, float(age) if age is not None else None)
-        prior_projection = max(individual_prior + td_adjustment + bonus_adjustment, 0.0)
-        prior_projection *= age_factor * team_context_factor * role_multiplier
+        # The 2026-08-29 review ablated the prior branch: age and depth role carried
+        # signal; TD regression, big-play regression, and the team-context scalar did
+        # not (docs/v2_metrics_review.md §4, §6a). Only the survivors remain.
+        prior_projection = max(individual_prior, 0.0) * age_factor * role_multiplier
 
         # The component branch turns role and team volume into a projected stat line.
         # Totals use season decay without multiplying by games a second time.
@@ -718,7 +732,7 @@ def build_projection_board(
             rows: list[tuple[dict[str, Any], float]] = weighted,
         ) -> float:
             return sum(
-                _number(row.get(column)) * weight / max(_number(row.get("games")), 1.0)
+                _number(row.get(column)) * weight / max(_games_played(row), 1.0)
                 for row, weight in rows
             )
 
@@ -1048,7 +1062,7 @@ def build_projection_board(
                 else 0.0
             )
             * weight
-            / max(_number(row.get("games")), 1.0)
+            / max(_games_played(row), 1.0)
             for row, weight in weighted
         )
         historical_residual_pg = historical_residual_points / max(effective_games, 1.0)
@@ -1078,6 +1092,7 @@ def build_projection_board(
 
         availability_numerator = 0.0
         availability_denominator = 0.0
+        injury_availability_denominator = 0.0
         injury_missed_equivalents = 0.0
         injury_report_weeks = 0.0
         for row in history:
@@ -1088,23 +1103,31 @@ def build_projection_board(
             possible_games = _number(row.get("team_games")) or observed_games
             availability_numerator += observed_games * decay
             availability_denominator += possible_games * decay
-            injury_report_weeks += _number(row.get("injury_report_weeks")) * decay
-            injury_missed_equivalents += (
-                _number(row.get("out_report_weeks"))
-                + 0.5 * _number(row.get("doubtful_report_weeks"))
-                + 0.1 * _number(row.get("questionable_report_weeks"))
-            ) * decay
+            # A missing marker means the caller predates explicit provenance and is
+            # treated as available for backward compatibility. An explicit False is
+            # historical source absence, not evidence of a perfectly healthy season.
+            injury_source_available = row.get("injury_data_available") is not False
+            if injury_source_available:
+                injury_availability_denominator += possible_games * decay
+                injury_report_weeks += _number(row.get("injury_report_weeks")) * decay
+                injury_missed_equivalents += (
+                    _number(row.get("out_report_weeks"))
+                    + 0.5 * _number(row.get("doubtful_report_weeks"))
+                    + 0.1 * _number(row.get("questionable_report_weeks"))
+                ) * decay
         observed_availability = (
             availability_numerator / availability_denominator
             if availability_denominator > 0
             else metrics.projection_availability_prior
         )
-        injury_availability = 1.0 - injury_missed_equivalents / max(availability_denominator, 1.0)
-        availability_sample = _bounded(
-            0.75 * observed_availability + 0.25 * injury_availability,
-            0.50,
-            1.0,
-        )
+        if injury_availability_denominator > 0:
+            injury_availability = 1.0 - injury_missed_equivalents / max(
+                injury_availability_denominator, 1.0
+            )
+            availability_sample = 0.75 * observed_availability + 0.25 * injury_availability
+        else:
+            availability_sample = observed_availability
+        availability_sample = _bounded(availability_sample, 0.50, 1.0)
         availability_reliability = availability_denominator / (
             availability_denominator + metrics.projection_availability_shrinkage_games
         )
@@ -1117,9 +1140,6 @@ def build_projection_board(
             1.0,
             float(metrics.projection_season_games),
         )
-        availability_factor = expected_games / metrics.projection_season_games
-        expected_season_points = proj_ppg * expected_games
-        season_equivalent_ppg = expected_season_points / metrics.projection_season_games
 
         historical_floor_ratio = weighted_metric("floor") / max(historical_ppg, 0.1)
         historical_volatility_ratio = weighted_metric("volatility") / max(historical_ppg, 0.1)
@@ -1171,17 +1191,11 @@ def build_projection_board(
                 "projection_confidence": _bounded(confidence, 0.0, 1.0),
                 "availability_confidence": availability_reliability,
                 "projected_availability": projected_availability,
-                "availability_factor": availability_factor,
                 "expected_games": expected_games,
-                "expected_season_points": expected_season_points,
-                "season_equivalent_ppg": season_equivalent_ppg,
                 "historical_injury_report_weeks": injury_report_weeks,
                 "injury_missed_equivalents": injury_missed_equivalents,
                 "effective_games": effective_games,
                 "age_factor": age_factor,
-                "td_regression_adjustment": td_adjustment,
-                "bonus_regression_adjustment": bonus_adjustment,
-                "team_context_factor": team_context_factor,
                 "qb_context": target["qb_context"],
                 "team_scoring_context": target["scoring"],
                 "team_pass_volume": target["pass_volume"],
@@ -1228,55 +1242,16 @@ def build_projection_board(
         baseline_ranks=config.vor_baseline_rank,
         min_games=config.min_games_baseline,
         ppg_column=PROJECTED_PPG,
+        games_column=_games_column(frame),
     )
     frame = add_vor(frame, levels, ppg_column=PROJECTED_PPG).rename(
         {"repl_ppg": "proj_repl_ppg", "vor": PROJECTED_VOR}
     )
-    floor_levels = replacement_levels(
-        frame,
-        baseline_ranks=config.vor_baseline_rank,
-        min_games=config.min_games_baseline,
-        ppg_column="projected_floor",
-    )
-    ceiling_levels = replacement_levels(
-        frame,
-        baseline_ranks=config.vor_baseline_rank,
-        min_games=config.min_games_baseline,
-        ppg_column="projected_ceiling",
-    )
+    # Superseded composites (v2_score, floor/ceiling VOR, availability-adjusted VOR)
+    # were removed after the backtest showed the fitted rankers beat them; the board's
+    # sort keys now live in ``board.rank``. ``adj_proj_vor`` remains as the projection's
+    # own VOR with overrides, the fallback when no fitted model is available.
     frame = frame.with_columns(
-        pl.col("position")
-        .replace_strict(floor_levels, default=None, return_dtype=pl.Float64)
-        .alias("floor_repl"),
-        pl.col("position")
-        .replace_strict(ceiling_levels, default=None, return_dtype=pl.Float64)
-        .alias("ceiling_repl"),
-    ).with_columns(
-        (pl.col("projected_floor") - pl.col("floor_repl")).alias("floor_vor"),
-        (pl.col("projected_ceiling") - pl.col("ceiling_repl")).alias("ceiling_vor"),
-        (pl.col(PROJECTED_VOR) + pl.col("override_delta")).alias(ADJUSTED_PROJECTED_VOR),
-        (pl.col(PROJECTED_VOR) * pl.col("availability_factor")).alias("availability_adjusted_vor"),
-    )
-    score_weight = (
-        config.metrics.projection_mean_weight
-        + config.metrics.projection_floor_weight
-        + config.metrics.projection_ceiling_weight
-    )
-    frame = frame.with_columns(
-        (
-            (
-                config.metrics.projection_mean_weight
-                * pl.col(PROJECTED_VOR)
-                * pl.col("availability_factor")
-                + config.metrics.projection_floor_weight
-                * pl.col("floor_vor")
-                * pl.col("availability_factor")
-                + config.metrics.projection_ceiling_weight
-                * pl.col("ceiling_vor")
-                * pl.col("availability_factor")
-            )
-            / score_weight
-            + pl.col("override_delta")
-        ).alias("v2_score")
-    ).sort("v2_score", descending=True)
+        (pl.col(PROJECTED_VOR) + pl.col("override_delta")).alias(ADJUSTED_PROJECTED_VOR)
+    ).sort(ADJUSTED_PROJECTED_VOR, descending=True, nulls_last=True)
     return frame.with_columns(pl.int_range(1, frame.height + 1, dtype=pl.Int32).alias("rank"))

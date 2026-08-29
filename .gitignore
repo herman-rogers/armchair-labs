@@ -13,6 +13,7 @@ __pycache__/
 # generated data — never committed
 data/cache/
 data/outputs/
+data/.runtime/
 
 # node
 web/node_modules/

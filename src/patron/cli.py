@@ -72,7 +72,7 @@ def board(
         "player_display_name",
         "position",
         "projected_team",
-        "v2_score",
+        "v2_overall_vor",
         "adj_proj_vor",
         "proj_ppg",
         "projection_confidence",
@@ -90,16 +90,24 @@ def board(
 @app.command("metric-report")
 def metric_report(
     force: bool = typer.Option(False, "--force", help="Rebuild derived caches from scratch."),
+    reanalyze: bool = typer.Option(
+        False,
+        "--reanalyze",
+        help="Refit and re-score from the retained fold predictions without rebuilding them.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run rolling v2 backtests and write the frontend metric report."""
     _configure_logging(verbose)
     settings = get_settings()
-    result = pipeline.build_metric_report(
-        config=get_league(),
-        settings=settings,
-        force=force,
-    )
+    if reanalyze:
+        result = pipeline.reanalyze_metric_report(settings=settings)
+    else:
+        result = pipeline.build_metric_report(
+            config=get_league(),
+            settings=settings,
+            force=force,
+        )
     paths = pipeline.export_metric_report(result, settings.outputs_dir)
     summary = result.report["data_summary"]
     typer.echo(
@@ -120,6 +128,50 @@ def serve(
 
     typer.echo(f"Serving on http://{host}:{port}  (frontend dev server: just web)")
     uvicorn.run("patron.api.app:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def dev(
+    restart: bool = typer.Option(False, "--restart", help="Stop existing services first."),
+    api_port: int = typer.Option(8000, "--api-port"),
+    web_port: int = typer.Option(5173, "--web-port"),
+    reload: bool = typer.Option(True, "--reload/--no-reload"),
+) -> None:
+    """Run API and frontend under one signal-safe development supervisor."""
+    from patron.dev import DevAlreadyRunningError, run
+
+    try:
+        exit_code = run(
+            restart=restart,
+            api_port=api_port,
+            web_port=web_port,
+            reload=reload,
+        )
+    except DevAlreadyRunningError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    raise typer.Exit(exit_code)
+
+
+@app.command("dev-stop")
+def dev_stop() -> None:
+    """Stop recorded services and reclaim project-owned legacy port orphans."""
+    from patron.dev import DevAlreadyRunningError, stop
+
+    try:
+        stopped = stop(include_legacy=True)
+    except DevAlreadyRunningError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo("Patron dev services stopped." if stopped else "No Patron dev services running.")
+
+
+@app.command("dev-status")
+def dev_status() -> None:
+    """Show whether the supervised API and frontend are running."""
+    from patron.dev import status
+
+    raise typer.Exit(0 if status() else 1)
 
 
 @app.command()

@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchUnrankable, fetchWire } from '../api/client'
 import type { MetricVersion } from '../api/types'
+import { SEASON_EQUIVALENT_TITLE } from '../metricPresentation'
 import { Freshness } from './Freshness'
 import {
   FLAGS_COLUMN,
   IDENTITY,
-  OWNERSHIP,
   PlayerTable,
   ROSTERED_PERCENT,
   number,
@@ -19,7 +19,7 @@ const COLUMNS: PlayerColumn[] = [
     key: 'wire_vor',
     label: 'Wire VOR',
     title:
-      'Points per game above the best player still available at this position. Not the draft-board VOR — replacement is measured against who is actually free right now.',
+      'Historical PPG above the configured replacement-ranked player in the current free-agent pool. This is not preseason draft VOR.',
     render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
   },
   {
@@ -32,11 +32,10 @@ const COLUMNS: PlayerColumn[] = [
   {
     key: 'floor',
     label: 'Floor',
-    title: '25th-percentile weekly score — what you can count on if you start him.',
+    title: 'Historical 25th-percentile weekly score; descriptive, not a guaranteed floor.',
     render: (p) => <span className="dim">{number(p.floor)}</span>,
   },
   ROSTERED_PERCENT,
-  OWNERSHIP,
 ]
 
 const V2_COLUMNS: PlayerColumn[] = [
@@ -44,14 +43,20 @@ const V2_COLUMNS: PlayerColumn[] = [
   {
     key: 'wire_vor',
     label: 'Wire VOR',
-    title: 'Availability-adjusted projected value above the actual free-agent pool.',
+    title: 'Season-equivalent projected PPG above the configured replacement-ranked player in the current free-agent pool.',
     render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
   },
   {
+    key: 'season_equivalent_ppg',
+    label: 'Avail PPG',
+    title: SEASON_EQUIVALENT_TITLE,
+    render: (p) => number(p.season_equivalent_ppg),
+  },
+  {
     key: 'proj_ppg',
-    label: 'V2 PPG',
-    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
-    render: (p) => number(p.proj_ppg),
+    label: 'Active PPG',
+    title: 'Hand-built projected points per active game. Compare with Avail PPG to see the effect of expected missed time.',
+    render: (p) => <span className="dim">{number(p.proj_ppg)}</span>,
   },
   {
     key: 'expected_games',
@@ -71,18 +76,21 @@ const V2_COLUMNS: PlayerColumn[] = [
     title: 'Projected carries per game.',
     render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
   },
-  FLAGS_COLUMN,
+  {
+    key: 'ppg',
+    label: 'Actual PPG',
+    title: 'Most recent season’s PPG, shown as baseline evidence.',
+    render: (p) => <span className="dim">{number(p.ppg)}</span>,
+  },
   ROSTERED_PERCENT,
-  OWNERSHIP,
 ]
 
 /**
  * The ranked wire.
  *
  * The one screen that wins waivers. Its numbers deliberately differ from the draft
- * board's: replacement level here is the best player still unowned, which after a
- * draft sits far below the preseason baseline. Using the preseason number would
- * understate every pickup on the list.
+ * board's: replacement is recalculated at the configured positional slot within the
+ * players currently unowned. Using the preseason pool would misstate pickup value.
  */
 export function WirePanel({ version }: { version: MetricVersion }) {
   const [healthyOnly, setHealthyOnly] = useState(false)
@@ -126,39 +134,39 @@ export function WirePanel({ version }: { version: MetricVersion }) {
           className="chip"
           aria-pressed={healthyOnly}
           onClick={() => setHealthyOnly((v) => !v)}
-          title="Hide players who cannot be started this week. Off by default — a cheap stash is a real play."
+          title="Hide ESPN OUT, IR, and suspension tags. This does not account for byes. Off by default because a stash can still be useful."
         >
-          Startable only
+          Hide OUT/IR/SUSP
         </button>
         <span className="spacer" />
-        <span className="count">{players.length} available</span>
+        <span className="count">{players.length} ranked free agents</span>
       </div>
 
       <p className="legend tight">
-        <b>Replacement right now:</b>{' '}
+        <b>Free-agent replacement:</b>{' '}
         {Object.entries(wire.data.replacement_levels)
           .sort()
           .map(([pos, ppg]) => `${pos} ${ppg.toFixed(1)}`)
           .join(' · ')}{' '}
-        — the best player still unowned at each position. Wire VOR is measured against
-        this, not against the preseason draft baseline. {version === 'v2' &&
-          'V2 uses season-equivalent projected PPG, so expected availability affects both the pool baseline and the pickup value.'}
+        — the configured replacement slot within the players currently unowned, not the
+        best free agent and not the preseason pool. {version === 'v2' &&
+          'Both the pool baseline and Wire VOR use availability-adjusted season-equivalent PPG.'}
       </p>
 
       <PlayerTable
         players={players}
         columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
         defaultSort="wire_vor"
-        emptyMessage="Nobody on the wire clears replacement level at this position."
+        emptyMessage="No ranked free agents at this position."
       />
 
       {unrankable.data && unrankable.data.total > 0 && (
         <div className="unrankable">
           <h3>{unrankable.data.total} players the model can’t price</h3>
           <p className="faint">
-            2026 rookies and players with no prior-season tape. They are listed rather than
-            hidden — a wire that silently omits a hyped rookie is worse than one that admits
-            it cannot rank him. Sorted by how much of the market already believes.
+            Rookies and players with no usable prior tape. They are listed rather than
+            assigned a fake zero, sorted by ESPN roster percentage. This list includes
+            rostered players as well as free agents.
           </p>
           <div className="unrankable-grid">
             {unrankable.data.players.slice(0, 12).map((p) => (
@@ -167,6 +175,7 @@ export function WirePanel({ version }: { version: MetricVersion }) {
                 <span className={`pos ${p.position}`}>{p.position}</span>
                 <span className="faint">{p.espn_team ?? '—'}</span>
                 <span className="dim">{(p.percent_owned ?? 0).toFixed(0)}% rostered</span>
+                <span className="faint owner">{p.owner_team_name ?? 'Unowned or unlisted'}</span>
               </div>
             ))}
           </div>

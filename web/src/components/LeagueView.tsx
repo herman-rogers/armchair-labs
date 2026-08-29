@@ -3,29 +3,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchLeague, refreshLeague } from '../api/client'
 import type { MetricVersion } from '../api/types'
 import { Freshness } from './Freshness'
-import { ComparePanel } from './ComparePanel'
+import { LeagueBoard } from './LeagueBoard'
 import { MatchupsPanel } from './MatchupsPanel'
-import { RosterPanel } from './RosterPanel'
-import { TeamsPanel } from './TeamsPanel'
 import { WirePanel } from './WirePanel'
 
-type Tab = 'roster' | 'matchups' | 'compare' | 'wire' | 'teams'
+type Tab = 'board' | 'matchups' | 'wire'
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
-  { id: 'roster', label: 'My Roster', hint: 'Health, value, and who to start' },
-  { id: 'matchups', label: 'Matchups', hint: 'Any week of the schedule, side by side' },
-  { id: 'compare', label: 'Compare', hint: 'Any two rosters, slot by slot' },
-  { id: 'wire', label: 'Wire', hint: 'Free agents ranked against what else is free' },
-  { id: 'teams', label: 'League', hint: 'Rival depth and what the room is paying' },
+  { id: 'board', label: 'League Board', hint: 'Power ranks, roster detail, and team comparisons' },
+  { id: 'matchups', label: 'Matchups', hint: 'The schedule and each weekly lineup edge' },
+  { id: 'wire', label: 'Waiver Wire', hint: 'Free agents ranked against what is actually available' },
 ]
 
 /** Everything that needs live ESPN state. */
 export function LeagueView({ version }: { version: MetricVersion }) {
-  const [tab, setTab] = useState<Tab>('roster')
-  // Compare holds its own pair rather than reusing the roster tab. Sending a team
-  // click to "My Roster" meant the tab lied about what it was showing and you lost
-  // your place getting back.
-  const [comparePair, setComparePair] = useState<{ left: number; right: number } | null>(null)
+  const [tab, setTab] = useState<Tab>('board')
   const queryClient = useQueryClient()
 
   const league = useQuery({
@@ -59,7 +51,11 @@ export function LeagueView({ version }: { version: MetricVersion }) {
 
   if (!league.data) return <div className="notice">Connecting to your league…</div>
 
-  const myTeam = league.data.teams.find((team) => team.is_mine) ?? null
+  if (league.data.teams.length === 0) {
+    return <div className="notice">No teams were returned for this league.</div>
+  }
+
+  const hasMyTeam = league.data.teams.some((team) => team.is_mine)
 
   return (
     <>
@@ -84,59 +80,16 @@ export function LeagueView({ version }: { version: MetricVersion }) {
         />
       </div>
 
-      {tab === 'roster' && myTeam && <RosterPanel team={myTeam} version={version} />}
-      {tab === 'roster' && !myTeam && (
+      {tab === 'board' && !hasMyTeam && (
         <div className="notice">
-          No team is marked as yours. Re-run <code>uv run patron auth login</code> to pick
-          your team, or set <code>ESPN_TEAM_ID</code> in <code>.env</code>.
+          <h2>Choose your team</h2>
+          Re-run <code>uv run patron auth login</code> to identify your team, or set{' '}
+          <code>ESPN_TEAM_ID</code> in <code>.env</code>.
         </div>
       )}
-
+      {tab === 'board' && hasMyTeam && <LeagueBoard teams={league.data.teams} version={version} />}
       {tab === 'matchups' && <MatchupsPanel version={version} />}
-
-      {tab === 'compare' && (
-        <ComparePanel
-          teams={league.data.teams}
-          left={comparePair?.left ?? myTeam?.team_id ?? league.data.teams[0].team_id}
-          right={
-            comparePair?.right ??
-            (league.data.teams.find((team) => !team.is_mine)?.team_id ??
-              league.data.teams[0].team_id)
-          }
-          version={version}
-          onChange={(side, teamId) =>
-            setComparePair((current) => {
-              const base = {
-                left: current?.left ?? myTeam?.team_id ?? league.data.teams[0].team_id,
-                right:
-                  current?.right ??
-                  (league.data.teams.find((team) => !team.is_mine)?.team_id ??
-                    league.data.teams[0].team_id),
-              }
-              return { ...base, [side]: teamId }
-            })
-          }
-        />
-      )}
-
       {tab === 'wire' && <WirePanel version={version} />}
-
-      {tab === 'teams' && (
-        <TeamsPanel
-          teams={league.data.teams}
-          version={version}
-          onSelectTeam={(team) => {
-            // Open the comparison against your own team rather than replacing the
-            // roster tab's contents.
-            setComparePair({
-              left: myTeam?.team_id ?? team.team_id,
-              right: team.team_id,
-            })
-            setTab('compare')
-          }}
-        />
-      )}
-
     </>
   )
 }

@@ -128,9 +128,11 @@ def test_a_receiver_move_uses_the_destination_quarterback_context(league_config)
     )
 
     assert move["projected_team"] == "HIGH"
+    # Destination context enters through the component branch's team inputs. The
+    # prior-branch context scalar was removed after it tested inert (review §4).
     assert move["qb_context"] > stay["qb_context"]
-    assert move["team_context_factor"] > stay["team_context_factor"]
-    assert move["proj_ppg"] > stay["proj_ppg"]
+    assert move["team_scoring_context"] > stay["team_scoring_context"]
+    assert move["projected_targets_pg"] != stay["projected_targets_pg"]
 
 
 def test_more_projected_teammate_competition_reduces_receiver_projection(
@@ -164,8 +166,8 @@ def test_more_projected_teammate_competition_reduces_receiver_projection(
     )
 
     assert crowded["teammate_competition"] > neutral["teammate_competition"]
-    assert crowded["team_context_factor"] < neutral["team_context_factor"]
-    assert crowded["proj_ppg"] < neutral["proj_ppg"]
+    # Competition enters through projected opportunity, not a separate scalar.
+    assert crowded["projected_targets_pg"] < neutral["projected_targets_pg"]
 
 
 def test_v2_reports_true_season_team_shares(league_config) -> None:
@@ -284,52 +286,6 @@ def test_receiving_role_metrics_drive_projected_opportunity(league_config) -> No
     )
 
 
-def test_balanced_score_uses_mean_floor_and_ceiling_vor(league_config) -> None:
-    receiver = season_row(
-        "wr",
-        "Distribution Receiver",
-        "WR",
-        "SEA",
-        15.0,
-        targets=130,
-        receptions=85,
-        receiving_yards=1100,
-        floor=10.0,
-        volatility=6.0,
-    )
-    mate = season_row(
-        "mate", "Distribution Mate", "WR", "SEA", 10.0, targets=90, floor=5.0, volatility=7.0
-    )
-    qb = season_row("qb", "Quarterback", "QB", "SEA", 20.0, passing_yards=4000, passing_tds=28)
-    row = (
-        build_projection_board(
-            pl.DataFrame([receiver, mate, qb]),
-            v1_board(receiver, mate),
-            wr_only_config(league_config),
-            assumptions=ProjectionAssumptions(),
-        )
-        .filter(pl.col("player_id") == "wr")
-        .to_dicts()[0]
-    )
-    metrics = league_config.metrics
-    expected = (
-        (
-            metrics.projection_mean_weight * row["proj_vor"]
-            + metrics.projection_floor_weight * row["floor_vor"]
-            + metrics.projection_ceiling_weight * row["ceiling_vor"]
-        )
-        / (
-            metrics.projection_mean_weight
-            + metrics.projection_floor_weight
-            + metrics.projection_ceiling_weight
-        )
-        * row["availability_factor"]
-    )
-
-    assert row["projected_floor"] < row["proj_ppg"] < row["projected_ceiling"]
-    assert row["v2_score"] == pytest.approx(expected)
-
-
 def test_route_participation_and_tprr_drive_targets(league_config) -> None:
     full_route = season_row(
         "full",
@@ -418,7 +374,7 @@ def test_current_depth_chart_changes_team_and_role_automatically(league_config) 
     assert "nflverse depth chart" in row["projection_reason"]
 
 
-def test_injury_and_participation_history_reduce_expected_games_and_v2_score(
+def test_injury_and_participation_history_reduce_expected_games(
     league_config,
 ) -> None:
     healthy = season_row(
@@ -465,8 +421,115 @@ def test_injury_and_participation_history_reduce_expected_games_and_v2_score(
 
     assert by_id["injured"]["proj_ppg"] == pytest.approx(by_id["healthy"]["proj_ppg"])
     assert by_id["injured"]["expected_games"] < by_id["healthy"]["expected_games"]
-    assert (
-        by_id["injured"]["availability_adjusted_vor"]
-        < by_id["healthy"]["availability_adjusted_vor"]
+    assert by_id["injured"]["projected_availability"] < by_id["healthy"]["projected_availability"]
+
+
+def test_unavailable_injury_source_does_not_imply_perfect_health(league_config) -> None:
+    unavailable = season_row(
+        "unavailable",
+        "Pre Injury Feed",
+        "WR",
+        "SEA",
+        14.0,
+        targets=120,
+        active_games=8,
+        team_games=17,
+        injury_data_available=False,
     )
-    assert by_id["injured"]["v2_score"] < by_id["healthy"]["v2_score"]
+    known_healthy = season_row(
+        "known",
+        "Known Healthy",
+        "WR",
+        "SEA",
+        14.0,
+        targets=120,
+        active_games=8,
+        team_games=17,
+        injury_data_available=True,
+    )
+    baseline = season_row("base", "Baseline", "WR", "SEA", 8.0, targets=70)
+    qb = season_row("qb", "Quarterback", "QB", "SEA", 20.0, passing_yards=4200)
+    config = wr_only_config(league_config).model_copy(update={"vor_baseline_rank": {"WR": 3}})
+
+    rows = build_projection_board(
+        pl.DataFrame([unavailable, known_healthy, baseline, qb]),
+        v1_board(unavailable, known_healthy, baseline),
+        config,
+        assumptions=ProjectionAssumptions(),
+    ).to_dicts()
+    by_id = {row["player_id"]: row for row in rows}
+
+    assert by_id["unavailable"]["expected_games"] < by_id["known"]["expected_games"]
+
+
+def test_small_samples_shrink_toward_the_ordinary_player_not_a_starter(league_config) -> None:
+    """A one-game cameo must not be projected as a starter.
+
+    The original rosterable pool anchored shrinkage on top-2x-baseline players, so a
+    0.9 PPG cameo was pulled to ~17 PPG. The all-player pool anchors on what the
+    position's ordinary player produces, and the two pools must differ in that order.
+    """
+    cameo = season_row("cameo", "Cameo Guy", "WR", "LOW", 1.0, games=1, targets=2)
+    stars = [
+        season_row(f"star{i}", f"Star {i}", "WR", "LOW", 18.0, games=17, targets=150)
+        for i in range(4)
+    ]
+    scrubs = [
+        season_row(f"scrub{i}", f"Scrub {i}", "WR", "LOW", 3.0, games=12, targets=20)
+        for i in range(6)
+    ]
+    qb = season_row("qb-low", "Low QB", "QB", "LOW", 15.0, passing_yards=3400, passing_tds=20)
+    seasons = pl.DataFrame([cameo, *stars, *scrubs, qb])
+    base = v1_board(cameo, *stars, *scrubs)
+    config = wr_only_config(league_config)
+
+    def cameo_prior(pool: str) -> float:
+        cfg = config.model_copy(
+            update={"metrics": config.metrics.model_copy(update={"projection_prior_pool": pool})}
+        )
+        board = build_projection_board(seasons, base, cfg, assumptions=ProjectionAssumptions())
+        return board.filter(pl.col("player_id") == "cameo").to_dicts()[0]["individual_prior_ppg"]
+
+    all_players = cameo_prior("all")
+    rosterable = cameo_prior("rosterable")
+
+    assert rosterable > 12.0  # anchored on the four 18-PPG starters
+    assert all_players < rosterable
+    assert all_players < 10.5  # games-weighted pool mean is ~10.2; the cameo sits below it
+
+
+def test_per_game_rates_use_active_games_when_present(league_config) -> None:
+    """A TE with 5 stat rows over 15 active games projects targets per active game.
+
+    v2 PPG already divides by participation-observed games; targets, carries, bonus,
+    and season weights must use the same denominator or the component branch scores
+    per stat-game while the outcome is per active game.
+    """
+    sparse = season_row("sparse", "Sparse End", "TE", "LOW", 3.0, games=5, targets=30)
+    sparse["ppg_denominator_games"] = 15
+    sparse["active_games"] = 15
+    dense = season_row("dense", "Dense End", "TE", "LOW", 3.0, games=15, targets=30)
+    dense["ppg_denominator_games"] = 15
+    dense["active_games"] = 15
+    starter = season_row("starter", "Starter", "TE", "LOW", 10.0, games=17, targets=100)
+    starter["ppg_denominator_games"] = 17
+    starter["active_games"] = 17
+    qb = season_row("qb-low", "Low QB", "QB", "LOW", 15.0, passing_yards=3400, passing_tds=20)
+    qb["ppg_denominator_games"] = 17
+    qb["active_games"] = 17
+    seasons = pl.DataFrame([sparse, dense, starter, qb])
+    config = league_config.model_copy(
+        update={"vor_baseline_rank": {"TE": 2}, "board_positions": ["TE"]}
+    )
+    board = build_projection_board(
+        seasons, v1_board(sparse, dense, starter), config, assumptions=ProjectionAssumptions()
+    )
+    rows = {row["player_id"]: row for row in board.iter_rows(named=True)}
+
+    # Same 30 targets over the same 15 active games: identical projection regardless of
+    # how many of those games produced a stat row.
+    assert rows["sparse"]["projected_targets_pg"] == pytest.approx(
+        rows["dense"]["projected_targets_pg"]
+    )
+    assert rows["sparse"]["effective_games"] == pytest.approx(15.0)
+    assert rows["sparse"]["proj_ppg"] == pytest.approx(rows["dense"]["proj_ppg"])

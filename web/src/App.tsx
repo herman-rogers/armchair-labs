@@ -17,9 +17,9 @@ const VIEWS: { id: View; label: string; hint: string }[] = [
 /**
  * The two metric generations, named by what they answer rather than by version.
  *
- * V1 is the actual historical board. V2 is the combined model: normalized actual
- * history plus the bottom-up forecast. Keep both the version and the meaning visible
- * so "V2" is never mistaken for a projection-only dataset.
+ * V1 is the actual historical board. V2 is the forward board: its position-specific
+ * rankers were selected from the rolling backtest and its overall order uses the
+ * fitted PPG ranker on one cross-position scale.
  */
 function versionOptions(boardSeason?: number, draftSeason?: number) {
   return [
@@ -30,8 +30,8 @@ function versionOptions(boardSeason?: number, draftSeason?: number) {
     },
     {
       id: 'v2' as MetricVersion,
-      label: draftSeason ? `V2 · ${draftSeason} Combined` : 'V2 · Combined',
-      hint: 'Normalized actual history blended with the bottom-up stat-line forecast.',
+      label: draftSeason ? `V2 · ${draftSeason} Projection` : 'V2 · Projection',
+      hint: 'Forward ranks selected by position from the rolling backtest.',
     },
   ]
 }

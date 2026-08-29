@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMatchups } from '../api/client'
 import type { MetricVersion } from '../api/types'
+import { boardMetricLabel } from '../metricPresentation'
 import { TeamCompare } from './TeamCompare'
 
 /**
@@ -46,6 +47,14 @@ export function MatchupsPanel({ version }: { version: MetricVersion }) {
           </button>
         ))}
       </div>
+
+      {data.matchups.length > 0 && (
+        <p className="legend tight faint">
+          Scores below are best-lineup {boardMetricLabel(data.matchups[0].home.metric)},
+          not forecasts for the selected week. Week changes the scheduled opponents;
+          values do not include matchup, bye, or current injury effects.
+        </p>
+      )}
 
       <div className="matchup-list">
         {data.matchups.map((matchup, index) => {

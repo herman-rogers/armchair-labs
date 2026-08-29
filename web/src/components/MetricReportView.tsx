@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMetricReport } from '../api/client'
 import type { MetricAssessment, MetricBacktestResult } from '../api/types'
+import { rankerLabel } from '../metricPresentation'
 
 const ASSESSMENTS: Array<{ id: MetricAssessment | 'all'; label: string }> = [
   { id: 'all', label: 'All evidence' },
   { id: 'strong', label: 'Strong' },
   { id: 'useful', label: 'Useful' },
+  { id: 'harmful', label: 'Harmful' },
   { id: 'redundant', label: 'Redundant' },
   { id: 'weak', label: 'Weak' },
   { id: 'mixed', label: 'Mixed' },
@@ -22,8 +24,20 @@ function percent(value: number | null) {
   return value == null ? '—' : `${Math.round(value * 100)}%`
 }
 
+function percentagePointLift(value: number | null) {
+  if (value == null) return '—'
+  const points = value * 100
+  return `${points >= 0 ? '+' : ''}${points.toFixed(1)} pp`
+}
+
 function evidenceScore(row: MetricBacktestResult) {
-  return Math.abs(row.partial_spearman ?? row.spearman ?? -1)
+  return Math.abs(row.partial_spearman ?? row.spearman ?? 0)
+}
+
+function seasonRange(seasons: number[]) {
+  if (seasons.length === 0) return 'none'
+  if (seasons.length === 1) return String(seasons[0])
+  return `${seasons[0]}–${seasons[seasons.length - 1]}`
 }
 
 export function MetricReportView({ available }: { available: boolean }) {
@@ -36,20 +50,49 @@ export function MetricReportView({ available }: { available: boolean }) {
   const [position, setPosition] = useState('ALL')
   const [group, setGroup] = useState('All groups')
   const [assessment, setAssessment] = useState<MetricAssessment | 'all'>('all')
+  const [window, setWindow] = useState('modern')
+  const [rankingTarget, setRankingTarget] = useState('actual_season_points')
+  const [fittedModel, setFittedModel] = useState('fitted_ppg')
 
   const groups = useMemo(
     () => ['All groups', ...new Set(report.data?.metrics.map((metric) => metric.group) ?? [])],
     [report.data],
   )
-  const rows = useMemo(
+  const evidenceRows = useMemo(
     () =>
       (report.data?.results ?? [])
+        .filter((row) => row.window === window)
         .filter((row) => row.target === target)
         .filter((row) => row.position === position)
-        .filter((row) => group === 'All groups' || row.group === group)
+        .filter((row) => group === 'All groups' || row.group === group),
+    [group, position, report.data, target, window],
+  )
+  const rows = useMemo(
+    () =>
+      evidenceRows
         .filter((row) => assessment === 'all' || row.assessment === assessment)
         .sort((left, right) => evidenceScore(right) - evidenceScore(left)),
-    [assessment, group, position, report.data, target],
+    [assessment, evidenceRows],
+  )
+  const modelRows = useMemo(
+    () =>
+      (report.data?.model_results ?? [])
+        .filter((row) => row.window === window)
+        .filter((row) => row.position === position),
+    [position, report.data, window],
+  )
+  const rankingRows = useMemo(
+    () =>
+      (report.data?.ranking_results ?? [])
+        .filter((row) => row.window === window && row.target === rankingTarget)
+        .sort(
+          (left, right) =>
+            ['QB', 'RB', 'WR', 'TE'].indexOf(left.position) -
+              ['QB', 'RB', 'WR', 'TE'].indexOf(right.position) ||
+            Number(left.role === 'candidate') - Number(right.role === 'candidate') ||
+            right.hit_rate - left.hit_rate,
+        ),
+    [rankingTarget, report.data, window],
   )
 
   if (!available) {
@@ -72,7 +115,7 @@ export function MetricReportView({ available }: { available: boolean }) {
         <div>
           <h2>{data.title}</h2>
           <p>
-            Rolling forecasts for {data.data_summary.completed_forecasts.join(', ')} using{' '}
+            Rolling forecasts for {seasonRange(data.data_summary.completed_forecasts)} using{' '}
             {data.configuration.history_seasons} trailing seasons.{' '}
             {data.data_summary.pending_forecasts.length > 0 &&
               `${data.data_summary.pending_forecasts.join(', ')} is saved as a pending prospective forecast.`}
@@ -83,15 +126,174 @@ export function MetricReportView({ available }: { available: boolean }) {
         </span>
       </div>
 
+      <div className="controls report-controls report-window-control">
+        <label>
+          Evidence window
+          <select value={window} onChange={(event) => setWindow(event.target.value)}>
+            {data.configuration.analysis_windows.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label} · {entry.start}–{entry.end}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="ranking-verdict">
+        <div className="ranking-heading">
+          <div>
+            <h3>Do projection rankers beat naive history?</h3>
+            <p className="legend tight">
+              Every ranker is tested on the same top-K player slice. “Beats” requires a
+              positive pooled hit-rate lift and more head-to-head fold wins than losses
+              against the best baseline available on the same seasons.
+            </p>
+          </div>
+          <label>
+            Ranking outcome
+            <select value={rankingTarget} onChange={(event) => setRankingTarget(event.target.value)}>
+              {data.configuration.ranking.targets.map((entry) => (
+                <option key={entry} value={entry}>{rankerLabel(entry)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Pos</th>
+                <th className="left">Ranker</th>
+                <th>Role</th>
+                <th>K</th>
+                <th>Hit @K</th>
+                <th>NDCG @K</th>
+                <th>Pool corr.</th>
+                <th>{rankingTarget === 'actual_ppg' ? 'Top-K PPG' : 'Top-K points'}</th>
+                <th>Hit lift</th>
+                <th title="Fold wins, ties, and losses versus the best baseline. Equal hit rates are broken by top-K actual production.">W–T–L</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankingRows.map((row) => (
+                <tr key={`${row.window}-${row.target}-${row.position}-${row.ranker}`}>
+                  <td className="strong">{row.position}</td>
+                  <td className="left name">{rankerLabel(row.ranker)}</td>
+                  <td>
+                    <span
+                      className={`ranking-role ${row.role}`}
+                      title={row.best_baseline ? `Compared with ${rankerLabel(row.best_baseline)}` : undefined}
+                    >
+                      {row.role}
+                    </span>
+                  </td>
+                  <td>{row.k}</td>
+                  <td className="strong">{percent(row.hit_rate)}</td>
+                  <td>{percent(row.ndcg)}</td>
+                  <td>{correlation(row.pool_spearman)}</td>
+                  <td title={`Ideal: ${row.ideal_top_k_actual_mean.toFixed(1)}`}>
+                    {row.top_k_actual_mean.toFixed(1)}
+                  </td>
+                  <td title={row.best_baseline ? `Versus ${rankerLabel(row.best_baseline)}` : undefined}>
+                    {percentagePointLift(row.hit_rate_lift)}
+                  </td>
+                  <td>
+                    {row.folds_won == null
+                      ? '—'
+                      : `${row.folds_won}–${row.folds_tied}–${row.folds_lost}`}
+                  </td>
+                  <td>
+                    {row.beats_baseline == null ? (
+                      '—'
+                    ) : (
+                      <span className={`ranking-verdict-badge ${row.beats_baseline ? 'passes' : 'loses'}`}>
+                        {row.beats_baseline ? 'beats' : 'does not beat'}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {(data.fitted_model_summary?.length ?? 0) > 0 && (
+        <div className="ranking-verdict">
+          <div className="ranking-heading">
+            <div>
+              <h3>Learned weights (walk-forward fitted rankers)</h3>
+              <p className="legend tight">
+                Standardized ridge coefficients, refitted each season on every earlier completed
+                fold with the ridge strength chosen by nested walk-forward validation. The small
+                number is the coefficient's spread across refits — a weight that swings is not
+                evidence.
+              </p>
+            </div>
+            <label>
+              Model
+              <select value={fittedModel} onChange={(event) => setFittedModel(event.target.value)}>
+                {[...new Set(data.fitted_model_summary.map((entry) => entry.model))].map((name) => (
+                  <option key={name} value={name}>{rankerLabel(name)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {(() => {
+            const entries = data.fitted_model_summary.filter((entry) => entry.model === fittedModel)
+            if (entries.length === 0) return null
+            const features = Object.keys(entries[0].coefficients)
+            return (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Pos</th>
+                      <th>Scope</th>
+                      <th>Train rows</th>
+                      <th>λ</th>
+                      <th>Refits</th>
+                      {features.map((feature) => (
+                        <th key={feature}>{rankerLabel(feature)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry) => (
+                      <tr key={`${entry.model}-${entry.position}`}>
+                        <td className="strong">{entry.position}</td>
+                        <td className="dim">{entry.scope}</td>
+                        <td>{entry.n_train}</td>
+                        <td className="dim">{entry.ridge_lambda ?? '—'}</td>
+                        <td>{entry.refits}</td>
+                        {features.map((feature) => (
+                          <td key={feature}>
+                            <span className="strong">{correlation(entry.coefficients[feature] ?? null)}</span>
+                            {entry.coefficient_sd_across_refits[feature] != null && (
+                              <span className="dim"> ±{entry.coefficient_sd_across_refits[feature].toFixed(2)}</span>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
       <div className="report-cards">
-        {(['strong', 'useful', 'redundant', 'weak'] as MetricAssessment[]).map((key) => (
+        {(['strong', 'useful', 'harmful', 'redundant', 'weak'] as MetricAssessment[]).map((key) => (
           <button
             type="button"
             className={`report-card ${key}`}
             key={key}
             onClick={() => setAssessment(key)}
           >
-            <span>{data.data_summary.assessment_counts[key] ?? 0}</span>
+            <span>{evidenceRows.filter((row) => row.assessment === key).length}</span>
             {key}
           </button>
         ))}
@@ -136,7 +338,8 @@ export function MetricReportView({ available }: { available: boolean }) {
       <p className="legend tight">
         Spearman measures next-season rank association. “Partial vs prior” measures what remains
         after controlling for the historical PPG prior. Consistency is the share of forecast years
-        agreeing with the pooled direction. Negative values can still be predictive.
+        agreeing with the pooled direction. “Harmful” means a repeatable signal points opposite
+        the metric's configured expected direction.
       </p>
 
       <div className="table-wrap">
@@ -148,7 +351,7 @@ export function MetricReportView({ available }: { available: boolean }) {
               <th>Assessment</th>
               <th>Spearman</th>
               <th>Partial vs prior</th>
-              <th>95% interval</th>
+              <th>Fold 2.5–97.5%</th>
               <th>Consistency</th>
               <th>Coverage</th>
               <th>N</th>
@@ -191,6 +394,40 @@ export function MetricReportView({ available }: { available: boolean }) {
 
       {rows.length === 0 && <div className="notice">No metrics match these filters.</div>}
 
+      <h3 className="section-head">Direct forecast calibration</h3>
+      <p className="legend tight">
+        Error measures apply only where a projection and outcome share the same units. Positive
+        bias means the model over-projected the outcome; rank correlation measures ordering.
+      </p>
+      <div className="table-wrap calibration-table">
+        <table>
+          <thead>
+            <tr>
+              <th className="left">Projection</th>
+              <th className="left">Outcome</th>
+              <th>MAE</th>
+              <th>RMSE</th>
+              <th>Bias</th>
+              <th>Rank corr.</th>
+              <th>N</th>
+            </tr>
+          </thead>
+          <tbody>
+            {modelRows.map((row) => (
+              <tr key={`${row.metric}-${row.target}-${row.position}`}>
+                <td className="left name">{row.label}</td>
+                <td className="left dim">{row.target_label}</td>
+                <td>{row.mae.toFixed(2)}</td>
+                <td>{row.rmse.toFixed(2)}</td>
+                <td>{correlation(row.bias)}</td>
+                <td>{correlation(row.spearman)}</td>
+                <td>{row.n}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <details className="metric-catalog">
         <summary>Metric catalog ({data.metrics.length})</summary>
         <div className="catalog-grid">
@@ -200,6 +437,8 @@ export function MetricReportView({ available }: { available: boolean }) {
               <p>{metric.description}</p>
               <span className="faint">
                 {metric.available ? `${percent(metric.coverage)} historical coverage` : 'Unavailable in artifact'}
+                {metric.available_from_forecast != null &&
+                  ` · evaluated from ${metric.available_from_forecast}`}
               </span>
             </article>
           ))}

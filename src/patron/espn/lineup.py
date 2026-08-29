@@ -212,7 +212,15 @@ def value_column_for(board: pl.DataFrame) -> str:
     projection matters for a schedule scan, where the question is about weeks that
     have not happened yet.
     """
-    for candidate in ("adj_proj_vor", "v2_score", "adj_vor", "vor", "ppg"):
+    for candidate in (
+        "v2_overall_vor",
+        "v2_rank_vor",
+        "adj_proj_vor",
+        "v2_score",
+        "adj_vor",
+        "vor",
+        "ppg",
+    ):
         if candidate in board.columns:
             return candidate
     raise ValueError("board carries no usable strength column")

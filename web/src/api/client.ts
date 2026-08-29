@@ -9,7 +9,6 @@ import type {
   MetricReport,
   OpponentsResponse,
   RosterResponse,
-  ScheduleResponse,
   Status,
   TransactionsResponse,
   UnrankableResponse,
@@ -75,9 +74,6 @@ export const fetchMatchups = (version: MetricVersion, week?: number) =>
   get<MatchupsResponse>(
     `/api/league/matchups?version=${version}${week ? `&week=${week}` : ''}`,
   )
-
-export const fetchSchedule = (version: MetricVersion) =>
-  get<ScheduleResponse>(`/api/league/schedule?version=${version}`)
 
 export const fetchCompare = (left: number, right: number, version: MetricVersion) =>
   get<CompareResponse>(`/api/league/compare?left=${left}&right=${right}&version=${version}`)

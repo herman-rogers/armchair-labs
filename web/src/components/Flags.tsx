@@ -1,7 +1,7 @@
 /** Renders the board's flag string as coloured chips.
  *
- * The colours carry the meaning the flags carry: green is an opportunity to buy,
- * red is a price to sell into, amber is a discount, blue is "verify this sample".
+ * These are historical evidence, not guarantees. Colours distinguish the signal
+ * families; the tooltip states the uncertainty the short label cannot.
  */
 
 const CLASSES: Record<string, string> = {
@@ -11,9 +11,9 @@ const CLASSES: Record<string, string> = {
 }
 
 const TITLES: Record<string, string> = {
-  BUY: 'Scored well under expectation with real volume behind it — the price is wrong in your favour.',
-  'TD-luck': 'Scored well over expectation — the price is built on luck that will not repeat.',
-  age: 'Running back at or past the 27.5 age cliff. A discount, not a disqualification.',
+  BUY: 'Scored below the volume-only touchdown expectation with meaningful opportunity. A regression candidate, not a guarantee.',
+  'TD-luck': 'Scored above the volume-only touchdown expectation. This may regress, but high-value usage can be repeatable.',
+  age: 'Running back at or past 27.5. V2 uses a gradual age curve; this historical flag is supporting evidence only.',
 }
 
 export function Flags({ value }: { value: string }) {

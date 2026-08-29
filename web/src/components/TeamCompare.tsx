@@ -1,4 +1,5 @@
 import type { LineupSlot, TeamStrength } from '../api/types'
+import { boardMetricLabel } from '../metricPresentation'
 
 function Side({ team, opponent }: { team: TeamStrength; opponent: TeamStrength }) {
   const ahead = team.total > opponent.total
@@ -145,9 +146,10 @@ export function TeamCompare({
       </div>
 
       <p className="legend tight faint">
-        Best fieldable lineup by <code>{left.metric}</code>, not a weekly projection — it
-        does not know byes, this week’s injury report, or opponent. Kicker and defense
-        slots are excluded because this league tiers those rather than ranking them.
+        Best fieldable lineup by {boardMetricLabel(left.metric)}, not projected weekly
+        points — it does not know byes, this week’s injury report, or opponent. Kicker
+        and defense slots are excluded because this league tiers those rather than
+        ranking them.
       </p>
     </div>
   )

@@ -56,21 +56,9 @@ metrics:
   # Effective games needed before a player's multi-year PPG prior mostly stands on
   # its own. Smaller samples are pulled toward the position mean.
   projection_shrinkage_games: 8.0
-  # Fraction of last season's rushing/receiving TD over-expectation removed.
-  projection_td_regression: 0.50
-  # Share of a player's historical big-play bonus rate retained; the rest regresses
-  # toward the positional rate because long touchdowns are volatile.
-  projection_bonus_retention: 0.35
-  # Maximum team-context change in either direction before a manual role multiplier.
-  projection_team_context_cap: 0.18
   # V2 combines a bottom-up projected stat line with the normalized historical PPG
   # branch. This is the bottom-up branch's share of projected PPG.
   projection_component_weight: 0.65
-  # Overall v2 draft score weights. These sum to 1 and keep expected value primary
-  # while allowing historical floor/volatility to describe roster utility.
-  projection_mean_weight: 0.75
-  projection_floor_weight: 0.15
-  projection_ceiling_weight: 0.10
   # Expected-games projections preserve PPG as ability per active game, then scale
   # VOR by availability for the actual draft rank.
   projection_season_games: 17
@@ -82,3 +70,38 @@ metrics:
   projection_route_weight: 0.55
   # Maximum automatic role change from the current nflverse depth-chart rank.
   projection_depth_chart_cap: 0.18
+  # Which players define the positional priors that small samples shrink toward and
+  # that anchor every projected rate (target share, catch rate, TD rates, ...).
+  #   all        — every player-season at the position (games-weighted). A three-game
+  #                player shrinks toward what three-game players actually become.
+  #   rosterable — the top 2x-baseline-rank players with 8+ games. This was the
+  #                original v2 choice; the 2026-08-29 backtest showed it pulls every
+  #                low-sample player toward starter production (+2 to +7 PPG below
+  #                rank 36) and cost ~0.09 rank correlation. Retained for comparison.
+  projection_prior_pool: all
+  # Which v2 output ranks each position on the live board. Chosen from the metric
+  # report's "does v2 beat the naive baseline" table (docs/v2_metrics_review.md §8):
+  # the walk-forward fitted ranker wins at QB/WR/TE, the bottom-up projection at RB.
+  # fitted_* columns come from the pending-season models in data/outputs/
+  # metric_report.json; if that report is absent the position falls back.
+  projection_rank_key:
+    QB: fitted_ppg
+    RB: fitted_ppg
+    WR: fitted_season_points
+    TE: ppg
+  projection_rank_fallback: adj_proj_vor
+  # Cross-position (overall) order: the metric report's OVERALL test ranks every
+  # position by one key as per-game VOR against its own replacement. The fitted
+  # season-points projection beat the naive baselines 7-0-0 (modern) and 15-0-4
+  # (2007-2025); the hand-built v2_score/proj_ppg overall orders lost to naive.
+  projection_overall_key: fitted_season_points
+  # Roster simulation inputs (League team-strength rating and lineup scans). The
+  # roster-level expected weekly points, risk, and floor are built from these three
+  # per-player fields, so they follow the backtest's choice: the fitted per-game mean
+  # and the fitted games projection (availability = fitted_games / 17). Volatility is
+  # the historical weekly-shape ratio rescaled to the fitted mean; it is not yet
+  # backtested at the roster level. Fallbacks apply in order when a column is absent.
+  roster_mean_columns: [fitted_ppg, proj_ppg, ppg]
+  roster_games_columns: [fitted_games]
+  roster_availability_columns: [projected_availability]
+  roster_volatility_columns: [projected_volatility, volatility]

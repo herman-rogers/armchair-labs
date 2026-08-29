@@ -250,10 +250,11 @@ under the league rules produces `component_proj_ppg`.
 
 `projected PPG = 35% prior_branch_ppg + 65% component_proj_ppg`
 
-The weight is configurable. Keeping both branches prevents an incomplete stat feed or
-unstable efficiency estimate from replacing the strong signal in multi-year league
-PPG, while the majority component weight allows an excellent role with poor prior
-results to move meaningfully.
+The weight is configurable. `proj_ppg` and its VOR (`proj_vor`, `adj_proj_vor` with
+overrides) remain as the hand-built projection, but since the 2026-08-29 review they
+are **inputs and diagnostics, not the sort**: `component_proj_ppg` and
+`historical_ppg_prior` are features of the walk-forward fitted rankers, and the board
+ranks on the fitted outputs (see §10).
 
 ### 6. Floor, volatility, and ceiling
 
@@ -263,22 +264,30 @@ positional profiles and applied to the forward mean:
 
 - `projected_floor`: projected 25th-percentile score;
 - `projected_volatility`: projected weekly standard deviation;
-- `projected_ceiling = projected PPG + 0.674 × projected volatility`, an approximate
-  75th-percentile outcome.
+- `projected_ceiling = projected PPG + 0.674 × projected volatility`.
 
-Replacement floor and ceiling are recomputed by position to produce `floor_vor` and
-`ceiling_vor` alongside expected `proj_vor`.
+These are descriptive fields and roster-risk inputs (the League team-strength rating
+rescales `projected_volatility` to the fitted mean). The former floor/ceiling VOR blend
+(`v2_score`) was removed after the backtest showed it lost to both the naive baseline
+and the fitted rankers on cross-position draft value.
 
-### 7. Balanced v2 score
+### 7. Removed after backtesting
 
-The configurable default is:
+The 2026-08-29 review (`docs/v2_metrics_review.md`) ablated every prior-branch
+adjustment against 22 seasons of folds. The following were removed because they
+carried no repeatable signal, and their config keys are gone:
 
-`v2_score = 75% projected VOR + 15% floor VOR + 10% ceiling VOR + manual override`
+- `td_regression_adjustment` (partial regression of last season's TD over-expectation);
+- `bonus_regression_adjustment` (big-play bonus regression toward the position);
+- `team_context_factor` (the ±18% capped scalar comparing destination and source
+  team environment — team context still enters the component branch through projected
+  team volume, TD rates, and teammate availability);
+- `v2_score`, `floor_vor`, `ceiling_vor`, `availability_adjusted_vor`,
+  `expected_season_points`, and `availability_factor` (composites superseded by the
+  fitted outputs).
 
-Expected value remains dominant, with a slight floor preference appropriate to a
-weekly head-to-head league. The weights are normalized at calculation time.
-`adj_proj_vor` remains available as pure expected VOR plus the override; `v2_score` is
-the actual v2 sort key.
+What survived the ablation and remains in the prior branch: the all-player shrinkage
+prior, the age curve, and the depth-chart role factor.
 
 ### 8. Current depth charts and explicit future assumptions
 
@@ -305,10 +314,26 @@ receive 25%, with OUT, DOUBTFUL, and QUESTIONABLE carrying decreasing missed-gam
 equivalents. The result is shrunk toward a configurable 94% availability prior over a
 17-game shrinkage sample.
 
-V2 exports `expected_games`, `expected_season_points`, and
-`availability_adjusted_vor`. The final v2 score scales expected, floor, and ceiling VOR
-by expected-games share before applying a manual override. Thus injury risk affects
-draft rank without contaminating per-active-game `proj_ppg`.
+V2 exports `expected_games` and `projected_availability`. They are features of the
+fitted games model (`fitted_games`), which is what turns fitted PPG into fitted season
+points; injury risk therefore affects draft rank without contaminating
+per-active-game `proj_ppg`.
+
+### 10. Fitted rankers and the board sort
+
+`src/patron/metrics/fit.py` fits walk-forward per-position ridge models on the
+completed backtest folds (`metric_report.yaml` → `fit.models`): `fitted_ppg`
+(per-active-game), `fitted_games` (calibrated availability on the full population),
+`fitted_season_points = fitted_ppg × fitted_games`, plus the direct and two-stage
+season-points variants that compete in the report. The live board applies the stored
+2026 models only when the report's artifact matches the current fit config, season,
+depth-chart cutoff, and snapshot.
+
+`league.yaml` → `projection_rank_key` picks each position's within-position key from
+the report's evidence (`fitted_ppg` QB/RB, `fitted_season_points` WR, last-season
+`ppg` TE); `projection_overall_key` (`fitted_season_points`) sets the cross-position
+order as per-game VOR against its own replacement (`v2_overall_vor`). The League
+team-strength rating reads the same fitted mean and games (`roster_*_columns`).
 
 ### ESPN's deliberately limited role
 

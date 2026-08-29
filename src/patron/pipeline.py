@@ -16,6 +16,7 @@ from typing import Any
 import polars as pl
 
 from patron.board.builder import build_board, build_player_seasons
+from patron.board.rank import apply_rank_key
 from patron.config.league import LeagueConfig, get_league
 from patron.config.settings import Settings, get_settings
 from patron.data import nflverse
@@ -27,11 +28,26 @@ from patron.metrics.backtest import (
 )
 from patron.metrics.backtest import build_metric_report as analyze_metric_report
 from patron.metrics.enrichment import (
+    build_expected_opportunity,
     build_injury_history,
+    build_market_rankings,
+    build_nextgen_features,
+    build_player_efficiency,
     build_player_usage,
+    build_team_tendencies,
     build_team_volume,
-    current_depth_chart,
+    depth_chart_as_of,
     enrich_player_seasons,
+    normalize_ppg_for_active_games,
+    validate_participation_usage,
+)
+from patron.metrics.fit import (
+    FittedArtifactError,
+    apply_fitted_models,
+    build_fit_artifact,
+    check_fit_artifact,
+    fit_walk_forward,
+    models_for_season,
 )
 from patron.metrics.projection import METRIC_VERSION, build_projection_board
 from patron.scoring.bonuses import BonusAudit, extract_touchdown_bonuses
@@ -94,11 +110,93 @@ def load_bonuses(
     return frame, audit
 
 
+def _season_equivalent(board: pl.DataFrame, season_games: int) -> pl.DataFrame:
+    """Fitted season points as a per-scheduled-game rate; the waiver-comparison value."""
+    source = (
+        pl.col("fitted_season_points") / float(season_games)
+        if "fitted_season_points" in board.columns
+        else pl.lit(None, dtype=pl.Float64)
+    )
+    return board.with_columns(source.alias("season_equivalent_ppg"))
+
+
+def load_fitted_models(
+    report_path: Path,
+    forecast_season: int,
+    report_config: MetricReportConfig,
+    live_depth_latest: str | None,
+) -> dict[str, Any]:
+    """Per-position fitted models for the draft season, from the last metric report.
+
+    The artifact must have been fitted for this season, with this fit configuration and
+    depth-chart cutoff, on the same depth-chart snapshot the live board selected.  Any
+    mismatch yields no models: the fitted columns stay null and ``apply_rank_key``
+    falls back to the configured key with a logged warning, never a silent zero.
+    """
+    if not report_path.exists():
+        logger.warning("no metric report at %s; fitted ranker unavailable", report_path)
+        return {}
+    report = json.loads(report_path.read_text())
+    try:
+        check_fit_artifact(
+            report.get("fitted_artifact"),
+            report_config.fit,
+            forecast_season,
+            report_config.depth_chart_cutoff,
+            live_depth_latest,
+        )
+    except FittedArtifactError as error:
+        logger.warning("fitted ranker rejected: %s; falling back to %s", error, "v2_score")
+        return {}
+    models = models_for_season(report.get("fitted_models") or [], forecast_season)
+    if not models:
+        logger.warning("metric report has no fitted models for %s", forecast_season)
+    else:
+        logger.info(
+            "fitted ranker loaded for %s (%s): %s",
+            forecast_season,
+            report["fitted_artifact"]["fingerprint"],
+            ", ".join(sorted(models)),
+        )
+    return models
+
+
+def load_draft_depth_chart(
+    config: LeagueConfig,
+    report_config: MetricReportConfig,
+) -> pl.DataFrame | None:
+    """Depth chart for the draft season, selected exactly as the backtest selects it.
+
+    The pending backtest fold scores the draft season on the last snapshot published
+    on or before the configured cutoff; the live board must use the same snapshot or
+    the fitted weights are applied to inputs they were never validated on.
+    """
+    frames: list[pl.DataFrame] = []
+    for season in sorted({config.board_season, config.draft_season}):
+        try:
+            frames.append(nflverse.load_depth_charts([season]))
+        except Exception:  # noqa: BLE001 - one missing season must not erase the board
+            logger.warning("depth charts unavailable for %s", season)
+    depth = pl.concat(frames, how="diagonal_relaxed") if frames else None
+    selected = depth_chart_as_of(depth, config.draft_season, report_config.depth_chart_cutoff)
+    if selected is None:
+        logger.warning(
+            "no depth chart on or before %s-%s",
+            config.draft_season,
+            report_config.depth_chart_cutoff,
+        )
+    else:
+        latest = selected["depth_chart_date"].cast(pl.String).max()
+        logger.info("draft depth chart: %s players, latest snapshot %s", selected.height, latest)
+    return selected
+
+
 def build(
     config: LeagueConfig | None = None,
     settings: Settings | None = None,
     force: bool = False,
     strict_overrides: bool = True,
+    report_config: MetricReportConfig | None = None,
 ) -> BuildResult:
     """Run the full Phase 1 pipeline and return every artifact it produced."""
     config = config or get_league()
@@ -110,13 +208,14 @@ def build(
 
     player_seasons = build_player_seasons(weeks, bonuses, config)
     team_volume = build_team_volume(nflverse.load_team_weeks(config.seasons))
+    participation_seasons = [season for season in config.seasons if season >= 2016]
     usage = cached_frame(
-        "projection_usage_v2",
+        "projection_usage_v3",
         config.seasons,
         lambda: build_player_usage(
             weeks,
             nflverse.load_projection_plays(config.seasons),
-            nflverse.load_participation(config.seasons),
+            nflverse.load_participation(participation_seasons),
         ),
         force=force,
         settings=settings,
@@ -128,7 +227,17 @@ def build(
         team_volume,
         injury_history,
     )
-    depth_chart = current_depth_chart(nflverse.load_depth_charts([config.board_season]))
+    validate_participation_usage(usage, participation_seasons)
+    player_seasons = player_seasons.with_columns(
+        (pl.col("season") >= 2009).alias("injury_data_available"),
+        (pl.col("season") >= 2016).alias("participation_data_available"),
+    )
+    projection_seasons = normalize_ppg_for_active_games(player_seasons)
+    report_config = report_config or MetricReportConfig.from_config()
+    depth_chart = load_draft_depth_chart(config, report_config)
+    live_depth_latest = (
+        depth_chart["depth_chart_date"].cast(pl.String).max() if depth_chart is not None else None
+    )
     birth_dates = nflverse.load_birth_dates(config.board_season)
     board = build_board(
         player_seasons,
@@ -136,11 +245,33 @@ def build(
         config=config,
         strict_overrides=strict_overrides,
     ).with_columns(pl.lit("v1").alias(METRIC_VERSION))
+    projection_base = build_board(
+        projection_seasons,
+        birth_dates,
+        config=config,
+        strict_overrides=strict_overrides,
+    ).with_columns(pl.lit("v1").alias(METRIC_VERSION))
     board_v2 = build_projection_board(
-        player_seasons,
-        board,
+        projection_seasons,
+        projection_base,
         config,
         current_players=depth_chart,
+    )
+    board_v2 = apply_rank_key(
+        _season_equivalent(
+            apply_fitted_models(
+                board_v2,
+                load_fitted_models(
+                    settings.outputs_dir / "metric_report.json",
+                    config.draft_season,
+                    report_config,
+                    live_depth_latest,
+                ),
+                report_config.fit,
+            ),
+            config.metrics.projection_season_games,
+        ),
+        config,
     )
 
     board_weeks = weeks.filter(pl.col("season") == config.board_season)
@@ -159,7 +290,7 @@ def build(
     return BuildResult(
         board=board,
         board_v2=board_v2,
-        player_seasons=player_seasons,
+        player_seasons=projection_seasons,
         kickers=kickers,
         defenses=defenses,
         bonus_audit=audit,
@@ -184,26 +315,73 @@ def build_metric_report(
     bonuses, _ = load_bonuses(history_config, force=force)
     player_seasons = build_player_seasons(weeks, bonuses, history_config)
     team_volume = build_team_volume(nflverse.load_team_weeks(history_config.seasons))
+    participation_seasons = [season for season in history_config.seasons if season >= 2016]
+    projection_plays = nflverse.load_projection_plays(history_config.seasons)
     usage = cached_frame(
-        "metric_report_usage_v2",
+        "metric_report_usage_v4",
         history_config.seasons,
         lambda: build_player_usage(
             weeks,
-            nflverse.load_projection_plays(history_config.seasons),
-            nflverse.load_participation(history_config.seasons),
+            projection_plays,
+            nflverse.load_participation(participation_seasons),
         ),
         force=force,
         settings=settings,
     )
-    injuries = build_injury_history(nflverse.load_injuries(history_config.seasons))
-    player_seasons = enrich_player_seasons(player_seasons, usage, team_volume, injuries)
+    injury_seasons = [season for season in history_config.seasons if season >= 2009]
+    injuries = build_injury_history(nflverse.load_injuries(injury_seasons))
+    expected_seasons = [season for season in history_config.seasons if season >= 2006]
+    expected_opportunity = cached_frame(
+        "metric_report_expected_opportunity_v1",
+        expected_seasons,
+        lambda: build_expected_opportunity(
+            nflverse.load_expected_opportunity(expected_seasons), weeks
+        ),
+        force=force,
+        settings=settings,
+    )
+    nextgen_seasons = [season for season in history_config.seasons if season >= 2016]
+    nextgen = cached_frame(
+        "metric_report_nextgen_v2",
+        nextgen_seasons,
+        lambda: build_nextgen_features(
+            nflverse.load_nextgen_stats(nextgen_seasons, "passing"),
+            nflverse.load_nextgen_stats(nextgen_seasons, "receiving"),
+            nflverse.load_nextgen_stats(nextgen_seasons, "rushing"),
+        ),
+        force=force,
+        settings=settings,
+    )
+    team_tendencies = cached_frame(
+        "metric_report_team_tendencies_v1",
+        history_config.seasons,
+        lambda: build_team_tendencies(projection_plays),
+        force=force,
+        settings=settings,
+    )
+    player_seasons = enrich_player_seasons(
+        player_seasons,
+        usage,
+        team_volume,
+        injuries,
+        player_efficiency=build_player_efficiency(weeks),
+        expected_opportunity=expected_opportunity,
+        nextgen_features=nextgen,
+        team_tendencies=team_tendencies,
+    )
+    validate_participation_usage(usage, participation_seasons)
+    player_seasons = player_seasons.with_columns(
+        (pl.col("season") >= 2009).alias("injury_data_available"),
+        (pl.col("season") >= 2016).alias("participation_data_available"),
+    )
+    player_seasons = normalize_ppg_for_active_games(player_seasons)
 
     birth_frames: list[pl.DataFrame] = []
     for season in report_config.input_seasons:
         try:
             birth_frames.append(nflverse.load_birth_dates(season))
         except Exception:  # noqa: BLE001 - one historical roster should not erase the report
-            logger.warning("birth dates unavailable for %s", season, exc_info=True)
+            logger.warning("birth dates unavailable for %s", season)
     if not birth_frames:
         raise RuntimeError("no roster birth dates were available for the metric report")
     birth_dates = pl.concat(birth_frames, how="diagonal_relaxed").unique(
@@ -212,13 +390,13 @@ def build_metric_report(
 
     depth_frames: list[pl.DataFrame] = []
     for season in report_config.forecast_seasons:
+        if season < report_config.depth_chart_start_season:
+            continue
         try:
             depth_frames.append(nflverse.load_depth_charts([season]))
         except Exception:  # noqa: BLE001 - projection falls back cleanly without depth charts
-            logger.warning("depth charts unavailable for %s", season, exc_info=True)
-    depth_charts = (
-        pl.concat(depth_frames, how="diagonal_relaxed") if depth_frames else None
-    )
+            logger.warning("depth charts unavailable for %s", season)
+    depth_charts = pl.concat(depth_frames, how="diagonal_relaxed") if depth_frames else None
 
     predictions = build_backtest_predictions(
         player_seasons,
@@ -226,8 +404,52 @@ def build_metric_report(
         config,
         report_config,
         depth_charts=depth_charts,
+        market_rankings=build_market_rankings(
+            nflverse.load_fantasy_rankings(),
+            nflverse.load_id_crosswalk(),
+            report_config.depth_chart_cutoff,
+        ),
     )
-    report = analyze_metric_report(predictions, report_config)
+    report, predictions = _analyze_with_fit(predictions, report_config)
+    return MetricReportBuildResult(report=report, predictions=predictions)
+
+
+def _analyze_with_fit(
+    predictions: pl.DataFrame,
+    report_config: MetricReportConfig,
+) -> tuple[dict[str, Any], pl.DataFrame]:
+    predictions = predictions.drop(
+        [
+            c
+            for c in (*report_config.fit.output_columns, "actual_played")
+            if c in predictions.columns
+        ]
+    )
+    predictions, fitted_models = fit_walk_forward(predictions, report_config.fit)
+    artifact = build_fit_artifact(report_config.fit, predictions, report_config.depth_chart_cutoff)
+    report = analyze_metric_report(
+        predictions, report_config, fitted_models=fitted_models, fitted_artifact=artifact
+    )
+    return report, predictions
+
+
+def reanalyze_metric_report(
+    settings: Settings | None = None,
+    report_config: MetricReportConfig | None = None,
+) -> MetricReportBuildResult:
+    """Refit and re-score from the retained fold predictions without rebuilding them.
+
+    Ranking-contract or fitted-model changes need no nflverse rebuild; only changes to
+    the projection itself or the historical data do.
+    """
+    settings = settings or get_settings()
+    report_config = report_config or MetricReportConfig.from_config()
+    path = settings.outputs_dir / "metric_backtest_predictions.parquet"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no retained fold predictions at {path}; run `patron metric-report`"
+        )
+    report, predictions = _analyze_with_fit(pl.read_parquet(path), report_config)
     return MetricReportBuildResult(report=report, predictions=predictions)
 
 
@@ -275,7 +497,18 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "depth_chart_position_group",
     "depth_chart_date",
     "depth_role_factor",
-    "v2_score",
+    "v2_overall_vor",
+    "v2_position_rank",
+    "v2_rank_key",
+    "v2_rank_value",
+    "v2_rank_vor",
+    "fitted_ppg",
+    "fitted_games",
+    "fitted_season_points",
+    "fitted_season_points_direct",
+    "fitted_return_prob",
+    "fitted_games_if_played",
+    "fitted_two_stage",
     "adj_proj_vor",
     "proj_vor",
     "proj_ppg",
@@ -287,23 +520,15 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "projected_floor",
     "projected_ceiling",
     "projected_volatility",
-    "floor_vor",
-    "ceiling_vor",
     "projection_confidence",
     "availability_confidence",
     "projected_availability",
-    "availability_factor",
     "expected_games",
-    "expected_season_points",
     "season_equivalent_ppg",
-    "availability_adjusted_vor",
     "historical_injury_report_weeks",
     "injury_missed_equivalents",
     "effective_games",
     "age_factor",
-    "td_regression_adjustment",
-    "bonus_regression_adjustment",
-    "team_context_factor",
     "qb_context",
     "team_scoring_context",
     "team_pass_volume",
@@ -362,13 +587,17 @@ def export_markdown(board: pl.DataFrame, path: Path, limit: int | None = None) -
     rows = board.head(limit) if limit else board
     is_v2 = "proj_ppg" in rows.columns
     version = "v2 projected" if is_v2 else "v1 historical"
-    vor_column = "v2_score" if is_v2 else "adj_vor"
+    vor_column = (
+        ("v2_overall_vor" if "v2_overall_vor" in rows.columns else "v2_score")
+        if is_v2
+        else "adj_vor"
+    )
     ppg_column = "proj_ppg" if is_v2 else "ppg"
     team_column = "projected_team" if is_v2 else "team"
     lines = [
         f"# Overall Draft Board ({version}) — {rows.height} players",
         "",
-        f"Rank | Player | Pos | Team | {'V2 Score' if is_v2 else 'VOR'} | PPG | Flags | Notes",
+        f"Rank | Player | Pos | Team | {'Overall VOR' if is_v2 else 'VOR'} | PPG | Flags | Notes",
         "---|---|---|---|---|---|---|---",
     ]
     for row in rows.iter_rows(named=True):
