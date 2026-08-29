@@ -33,6 +33,11 @@ export interface Player {
   override_reason: string | null
   /** v2 forward-looking fields; absent on the historical v1 artifact. */
   projected_team?: string
+  depth_chart_rank?: number | null
+  depth_chart_position?: string | null
+  depth_chart_position_group?: string | null
+  depth_chart_date?: string | null
+  depth_role_factor?: number
   v2_score?: number
   adj_proj_vor?: number
   proj_vor?: number
@@ -48,6 +53,15 @@ export interface Player {
   floor_vor?: number
   ceiling_vor?: number
   projection_confidence?: number
+  availability_confidence?: number
+  projected_availability?: number
+  availability_factor?: number
+  expected_games?: number
+  expected_season_points?: number
+  season_equivalent_ppg?: number
+  availability_adjusted_vor?: number
+  historical_injury_report_weeks?: number
+  injury_missed_equivalents?: number
   effective_games?: number
   age_factor?: number
   td_regression_adjustment?: number
@@ -56,6 +70,7 @@ export interface Player {
   qb_context?: number
   team_scoring_context?: number
   team_pass_volume?: number
+  team_dropbacks?: number
   team_rush_volume?: number
   teammate_competition?: number
   season_target_share?: number | null
@@ -65,12 +80,20 @@ export interface Player {
   projected_wopr?: number
   projected_air_yards_share?: number
   projected_targets_pg?: number
+  projected_route_opportunities_pg?: number
+  projected_route_participation?: number
+  projected_targets_per_route_opportunity?: number
   projected_carries_pg?: number
   projected_receptions_pg?: number
   projected_receiving_yards_pg?: number
   projected_rushing_yards_pg?: number
   projected_receiving_tds_pg?: number
   projected_rushing_tds_pg?: number
+  projected_red_zone_targets_pg?: number
+  projected_end_zone_targets_pg?: number
+  projected_red_zone_carries_pg?: number
+  projected_goal_line_carries_pg?: number
+  projected_pass_attempts_pg?: number
   projected_passing_yards_pg?: number
   projected_passing_tds_pg?: number
   projected_interceptions_pg?: number
@@ -149,6 +172,14 @@ export interface LeagueTeam {
   losses: number
   faab_remaining: number | null
   is_mine: boolean
+  division_id: number | null
+  division_name: string | null
+  /** League-relative roster strength: 5.0 is average, 1.5 points is one SD. */
+  team_score: number
+  team_rank: number
+  scored_players: number
+  /** Players without nflverse tape whose ESPN projection supplied the fallback. */
+  fallback_players: number
 }
 
 export interface LeagueResponse extends Freshness {

@@ -31,7 +31,11 @@ projected VOR. It adds:
 - projected-team context: quarterback quality, offensive volume, scoring environment,
   and the opportunity occupied by the strongest teammate;
 - explicit future assumptions for trades, quarterback changes, and role changes;
-- a confidence field measuring how much historical sample supports the estimate.
+- nflverse route-opportunity participation, targets per route opportunity, official
+  pass attempts/dropbacks, high-value rushing/receiving usage, current depth charts,
+  and injury-report history;
+- expected games and availability-adjusted VOR alongside per-active-game PPG;
+- confidence fields measuring support for both production and availability estimates.
 
 V2 is intentionally labeled a transparent projection, not a trained forecasting
 model. Its coefficients are bounded heuristics and need backtesting as additional
@@ -168,7 +172,7 @@ position. The age curve and relative team-context factor are then applied. This 
 For every team-season, v2 calculates:
 
 - passing fantasy context per game;
-- team target and carry volume per game;
+- official pass attempts, dropbacks, and carry volume per game;
 - offensive TDs per game;
 - passing TDs per target and rushing TDs per carry;
 - the largest teammate target share;
@@ -180,8 +184,8 @@ team effect is capped at ±18%, preventing one unstable team statistic from domi
 
 ### 3. Projected opportunity
 
-V2 calculates true target and carry share from player opportunities divided by team
-opportunities. Each is recency-weighted and shrunk according to its target/carry
+V2 calculates target share against official team pass attempts and carry share against
+team carries. Each is recency-weighted and shrunk according to its target/carry
 sample.
 
 Receiving role blends correlated metrics deliberately:
@@ -192,9 +196,18 @@ WOPR therefore contributes air-yard role information without counting target sha
 twice at full weight. Teammate availability then adjusts the share. RB carry share is
 adjusted by the strongest competing back.
 
-Projected targets use three anchors:
+The nflverse participation feed identifies which offensive players were present on a
+dropback, but it does not prove that every eligible RB/TE released into a route. V2
+therefore names this input `route_opportunities`, not charted routes. It separately
+shrinks route-opportunity participation and targets per route opportunity (TPRR).
 
-`targets/game = 65% team-share estimate + 20% historical target rate + 15% raw weighted-opportunity estimate`
+When participation is available, projected targets use:
+
+`route targets = projected team dropbacks × route-opportunity participation × TPRR`
+
+The route estimate receives 55% weight. The remaining branch blends target share
+against official attempts, historical target rate, and raw weighted opportunity.
+Without participation data, v2 falls back cleanly to that remaining branch.
 
 Projected carries use 75% team carry-share volume and 25% normalized historical
 carries/game. All historical anchors respond to projected team pass/rush volume, and
@@ -211,13 +224,21 @@ The component model separately shrinks:
 - rushing TDs per carry;
 - big-play bonus points per opportunity.
 
+Receiving touchdowns are decomposed into projected end-zone targets, end-zone
+conversion, and non-end-zone TD rate. Rushing touchdowns similarly separate carries
+inside the five, goal-line conversion, and non-goal-line TD rate. Red-zone targets and
+carries are exported alongside the narrower high-value opportunities. General TD
+rates retain 30% weight so sparse charting samples cannot dominate.
+
 Air-yards share is recency-weighted and shrunk. Its ratio to target share measures
 role depth relative to the position, producing a bounded `air_yard_factor` for yards
 per target and long-TD bonus expectation. Receiving and rushing TD rates are also
 scaled by the projected team's passing- and rushing-TD environments.
 
-For QBs, passing yards, passing TDs, interceptions, rushing yards, rushing TDs, and
-bonus points are projected directly from shrunk per-game history and team context.
+For QBs, official attempts are projected from team passing volume. Yards per attempt,
+passing-TD rate, and interception rate are shrunk separately, then converted into the
+passing stat line. QB rushing yards, rushing TDs, and bonus points remain separately
+projected.
 
 The exported component stat line contains targets, carries, receptions, passing/
 rushing/receiving yards, split TDs, interceptions, and bonus points per game. A small
@@ -259,7 +280,14 @@ weekly head-to-head league. The weights are normalized at calculation time.
 `adj_proj_vor` remains available as pure expected VOR plus the override; `v2_score` is
 the actual v2 sort key.
 
-### 8. Explicit future assumptions
+### 8. Current depth charts and explicit future assumptions
+
+The latest published nflverse depth-chart snapshot automatically supplies current NFL
+team, position, and depth rank. Current team supersedes the player's last historical
+team unless a manual projection override is present. Depth rank applies a bounded
+role adjustment: rank one is neutral, while ranks two and below progressively reduce
+opportunity. The snapshot date is exported because a dated depth chart is evidence,
+not timeless truth.
 
 [`projections.yaml`](../src/patron/config/projections.yaml) supplies facts historical
 data cannot know. A player entry can set `projected_team`, `opportunity_multiplier`,
@@ -267,6 +295,49 @@ and a visible reason. A team entry can adjust QB context, pass/rush volume, scor
 target availability, or backfield availability for every player on that team.
 Unmatched player entries fail the build so a misspelled trade or role change cannot
 quietly disappear.
+
+### 9. Injury-based expected games
+
+PPG remains an estimate of ability per active game. Expected games are modeled
+separately from nflverse offensive participation and official injury-report history.
+Observed availability receives 75% of the player sample and injury designations
+receive 25%, with OUT, DOUBTFUL, and QUESTIONABLE carrying decreasing missed-game
+equivalents. The result is shrunk toward a configurable 94% availability prior over a
+17-game shrinkage sample.
+
+V2 exports `expected_games`, `expected_season_points`, and
+`availability_adjusted_vor`. The final v2 score scales expected, floor, and ceiling VOR
+by expected-games share before applying a manual override. Thus injury risk affects
+draft rank without contaminating per-active-game `proj_ppg`.
+
+### ESPN's deliberately limited role
+
+ESPN is not a statistical projection source. It remains useful for private-league
+state that nflverse cannot know: which fantasy manager owns a player, who is a free
+agent, fantasy lineup placement, and ESPN's live injury display. Those fields power
+roster and waiver views, but ESPN projected points, lineup slots, and ownership rates
+do not feed V2's football projection. Historical statistics, usage, teams, depth
+charts, and injury modeling are nflverse-first.
+
+### League team-strength rating
+
+The League dashboard rolls the selected board into an overall fantasy-roster rating.
+For V2, each matched player's balanced `v2_score` is the value input; V1 uses adjusted
+historical VOR. Current starters count fully, injured-reserve players count zero, and
+positive bench value counts 20% so useful depth matters without treating the bench as
+a second starting lineup. Kickers and defenses remain outside this score because the
+player board tiers rather than ranks them.
+
+An ESPN full-season projection is used only as a replacement-relative fallback for a
+rostered rookie or returnee with no nflverse tape. The UI reports the number of these
+fallbacks on each affected team rather than presenting them as V2 projections.
+
+The raw roster values determine overall `team_rank`. The displayed `team_score` is a
+league-relative 0–10 index centered at 5.0, with 1.5 rating points representing one
+standard deviation of roster strength. This avoids forcing the current best and worst
+teams to artificial 10.0 and 0.0 endpoints. ESPN division IDs and names group the team
+cards when the league supplies them; division grouping does not change the overall
+rank.
 
 ## V2 additions and updates
 
@@ -287,26 +358,69 @@ quietly disappear.
 | Age | Binary RB flag | Gradual position curve plus original flag |
 | Future changes | Manual VOR delta | Projected team, team-wide context, and role multiplier |
 | Dashboard/API | One board | Selectable v1/v2 with component metrics |
+| League comparison | Opponent positional weaknesses | Overall roster rank/strength, rookie fallback visibility, and ESPN divisions |
+| Routes/TPRR | Missing | nflverse route-opportunity participation and regressed TPRR project targets |
+| High-value usage | TD rate only | Red-zone/end-zone targets and carries inside the five project split TDs |
+| Passing volume | Target proxy | Official attempts/dropbacks project QB and receiver opportunity |
+| Depth charts | Manual only | Latest nflverse team/rank automatically changes context and role |
+| Availability | Games flag | Expected games, season points, and availability-scaled VOR |
 
-## Important missing inputs and planned refinements
+## Implementation coverage and remaining roadmap
 
-The next improvements with the highest expected value are:
+The percentages below are approximate implementation coverage, not claims about
+forecast accuracy. "Direct" means the input is represented in the projected stat
+line. "Proxy" means v2 responds to a related signal but cannot distinguish the more
+specific football usage we ultimately want.
 
-1. Snap share, route participation, targets per route, designed QB rushes, two-minute
-   RB routes, goal-line carries, and end-zone targets.
-2. Official team pass attempts, situation-neutral pace, red-zone trips, and implied
-   scoring rather than target/carry proxies.
-3. Current roster/depth-chart ingestion so teammate competition is projected from the
-   future roster rather than latest-season usage plus manual multipliers.
-4. Injury-specific games-played distributions and cumulative RB touches.
-5. Actual player/team air-yard totals and yards per route. V2 currently uses the
-   available air-yards share as a bounded role-depth factor.
-6. Backtesting each coefficient against held-out seasons, including calibration by
-   position and projection-confidence bucket.
-7. ADP and auction-price deltas. Market price should not determine player ability, but
-   it is essential for deciding when a model edge is actionable.
-8. Draft tiers and uncertainty bands. Differences of 0.1 projected VOR should not be
-   presented as materially precise rank gaps.
+### Bottom-up projection core
+
+| Area | Approx. coverage | What v2 does now | Important gap |
+|---|---:|---|---|
+| Targets | 90% | Projects route opportunities × TPRR, blended with share of official attempts, historical target rate, WOPR, and weighted opportunity | Participation cannot distinguish pass protection from a released route |
+| Carries | 90% | Projects carry share and team carry volume, with current depth rank, backfield competition, red-zone work, and goal-line work | Situation-neutral run rate and two-minute usage remain implicit |
+| Routes | 65% | Derives eligible-player dropback participation and TPRR from nflverse play participation | This is a route-opportunity proxy, not a charted route for every player |
+| Red-zone opportunities | 80% | Separates red-zone/end-zone targets, carries inside the five, and their conversion rates | Quarterback sneak competition and expected red-zone trips are not yet separately forecast |
+| Efficiency | 75% | Separately projects catch rate, receiving yards per target, rushing yards per carry, TD rates, and bonus rate | No yards per route, separation by route/coverage type, or explicit efficiency aging beyond the overall age factor |
+| League scoring | 90% | Scores the projected components under the league rules and retains a shrunk residual for rare scoring | Fumbles, two-point conversions, and special-teams scoring are not projected as separate events |
+| Weekly range | 75% | Projects floor, volatility, and ceiling from shrunk historical distribution shapes around the new mean | No matchup, injury, or role-state mixture distributions |
+
+The core is therefore roughly two-thirds to three-quarters of the way to a complete
+transparent stat-line projection. The missing enrichment inputs below are less
+complete and are the main reason the model should not yet be treated as a full
+play-by-play projection system.
+
+### Remaining enrichment inputs
+
+| Upgrade | Data availability | Projection use today | Assessment and next step |
+|---|---:|---:|---|
+| Route participation | 75% proxy | 70% | nflverse participation now drives projected route opportunities. Replacing on-field dropbacks with charted route releases would remove blocking false positives. |
+| Targets per route | 75% proxy | 75% | Regressed targets per route opportunity is a primary target estimate. True charted routes would upgrade the denominator. |
+| Goal-line/end-zone usage | 90% | 80% | nflverse play-by-play supplies red-zone targets/carries, end-zone targets, carries inside the five, and conversions. Next add team red-zone-trip forecasts and QB sneak competition. |
+| Official pass attempts | 100% | 90% | nflverse team attempts and attempts-plus-sacks dropbacks now set team/QB volume and target-share denominators. Situation-neutral pace remains missing. |
+| Current depth chart | 90% | 80% | Latest nflverse team/rank automatically changes projected team and role, with timestamp and manual override support. Camp-battle probabilities and formation-specific depth remain missing. |
+| Injury-based games played | 85% history | 75% | nflverse participation and injury reports now project expected games, season points, and availability-adjusted VOR. Injury type/recovery-stage models and a current preseason availability feed remain missing. |
+
+This distinction now appears directly in rankings: `proj_ppg` remains a per-active-
+game estimate, while `expected_season_points = proj_ppg × expected_games` and
+availability-adjusted VOR carry season-long durability.
+
+### Next refinements after upgrades 1–5
+
+1. Replace route opportunities with fully charted routes if a stable, licensed source
+   becomes available; retain the nflverse proxy as a fallback.
+2. Add situation-neutral pace, red-zone trips, two-minute roles, designed QB runs, and
+   quarterback sneak competition.
+3. Model depth charts as role probabilities during camp rather than treating each
+   published rank as certain.
+4. Add injury type, surgery/recovery stage, cumulative workload, and current preseason
+   availability to the expected-games model.
+5. Backtest all new coefficients against held-out seasons and calibrate expected games,
+   targets, carries, touchdowns, and PPG separately.
+
+After those inputs, the most valuable model-level work is held-out-season backtesting,
+calibration by position and confidence bucket, cumulative RB-touch aging, ADP/auction
+price deltas, and draft tiers with uncertainty bands. Differences of 0.1 projected
+VOR should not be presented as materially precise rank gaps.
 
 ## Version selection and artifacts
 

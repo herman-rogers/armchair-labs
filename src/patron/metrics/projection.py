@@ -12,9 +12,10 @@ the environments already embedded in the player's history.  Comparing contexts i
 important: adding a raw "good quarterback" bonus would count the same quarterback
 twice for a player who never changed teams.
 
-The historical data cannot know a future trade, quarterback change, or depth-chart
-promotion.  ``config/projections.yaml`` carries those assumptions, visibly and with
-reasons, in the same spirit as the v1 injury overrides.
+The latest nflverse depth chart supplies current team and role evidence. Facts that
+remain uncertain—a future trade, quarterback change, or camp promotion—live in
+``config/projections.yaml`` with visible reasons, in the same spirit as the v1 injury
+overrides.
 """
 
 from __future__ import annotations
@@ -111,6 +112,7 @@ class TeamProfile:
     games: float = 0.0
     qb_context: float = 0.0
     pass_volume: float = 0.0
+    dropbacks: float = 0.0
     rush_volume: float = 0.0
     scoring: float = 0.0
     pass_td_rate: float = 0.0
@@ -147,21 +149,36 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
                 "passing_yards": 0.0,
                 "passing_tds": 0.0,
                 "passing_interceptions": 0.0,
+                "attempts": 0.0,
+                "team_pass_attempts": 0.0,
+                "team_dropbacks": 0.0,
+                "official_team_carries": 0.0,
                 "rushing_tds": 0.0,
                 "targets": {},
                 "carries": 0.0,
                 "rb_opportunity": {},
             },
         )
-        bucket["games"] = max(bucket["games"], _number(row.get("games")))
+        bucket["games"] = max(
+            bucket["games"],
+            _number(row.get("team_games")) or _number(row.get("games")),
+        )
         for column in (
             "passing_yards",
             "passing_tds",
             "passing_interceptions",
+            "attempts",
             "rushing_tds",
             "carries",
         ):
             bucket[column] += _number(row.get(column))
+        bucket["team_pass_attempts"] = max(
+            bucket["team_pass_attempts"], _number(row.get("team_pass_attempts"))
+        )
+        bucket["team_dropbacks"] = max(bucket["team_dropbacks"], _number(row.get("team_dropbacks")))
+        bucket["official_team_carries"] = max(
+            bucket["official_team_carries"], _number(row.get("official_team_carries"))
+        )
 
         player_id = str(row["player_id"])
         bucket["targets"][player_id] = bucket["targets"].get(player_id, 0.0) + _number(
@@ -175,6 +192,11 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
     profiles: dict[tuple[int, str], TeamProfile] = {}
     for key, values in grouped.items():
         games = values["games"] or 1.0
+        pass_attempts = values["team_pass_attempts"] or values["attempts"]
+        if pass_attempts <= 0:
+            pass_attempts = sum(values["targets"].values())
+        dropbacks = values["team_dropbacks"] or pass_attempts
+        team_carries = values["official_team_carries"] or values["carries"]
         profiles[key] = TeamProfile(
             games=games,
             qb_context=(
@@ -183,11 +205,12 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
                 - 2.0 * values["passing_interceptions"]
             )
             / games,
-            pass_volume=sum(values["targets"].values()) / games,
-            rush_volume=values["carries"] / games,
+            pass_volume=pass_attempts / games,
+            dropbacks=dropbacks / games,
+            rush_volume=team_carries / games,
             scoring=(values["passing_tds"] + values["rushing_tds"]) / games,
-            pass_td_rate=values["passing_tds"] / max(sum(values["targets"].values()), 1.0),
-            rush_td_rate=values["rushing_tds"] / max(values["carries"], 1.0),
+            pass_td_rate=values["passing_tds"] / max(pass_attempts, 1.0),
+            rush_td_rate=values["rushing_tds"] / max(team_carries, 1.0),
             targets=values["targets"],
             rb_opportunity=values["rb_opportunity"],
         )
@@ -278,12 +301,22 @@ def _component_priors(
             "rushing_tds": 0.0,
             "bonus_pts": 0.0,
             "passing_yards": 0.0,
+            "attempts": 0.0,
             "passing_tds": 0.0,
             "passing_interceptions": 0.0,
             "target_share": 0.0,
             "carry_share": 0.0,
             "wopr": 0.0,
             "air_yards_share": 0.0,
+            "route_opportunities": 0.0,
+            "route_participation": 0.0,
+            "targets_per_route_opportunity": 0.0,
+            "red_zone_targets": 0.0,
+            "end_zone_targets": 0.0,
+            "end_zone_receiving_tds": 0.0,
+            "red_zone_carries": 0.0,
+            "goal_line_carries": 0.0,
+            "goal_line_rushing_tds": 0.0,
             "floor_ratio": 0.0,
             "volatility_ratio": 0.0,
             "residual_points": 0.0,
@@ -305,13 +338,21 @@ def _component_priors(
                 "rushing_tds",
                 "bonus_pts",
                 "passing_yards",
+                "attempts",
                 "passing_tds",
                 "passing_interceptions",
+                "route_opportunities",
+                "red_zone_targets",
+                "end_zone_targets",
+                "end_zone_receiving_tds",
+                "red_zone_carries",
+                "goal_line_carries",
+                "goal_line_rushing_tds",
             ):
                 totals[column] += _number(row.get(column)) * decay
 
             profile = profiles.get((int(row["season"]), str(row.get("team") or "").upper()))
-            team_targets = sum(profile.targets.values()) if profile else 0.0
+            team_targets = profile.pass_volume * profile.games if profile else 0.0
             team_carries = profile.rush_volume * profile.games if profile else 0.0
             totals["target_share"] += (
                 _number(row.get("targets")) / team_targets if team_targets else 0.0
@@ -321,6 +362,14 @@ def _component_priors(
             ) * game_weight
             totals["wopr"] += _number(row.get("wopr")) * game_weight
             totals["air_yards_share"] += _number(row.get("air_yards_share")) * game_weight
+            if row.get("route_participation") is not None:
+                totals["route_participation"] += (
+                    _number(row.get("route_participation")) * game_weight
+                )
+            if row.get("targets_per_route_opportunity") is not None:
+                totals["targets_per_route_opportunity"] += (
+                    _number(row.get("targets_per_route_opportunity")) * game_weight
+                )
             ppg = _number(row.get("ppg"))
             if ppg > 0:
                 totals["floor_ratio"] += _number(row.get("floor")) / ppg * game_weight
@@ -339,14 +388,37 @@ def _component_priors(
             "carry_share": totals["carry_share"] / games,
             "wopr": totals["wopr"] / games,
             "air_yards_share": totals["air_yards_share"] / games,
+            "route_participation": totals["route_participation"] / games,
+            "targets_per_route_opportunity": totals["targets_per_route_opportunity"] / games,
             "catch_rate": totals["receptions"] / targets,
             "receiving_yards_per_target": totals["receiving_yards"] / targets,
             "rushing_yards_per_carry": totals["rushing_yards"] / carries,
             "receiving_td_rate": totals["receiving_tds"] / targets,
             "rushing_td_rate": totals["rushing_tds"] / carries,
+            "red_zone_target_rate": totals["red_zone_targets"] / targets,
+            "end_zone_target_rate": totals["end_zone_targets"] / targets,
+            "end_zone_conversion_rate": totals["end_zone_receiving_tds"]
+            / max(totals["end_zone_targets"], 1.0),
+            "non_end_zone_receiving_td_rate": max(
+                totals["receiving_tds"] - totals["end_zone_receiving_tds"], 0.0
+            )
+            / max(totals["targets"] - totals["end_zone_targets"], 1.0),
+            "red_zone_carry_rate": totals["red_zone_carries"] / carries,
+            "goal_line_carry_rate": totals["goal_line_carries"] / carries,
+            "goal_line_conversion_rate": totals["goal_line_rushing_tds"]
+            / max(totals["goal_line_carries"], 1.0),
+            "non_goal_line_rushing_td_rate": max(
+                totals["rushing_tds"] - totals["goal_line_rushing_tds"], 0.0
+            )
+            / max(totals["carries"] - totals["goal_line_carries"], 1.0),
             "bonus_per_opportunity": totals["bonus_pts"] / opportunity,
             "bonus_pg": totals["bonus_pts"] / games,
             "passing_yards_pg": totals["passing_yards"] / games,
+            "passing_attempts_pg": totals["attempts"] / games,
+            "passing_yards_per_attempt": totals["passing_yards"] / max(totals["attempts"], 1.0),
+            "passing_td_per_attempt": totals["passing_tds"] / max(totals["attempts"], 1.0),
+            "interception_per_attempt": totals["passing_interceptions"]
+            / max(totals["attempts"], 1.0),
             "passing_tds_pg": totals["passing_tds"] / games,
             "passing_interceptions_pg": totals["passing_interceptions"] / games,
             "rushing_yards_pg": totals["rushing_yards"] / games,
@@ -365,6 +437,7 @@ def _apply_team_override(
     return {
         "qb_context": profile.qb_context * (override.qb_context_multiplier if override else 1.0),
         "pass_volume": profile.pass_volume * (override.pass_volume_multiplier if override else 1.0),
+        "dropbacks": profile.dropbacks * (override.pass_volume_multiplier if override else 1.0),
         "rush_volume": profile.rush_volume * (override.rush_volume_multiplier if override else 1.0),
         "scoring": profile.scoring * (override.scoring_multiplier if override else 1.0),
         "pass_td_rate": profile.pass_td_rate * (override.scoring_multiplier if override else 1.0),
@@ -378,11 +451,57 @@ def _apply_team_override(
     }
 
 
+def _depth_role_factor(rank: int | None, cap: float) -> float:
+    """Bounded automatic role signal from the latest nflverse depth chart."""
+    if rank is None or rank <= 0:
+        return 1.0
+    raw = {1: 1.0, 2: 0.93, 3: 0.82, 4: 0.72}.get(rank, 0.65)
+    return _bounded(raw, 1.0 - cap, 1.0 + cap)
+
+
+def _depth_availability(
+    current_players: pl.DataFrame | None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Translate the current offensive depth chart into teammate competition."""
+    if current_players is None or "depth_chart_position_group" not in current_players.columns:
+        return {}, {}
+
+    receiving: dict[str, dict[str, float]] = {}
+    backfields: dict[str, dict[str, float]] = {}
+    for row in current_players.iter_rows(named=True):
+        player_id = str(row.get("player_id") or "")
+        team = str(row.get("current_team") or "")
+        position = str(row.get("depth_chart_position_group") or "")
+        rank = max(int(row.get("depth_chart_rank") or 1), 1)
+        if not player_id or not team:
+            continue
+        if position in {"WR", "TE", "RB"}:
+            position_weight = {"WR": 1.0, "TE": 0.72, "RB": 0.42}[position]
+            receiving.setdefault(team, {})[player_id] = position_weight / rank**0.65
+        if position == "RB":
+            backfields.setdefault(team, {})[player_id] = 1.0 / rank**0.65
+
+    def player_availability(groups: dict[str, dict[str, float]]) -> dict[str, float]:
+        result: dict[str, float] = {}
+        for players in groups.values():
+            total = sum(players.values())
+            for player_id in players:
+                other = max(
+                    (value for key, value in players.items() if key != player_id),
+                    default=0.0,
+                )
+                result[player_id] = 1.0 - other / total if total > 0 else 1.0
+        return result
+
+    return player_availability(receiving), player_availability(backfields)
+
+
 def build_projection_board(
     player_seasons: pl.DataFrame,
     v1_board: pl.DataFrame,
     config: LeagueConfig,
     assumptions: ProjectionAssumptions | None = None,
+    current_players: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Build the v2 board while retaining every v1 metric as supporting evidence."""
     assumptions = assumptions or ProjectionAssumptions.from_config()
@@ -391,6 +510,12 @@ def build_projection_board(
     pools = _rosterable_rows(player_seasons, config)
     position_ppg, position_bonus = _position_means(pools)
     component_priors = _component_priors(pools, profiles, config)
+    current_by_player = (
+        {str(row["player_id"]): row for row in current_players.iter_rows(named=True)}
+        if current_players is not None
+        else {}
+    )
+    depth_target_availability, depth_backfield_availability = _depth_availability(current_players)
 
     board_keys = {
         (normalize(str(row["player_display_name"])), str(row["position"]).upper())
@@ -410,10 +535,21 @@ def build_projection_board(
         position = str(base["position"])
         history = histories.get(player_id, [base])
         override = assumptions.players.get((normalize(str(base["player_display_name"])), position))
+        current = current_by_player.get(player_id, {})
         projected_team = str(
-            (override.projected_team if override and override.projected_team else base["team"])
+            (
+                override.projected_team
+                if override and override.projected_team
+                else current.get("current_team") or base["team"]
+            )
             or ""
         ).upper()
+        depth_rank_value = current.get("depth_chart_rank")
+        depth_rank = int(depth_rank_value) if depth_rank_value is not None else None
+        depth_role_factor = _depth_role_factor(
+            depth_rank,
+            metrics.projection_depth_chart_cap,
+        )
 
         weighted: list[tuple[dict[str, Any], float]] = []
         for row in history:
@@ -463,6 +599,7 @@ def build_projection_board(
         source_context = {
             "qb_context": 0.0,
             "pass_volume": 0.0,
+            "dropbacks": 0.0,
             "rush_volume": 0.0,
             "scoring": 0.0,
             "pass_td_rate": 0.0,
@@ -478,6 +615,7 @@ def build_projection_board(
             context_weight += weight
             source_context["qb_context"] += profile.qb_context * weight
             source_context["pass_volume"] += profile.pass_volume * weight
+            source_context["dropbacks"] += profile.dropbacks * weight
             source_context["rush_volume"] += profile.rush_volume * weight
             source_context["scoring"] += profile.scoring * weight
             source_context["pass_td_rate"] += profile.pass_td_rate * weight
@@ -497,6 +635,7 @@ def build_projection_board(
             target_profile = TeamProfile(
                 qb_context=source_context["qb_context"],
                 pass_volume=source_context["pass_volume"],
+                dropbacks=source_context["dropbacks"],
                 rush_volume=source_context["rush_volume"],
                 scoring=source_context["scoring"],
                 pass_td_rate=source_context["pass_td_rate"],
@@ -507,17 +646,29 @@ def build_projection_board(
             target_profile.target_availability(player_id)
             if target_profile_known
             else source_context["target_availability"]
-        ) * target["target_availability_multiplier"]
+        )
         backfield_availability = (
             target_profile.backfield_availability(player_id)
             if target_profile_known
             else source_context["backfield_availability"]
-        ) * target["backfield_availability_multiplier"]
+        )
+        if player_id in depth_target_availability:
+            target_availability = (
+                0.65 * depth_target_availability[player_id] + 0.35 * target_availability
+            )
+        if player_id in depth_backfield_availability:
+            backfield_availability = (
+                0.65 * depth_backfield_availability[player_id] + 0.35 * backfield_availability
+            )
+        target_availability *= target["target_availability_multiplier"]
+        backfield_availability *= target["backfield_availability_multiplier"]
         latest_source_profile = profiles.get(
             (config.board_season, str(base.get("team") or "").upper())
         )
         latest_team_targets = (
-            sum(latest_source_profile.targets.values()) if latest_source_profile else 0.0
+            latest_source_profile.pass_volume * latest_source_profile.games
+            if latest_source_profile
+            else 0.0
         )
         latest_team_carries = (
             latest_source_profile.rush_volume * latest_source_profile.games
@@ -553,7 +704,8 @@ def build_projection_board(
 
         cap = metrics.projection_team_context_cap
         team_context_factor = 1.0 + _bounded(context_delta, -cap, cap)
-        role_multiplier = override.opportunity_multiplier if override else 1.0
+        manual_role_multiplier = override.opportunity_multiplier if override else 1.0
+        role_multiplier = manual_role_multiplier * depth_role_factor
         age = base.get("age_at_season")
         age_factor = _age_factor(position, float(age) if age is not None else None)
         prior_projection = max(individual_prior + td_adjustment + bonus_adjustment, 0.0)
@@ -585,8 +737,16 @@ def build_projection_board(
         weighted_rushing_yards = weighted_total("rushing_yards")
         weighted_receiving_tds = weighted_total("receiving_tds")
         weighted_rushing_tds = weighted_total("rushing_tds")
+        weighted_pass_attempts = weighted_total("attempts")
         weighted_bonus = weighted_total("bonus_pts")
         weighted_opportunity = weighted_total("wtd_opp")
+        weighted_route_opportunities = weighted_total("route_opportunities")
+        weighted_end_zone_targets = weighted_total("end_zone_targets")
+        weighted_end_zone_tds = weighted_total("end_zone_receiving_tds")
+        weighted_red_zone_targets = weighted_total("red_zone_targets")
+        weighted_goal_line_carries = weighted_total("goal_line_carries")
+        weighted_goal_line_tds = weighted_total("goal_line_rushing_tds")
+        weighted_red_zone_carries = weighted_total("red_zone_carries")
 
         historical_target_share = 0.0
         historical_carry_share = 0.0
@@ -595,7 +755,7 @@ def build_projection_board(
             profile = profiles.get((int(row["season"]), str(row.get("team") or "").upper()))
             if profile is None:
                 continue
-            team_targets = sum(profile.targets.values())
+            team_targets = profile.pass_volume * profile.games
             team_carries = profile.rush_volume * profile.games
             historical_target_share += (
                 _number(row.get("targets")) / team_targets if team_targets else 0.0
@@ -651,6 +811,20 @@ def build_projection_board(
             (weighted_opportunity - weighted_carries) / 2.2 / max(effective_games, 1.0),
             0.0,
         )
+        route_reliability = weighted_route_opportunities / (weighted_route_opportunities + 160.0)
+        historical_route_participation = weighted_metric("route_participation")
+        projected_route_participation = route_reliability * historical_route_participation + (
+            1.0 - route_reliability
+        ) * prior.get("route_participation", historical_route_participation)
+        historical_tprr = weighted_targets / max(weighted_route_opportunities, 1.0)
+        projected_tprr = route_reliability * historical_tprr + (
+            1.0 - route_reliability
+        ) * prior.get("targets_per_route_opportunity", historical_tprr)
+        projected_route_participation = _bounded(projected_route_participation, 0.0, 1.0)
+        projected_tprr = _bounded(projected_tprr, 0.0, 0.45)
+        projected_route_opportunities = projected_route_participation * target["dropbacks"]
+        route_target_projection = projected_route_opportunities * projected_tprr
+        has_route_data = weighted_route_opportunities > 0 and target["dropbacks"] > 0
 
         if position == "QB":
             projected_targets = 0.0
@@ -660,14 +834,26 @@ def build_projection_board(
             )
             projected_carries *= role_multiplier
         else:
-            projected_targets = (
+            baseline_target_projection = (
                 0.65 * team_target_projection
                 + 0.20 * historical_targets_pg * pass_volume_ratio
                 + 0.15 * opportunity_implied_targets * pass_volume_ratio
+            )
+            route_weight = metrics.projection_route_weight if has_route_data else 0.0
+            projected_targets = (
+                route_weight * route_target_projection
+                + (1.0 - route_weight) * baseline_target_projection
             ) * role_multiplier
             projected_carries = (
                 0.75 * team_carry_projection + 0.25 * historical_carries_pg * rush_volume_ratio
             ) * role_multiplier
+
+        if target["pass_volume"] > 0 and position != "QB":
+            projected_target_share = _bounded(
+                projected_targets / target["pass_volume"],
+                0.0,
+                0.45,
+            )
 
         catch_reliability = weighted_targets / (weighted_targets + 80.0)
         carry_efficiency_reliability = weighted_carries / (weighted_carries + 120.0)
@@ -710,11 +896,89 @@ def build_projection_board(
             * prior.get("rushing_td_rate", historical_rushing_td_rate)
         ) * _ratio(target["rush_td_rate"], source_context["rush_td_rate"])
 
+        high_value_target_reliability = weighted_end_zone_targets / (
+            weighted_end_zone_targets + 16.0
+        )
+        historical_end_zone_target_rate = weighted_end_zone_targets / max(weighted_targets, 1.0)
+        projected_end_zone_target_rate = (
+            high_value_target_reliability * historical_end_zone_target_rate
+            + (1.0 - high_value_target_reliability)
+            * prior.get("end_zone_target_rate", historical_end_zone_target_rate)
+        )
+        historical_end_zone_conversion = weighted_end_zone_tds / max(weighted_end_zone_targets, 1.0)
+        projected_end_zone_conversion = (
+            high_value_target_reliability * historical_end_zone_conversion
+            + (1.0 - high_value_target_reliability)
+            * prior.get("end_zone_conversion_rate", historical_end_zone_conversion)
+        )
+        non_end_zone_targets = max(weighted_targets - weighted_end_zone_targets, 1.0)
+        historical_non_end_zone_td_rate = (
+            max(weighted_receiving_tds - weighted_end_zone_tds, 0.0) / non_end_zone_targets
+        )
+        projected_non_end_zone_td_rate = (
+            receiving_td_reliability * historical_non_end_zone_td_rate
+            + (1.0 - receiving_td_reliability)
+            * prior.get("non_end_zone_receiving_td_rate", historical_non_end_zone_td_rate)
+        )
+
+        high_value_carry_reliability = weighted_goal_line_carries / (
+            weighted_goal_line_carries + 20.0
+        )
+        historical_goal_line_carry_rate = weighted_goal_line_carries / max(weighted_carries, 1.0)
+        projected_goal_line_carry_rate = (
+            high_value_carry_reliability * historical_goal_line_carry_rate
+            + (1.0 - high_value_carry_reliability)
+            * prior.get("goal_line_carry_rate", historical_goal_line_carry_rate)
+        )
+        historical_goal_line_conversion = weighted_goal_line_tds / max(
+            weighted_goal_line_carries, 1.0
+        )
+        projected_goal_line_conversion = (
+            high_value_carry_reliability * historical_goal_line_conversion
+            + (1.0 - high_value_carry_reliability)
+            * prior.get("goal_line_conversion_rate", historical_goal_line_conversion)
+        )
+        non_goal_line_carries = max(weighted_carries - weighted_goal_line_carries, 1.0)
+        historical_non_goal_line_td_rate = (
+            max(weighted_rushing_tds - weighted_goal_line_tds, 0.0) / non_goal_line_carries
+        )
+        projected_non_goal_line_td_rate = (
+            rushing_td_reliability * historical_non_goal_line_td_rate
+            + (1.0 - rushing_td_reliability)
+            * prior.get("non_goal_line_rushing_td_rate", historical_non_goal_line_td_rate)
+        )
+
         projected_receptions = projected_targets * projected_catch_rate
         projected_receiving_yards = projected_targets * projected_ypt
         projected_rushing_yards = projected_carries * projected_ypc
-        projected_receiving_tds = projected_targets * projected_receiving_td_rate
-        projected_rushing_tds = projected_carries * projected_rushing_td_rate
+        projected_red_zone_targets = projected_targets * (
+            weighted_red_zone_targets / max(weighted_targets, 1.0)
+        )
+        projected_end_zone_targets = projected_targets * projected_end_zone_target_rate
+        projected_goal_line_carries = projected_carries * projected_goal_line_carry_rate
+        projected_red_zone_carries = projected_carries * (
+            weighted_red_zone_carries / max(weighted_carries, 1.0)
+        )
+        high_value_receiving_tds = (
+            projected_end_zone_targets * projected_end_zone_conversion
+            + max(projected_targets - projected_end_zone_targets, 0.0)
+            * projected_non_end_zone_td_rate
+        ) * _ratio(target["pass_td_rate"], source_context["pass_td_rate"])
+        high_value_rushing_tds = (
+            projected_goal_line_carries * projected_goal_line_conversion
+            + max(projected_carries - projected_goal_line_carries, 0.0)
+            * projected_non_goal_line_td_rate
+        ) * _ratio(target["rush_td_rate"], source_context["rush_td_rate"])
+        receiving_high_value_weight = 0.70 if weighted_end_zone_targets > 0 else 0.0
+        rushing_high_value_weight = 0.70 if weighted_goal_line_carries > 0 else 0.0
+        projected_receiving_tds = (
+            receiving_high_value_weight * high_value_receiving_tds
+            + (1.0 - receiving_high_value_weight) * projected_targets * projected_receiving_td_rate
+        )
+        projected_rushing_tds = (
+            rushing_high_value_weight * high_value_rushing_tds
+            + (1.0 - rushing_high_value_weight) * projected_carries * projected_rushing_td_rate
+        )
 
         opportunity = weighted_targets + weighted_carries
         bonus_reliability = opportunity / (opportunity + 120.0)
@@ -742,7 +1006,33 @@ def build_projection_board(
         projected_interceptions = reliability * historical_interceptions_pg + (
             1.0 - reliability
         ) * prior.get("passing_interceptions_pg", 0.0)
+        projected_pass_attempts = 0.0
+        if position == "QB" and weighted_pass_attempts > 0:
+            attempt_reliability = weighted_pass_attempts / (weighted_pass_attempts + 220.0)
+            historical_ypa = weighted_total("passing_yards") / weighted_pass_attempts
+            historical_pass_td_rate = weighted_total("passing_tds") / weighted_pass_attempts
+            historical_interception_rate = (
+                weighted_total("passing_interceptions") / weighted_pass_attempts
+            )
+            projected_ypa = attempt_reliability * historical_ypa + (
+                1.0 - attempt_reliability
+            ) * prior.get("passing_yards_per_attempt", historical_ypa)
+            projected_pass_td_rate = attempt_reliability * historical_pass_td_rate + (
+                1.0 - attempt_reliability
+            ) * prior.get("passing_td_per_attempt", historical_pass_td_rate)
+            projected_interception_rate = attempt_reliability * historical_interception_rate + (
+                1.0 - attempt_reliability
+            ) * prior.get("interception_per_attempt", historical_interception_rate)
+            projected_pass_attempts = target["pass_volume"] * role_multiplier
+            projected_passing_yards = projected_pass_attempts * projected_ypa
+            projected_passing_tds = (
+                projected_pass_attempts
+                * projected_pass_td_rate
+                * _ratio(target["pass_td_rate"], source_context["pass_td_rate"])
+            )
+            projected_interceptions = projected_pass_attempts * projected_interception_rate
         if position != "QB":
+            projected_pass_attempts = 0.0
             projected_passing_yards = 0.0
             projected_passing_tds = 0.0
             projected_interceptions = 0.0
@@ -786,6 +1076,51 @@ def build_projection_board(
             component_projection, 0.0
         )
 
+        availability_numerator = 0.0
+        availability_denominator = 0.0
+        injury_missed_equivalents = 0.0
+        injury_report_weeks = 0.0
+        for row in history:
+            decay = metrics.projection_season_decay ** max(
+                config.board_season - int(row["season"]), 0
+            )
+            observed_games = _number(row.get("active_games")) or _number(row.get("games"))
+            possible_games = _number(row.get("team_games")) or observed_games
+            availability_numerator += observed_games * decay
+            availability_denominator += possible_games * decay
+            injury_report_weeks += _number(row.get("injury_report_weeks")) * decay
+            injury_missed_equivalents += (
+                _number(row.get("out_report_weeks"))
+                + 0.5 * _number(row.get("doubtful_report_weeks"))
+                + 0.1 * _number(row.get("questionable_report_weeks"))
+            ) * decay
+        observed_availability = (
+            availability_numerator / availability_denominator
+            if availability_denominator > 0
+            else metrics.projection_availability_prior
+        )
+        injury_availability = 1.0 - injury_missed_equivalents / max(availability_denominator, 1.0)
+        availability_sample = _bounded(
+            0.75 * observed_availability + 0.25 * injury_availability,
+            0.50,
+            1.0,
+        )
+        availability_reliability = availability_denominator / (
+            availability_denominator + metrics.projection_availability_shrinkage_games
+        )
+        projected_availability = (
+            availability_reliability * availability_sample
+            + (1.0 - availability_reliability) * metrics.projection_availability_prior
+        )
+        expected_games = _bounded(
+            metrics.projection_season_games * projected_availability,
+            1.0,
+            float(metrics.projection_season_games),
+        )
+        availability_factor = expected_games / metrics.projection_season_games
+        expected_season_points = proj_ppg * expected_games
+        season_equivalent_ppg = expected_season_points / metrics.projection_season_games
+
         historical_floor_ratio = weighted_metric("floor") / max(historical_ppg, 0.1)
         historical_volatility_ratio = weighted_metric("volatility") / max(historical_ppg, 0.1)
         projected_floor_ratio = reliability * historical_floor_ratio + (
@@ -802,6 +1137,8 @@ def build_projection_board(
         confidence = reliability * (0.88 if moved else 1.0)
         if override and override.opportunity_multiplier != 1.0:
             confidence *= 0.92
+        if depth_role_factor != 1.0:
+            confidence *= 0.95
 
         reasons = [
             value
@@ -811,11 +1148,18 @@ def build_projection_board(
             )
             if value
         ]
+        if moved and not (override and override.projected_team):
+            reasons.append(f"nflverse depth chart moved team to {projected_team}")
         projected.append(
             {
                 **base,
                 METRIC_VERSION: "v2",
                 "projected_team": projected_team,
+                "depth_chart_rank": depth_rank,
+                "depth_chart_position": current.get("depth_chart_position"),
+                "depth_chart_position_group": current.get("depth_chart_position_group"),
+                "depth_chart_date": current.get("depth_chart_date"),
+                "depth_role_factor": depth_role_factor,
                 "historical_ppg_prior": historical_ppg,
                 "individual_prior_ppg": individual_prior,
                 "prior_branch_ppg": prior_projection,
@@ -825,6 +1169,14 @@ def build_projection_board(
                 "projected_ceiling": projected_ceiling,
                 "projected_volatility": projected_volatility,
                 "projection_confidence": _bounded(confidence, 0.0, 1.0),
+                "availability_confidence": availability_reliability,
+                "projected_availability": projected_availability,
+                "availability_factor": availability_factor,
+                "expected_games": expected_games,
+                "expected_season_points": expected_season_points,
+                "season_equivalent_ppg": season_equivalent_ppg,
+                "historical_injury_report_weeks": injury_report_weeks,
+                "injury_missed_equivalents": injury_missed_equivalents,
                 "effective_games": effective_games,
                 "age_factor": age_factor,
                 "td_regression_adjustment": td_adjustment,
@@ -833,6 +1185,7 @@ def build_projection_board(
                 "qb_context": target["qb_context"],
                 "team_scoring_context": target["scoring"],
                 "team_pass_volume": target["pass_volume"],
+                "team_dropbacks": target["dropbacks"],
                 "team_rush_volume": target["rush_volume"],
                 "teammate_competition": 1.0
                 - (backfield_availability if position == "RB" else target_availability),
@@ -843,18 +1196,26 @@ def build_projection_board(
                 "projected_wopr": projected_wopr,
                 "projected_air_yards_share": projected_air_share,
                 "projected_targets_pg": projected_targets,
+                "projected_route_opportunities_pg": projected_route_opportunities,
+                "projected_route_participation": projected_route_participation,
+                "projected_targets_per_route_opportunity": projected_tprr,
                 "projected_carries_pg": projected_carries,
                 "projected_receptions_pg": projected_receptions,
                 "projected_receiving_yards_pg": projected_receiving_yards,
                 "projected_rushing_yards_pg": projected_rushing_yards,
                 "projected_receiving_tds_pg": projected_receiving_tds,
                 "projected_rushing_tds_pg": projected_rushing_tds,
+                "projected_red_zone_targets_pg": projected_red_zone_targets,
+                "projected_end_zone_targets_pg": projected_end_zone_targets,
+                "projected_red_zone_carries_pg": projected_red_zone_carries,
+                "projected_goal_line_carries_pg": projected_goal_line_carries,
+                "projected_pass_attempts_pg": projected_pass_attempts,
                 "projected_passing_yards_pg": projected_passing_yards,
                 "projected_passing_tds_pg": projected_passing_tds,
                 "projected_interceptions_pg": projected_interceptions,
                 "projected_bonus_pg": projected_bonus_pg,
                 "air_yard_factor": air_yard_factor,
-                "opportunity_multiplier": role_multiplier,
+                "opportunity_multiplier": manual_role_multiplier,
                 "projection_reason": " | ".join(reasons) or None,
             }
         )
@@ -894,6 +1255,7 @@ def build_projection_board(
         (pl.col("projected_floor") - pl.col("floor_repl")).alias("floor_vor"),
         (pl.col("projected_ceiling") - pl.col("ceiling_repl")).alias("ceiling_vor"),
         (pl.col(PROJECTED_VOR) + pl.col("override_delta")).alias(ADJUSTED_PROJECTED_VOR),
+        (pl.col(PROJECTED_VOR) * pl.col("availability_factor")).alias("availability_adjusted_vor"),
     )
     score_weight = (
         config.metrics.projection_mean_weight
@@ -903,9 +1265,15 @@ def build_projection_board(
     frame = frame.with_columns(
         (
             (
-                config.metrics.projection_mean_weight * pl.col(PROJECTED_VOR)
-                + config.metrics.projection_floor_weight * pl.col("floor_vor")
-                + config.metrics.projection_ceiling_weight * pl.col("ceiling_vor")
+                config.metrics.projection_mean_weight
+                * pl.col(PROJECTED_VOR)
+                * pl.col("availability_factor")
+                + config.metrics.projection_floor_weight
+                * pl.col("floor_vor")
+                * pl.col("availability_factor")
+                + config.metrics.projection_ceiling_weight
+                * pl.col("ceiling_vor")
+                * pl.col("availability_factor")
             )
             / score_weight
             + pl.col("override_delta")

@@ -44,6 +44,41 @@ const COLUMNS: PlayerColumn[] = [
   },
 ]
 
+const V2_COLUMNS: PlayerColumn[] = [
+  ...IDENTITY,
+  {
+    key: 'v2_score',
+    label: 'V2 Score',
+    title: 'Availability-aware projected value over replacement.',
+    render: (p) => <span className="strong">{number(p.v2_score, 2)}</span>,
+  },
+  {
+    key: 'proj_ppg',
+    label: 'V2 PPG',
+    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
+    render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'expected_games',
+    label: 'Exp G',
+    title: 'Expected games from nflverse participation and injury history.',
+    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+  },
+  {
+    key: 'projected_floor',
+    label: 'Floor',
+    title: 'Projected 25th-percentile weekly score when active.',
+    render: (p) => <span className="dim">{number(p.projected_floor)}</span>,
+  },
+  FLAGS_COLUMN,
+  {
+    key: 'percent_started',
+    label: '%Start',
+    title: 'ESPN market usage; displayed but not used by V2.',
+    render: (p) => <span className="dim">{number(p.percent_started, 0)}</span>,
+  },
+]
+
 /** One team's roster, joined to the board, decisions first. */
 export function RosterPanel({
   team,
@@ -84,8 +119,8 @@ export function RosterPanel({
       )}
       <PlayerTable
         players={roster.data.players}
-        columns={COLUMNS}
-        defaultSort="adj_vor"
+        columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
+        defaultSort={version === 'v2' ? 'v2_score' : 'adj_vor'}
         emptyMessage="No ranked players on this roster."
       />
       <p className="legend tight faint">

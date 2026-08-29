@@ -39,6 +39,43 @@ const COLUMNS: PlayerColumn[] = [
   OWNERSHIP,
 ]
 
+const V2_COLUMNS: PlayerColumn[] = [
+  ...IDENTITY,
+  {
+    key: 'wire_vor',
+    label: 'Wire VOR',
+    title: 'Availability-adjusted projected value above the actual free-agent pool.',
+    render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
+  },
+  {
+    key: 'proj_ppg',
+    label: 'V2 PPG',
+    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
+    render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'expected_games',
+    label: 'Exp G',
+    title: 'Expected games from nflverse participation and injury history.',
+    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+  },
+  {
+    key: 'projected_targets_pg',
+    label: 'Tgt/G',
+    title: 'Projected targets per game.',
+    render: (p) => <span className="dim">{number(p.projected_targets_pg)}</span>,
+  },
+  {
+    key: 'projected_carries_pg',
+    label: 'Car/G',
+    title: 'Projected carries per game.',
+    render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
+  },
+  FLAGS_COLUMN,
+  ROSTERED_PERCENT,
+  OWNERSHIP,
+]
+
 /**
  * The ranked wire.
  *
@@ -104,12 +141,13 @@ export function WirePanel({ version }: { version: MetricVersion }) {
           .map(([pos, ppg]) => `${pos} ${ppg.toFixed(1)}`)
           .join(' · ')}{' '}
         — the best player still unowned at each position. Wire VOR is measured against
-        this, not against the preseason draft baseline.
+        this, not against the preseason draft baseline. {version === 'v2' &&
+          'V2 uses season-equivalent projected PPG, so expected availability affects both the pool baseline and the pickup value.'}
       </p>
 
       <PlayerTable
         players={players}
-        columns={COLUMNS}
+        columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
         defaultSort="wire_vor"
         emptyMessage="Nobody on the wire clears replacement level at this position."
       />

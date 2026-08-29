@@ -28,6 +28,7 @@ IDENTITY_COLUMNS: Final[tuple[str, ...]] = (
 )
 
 PASSING_COLUMNS: Final[tuple[str, ...]] = (
+    "attempts",
     "passing_yards",
     "passing_tds",
     "passing_interceptions",
@@ -113,6 +114,69 @@ PBP_TOUCHDOWN_COLUMNS: Final[tuple[str, ...]] = (
     "passer_player_id",
     "receiver_player_id",
     "rusher_player_id",
+)
+
+# Projection-only nflverse contracts. These feeds enrich v2 without changing v1's
+# historical scoring semantics.
+TEAM_VOLUME_COLUMNS: Final[tuple[str, ...]] = (
+    "season",
+    "week",
+    "season_type",
+    "team",
+    "attempts",
+    "sacks_suffered",
+    "carries",
+)
+
+PBP_USAGE_COLUMNS: Final[tuple[str, ...]] = (
+    "game_id",
+    "play_id",
+    "season",
+    "week",
+    "season_type",
+    "posteam",
+    "pass_attempt",
+    "rush_attempt",
+    "qb_dropback",
+    "qb_scramble",
+    "qb_kneel",
+    "yardline_100",
+    "air_yards",
+    "pass_touchdown",
+    "rush_touchdown",
+    "passer_player_id",
+    "receiver_player_id",
+    "rusher_player_id",
+    "two_point_attempt",
+)
+
+PARTICIPATION_COLUMNS: Final[tuple[str, ...]] = (
+    "nflverse_game_id",
+    "play_id",
+    "possession_team",
+    "offense_players",
+    "offense_positions",
+)
+
+DEPTH_CHART_COLUMNS: Final[tuple[str, ...]] = (
+    "dt",
+    "team",
+    "gsis_id",
+    "pos_abb",
+    "pos_name",
+    "pos_rank",
+)
+
+INJURY_COLUMNS: Final[tuple[str, ...]] = (
+    "season",
+    "week",
+    "team",
+    "gsis_id",
+    "position",
+    "report_primary_injury",
+    "report_status",
+    "practice_primary_injury",
+    "practice_status",
 )
 
 ROSTER_COLUMNS: Final[tuple[str, ...]] = ("gsis_id", "birth_date")

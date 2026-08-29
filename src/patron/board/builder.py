@@ -89,6 +89,7 @@ def build_player_seasons(
         pl.col("rushing_tds").fill_null(0).sum().alias("rushing_tds"),
         pl.col("receiving_tds").fill_null(0).sum().alias("receiving_tds"),
         pl.col("passing_tds").fill_null(0).sum().alias("passing_tds"),
+        pl.col("attempts").fill_null(0).sum().alias("attempts"),
         pl.col("passing_interceptions").fill_null(0).sum().alias("passing_interceptions"),
         pl.col("passing_yards").fill_null(0).sum().alias("passing_yards"),
         pl.col("rushing_yards").fill_null(0).sum().alias("rushing_yards"),

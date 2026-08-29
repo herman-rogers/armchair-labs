@@ -39,7 +39,8 @@ async function post<T>(path: string): Promise<T> {
 
 export const fetchLeagueStatus = () => get<LeagueStatus>('/api/league/status')
 
-export const fetchLeague = () => get<LeagueResponse>('/api/league')
+export const fetchLeague = (version: MetricVersion) =>
+  get<LeagueResponse>(`/api/league?version=${version}`)
 
 export const fetchLeaguePlayers = (version: MetricVersion, limit = 1000) =>
   get<LeaguePlayersResponse>(`/api/league/players?version=${version}&limit=${limit}`)
@@ -61,4 +62,5 @@ export const fetchOpponents = (version: MetricVersion) =>
 export const fetchTransactions = () => get<TransactionsResponse>('/api/league/transactions')
 
 /** Force a pull from ESPN, ignoring the TTL. */
-export const refreshLeague = () => post<LeagueStatus>('/api/league/refresh')
+export const refreshLeague = (version: MetricVersion) =>
+  post<LeagueStatus>(`/api/league/refresh?version=${version}`)

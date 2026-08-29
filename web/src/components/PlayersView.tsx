@@ -11,6 +11,7 @@ import {
   PlayerTable,
   ROSTERED_PERCENT,
   number,
+  percent,
   type PlayerColumn,
 } from './PlayerTable'
 
@@ -60,6 +61,67 @@ const LEAGUE_COLUMNS: PlayerColumn[] = [
       </span>
     ),
   },
+  ROSTERED_PERCENT,
+]
+
+const V2_LEAGUE_COLUMNS: PlayerColumn[] = [
+  ...IDENTITY,
+  OWNERSHIP,
+  {
+    key: 'projected_team',
+    label: 'Proj Tm',
+    title: 'NFL team used by V2, from the latest nflverse depth chart or a manual override.',
+    render: (p) => <span className="team">{p.projected_team ?? p.team}</span>,
+  },
+  {
+    key: 'v2_score',
+    label: 'V2 Score',
+    title: 'Availability-scaled blend of expected, floor, and ceiling VOR, plus manual overrides.',
+    render: (p) => <span className="strong">{number(p.v2_score, 2)}</span>,
+  },
+  {
+    key: 'proj_ppg',
+    label: 'V2 PPG',
+    title: 'Combined points per active game: normalized actual history plus the bottom-up forecast.',
+    render: (p) => number(p.proj_ppg),
+  },
+  {
+    key: 'expected_games',
+    label: 'Exp G',
+    title: 'Expected games from nflverse participation and injury-report history.',
+    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+  },
+  {
+    key: 'availability_adjusted_vor',
+    label: 'Season VOR',
+    title: 'Projected VOR scaled by expected games.',
+    render: (p) => <span className="dim">{number(p.availability_adjusted_vor, 2)}</span>,
+  },
+  {
+    key: 'projected_targets_pg',
+    label: 'Tgt/G',
+    title: 'Projected targets per game, including route-opportunity and official-attempt inputs.',
+    render: (p) => <span className="dim">{number(p.projected_targets_pg)}</span>,
+  },
+  {
+    key: 'projected_carries_pg',
+    label: 'Car/G',
+    title: 'Projected carries per game from official team volume and current role.',
+    render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
+  },
+  {
+    key: 'projected_route_participation',
+    label: 'Route%',
+    title: 'Projected eligible-player participation on team dropbacks; blocking cannot be separated.',
+    render: (p) => <span className="dim">{percent(p.projected_route_participation)}</span>,
+  },
+  {
+    key: 'depth_chart_rank',
+    label: 'Depth',
+    title: 'Latest published nflverse NFL depth-chart rank.',
+    render: (p) => <span className="dim">{p.depth_chart_rank ?? '—'}</span>,
+  },
+  FLAGS_COLUMN,
   ROSTERED_PERCENT,
 ]
 
@@ -186,12 +248,23 @@ export function PlayersView({ version }: { version: MetricVersion }) {
       )}
 
       {connected ? (
-        <PlayerTable players={filtered} columns={LEAGUE_COLUMNS} defaultSort="adj_vor" />
+        <PlayerTable
+          players={filtered}
+          columns={version === 'v2' ? V2_LEAGUE_COLUMNS : LEAGUE_COLUMNS}
+          defaultSort={version === 'v2' ? 'v2_score' : 'adj_vor'}
+        />
       ) : (
         <BoardTable players={filtered} version={version} />
       )}
 
       {connected && <Freshness data={league.data} />}
+      {connected && version === 'v2' && (
+        <p className="legend tight faint">
+          V2 football metrics come from nflverse. ESPN contributes ownership, fantasy
+          lineup, transactions, and the live injury badge only; ESPN projected points do
+          not affect the rank.
+        </p>
+      )}
     </>
   )
 }

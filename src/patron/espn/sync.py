@@ -59,6 +59,10 @@ class TeamState:
     wins: int
     losses: int
     faab_remaining: int | None
+    # ESPN assigns both on the Team object. Optional defaults keep snapshots written
+    # before division ingestion backward-compatible.
+    division_id: int | None = None
+    division_name: str | None = None
 
 
 @dataclass
@@ -220,6 +224,12 @@ def fetch_snapshot(
             wins=int(_attribute(team, "wins", default=0)),
             losses=int(_attribute(team, "losses", default=0)),
             faab_remaining=_remaining_faab(league, team),
+            division_id=(
+                int(division_id)
+                if (division_id := _attribute(team, "division_id")) is not None
+                else None
+            ),
+            division_name=_text(_attribute(team, "division_name")),
         )
         for team in league.teams
     ]

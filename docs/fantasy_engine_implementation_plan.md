@@ -15,8 +15,12 @@ The end state is a dashboard-and-alerts loop: every player broken down by the me
 **nflverse, via the `nflreadpy` Python package (PyPI).** The open-source ecosystem all serious NFL analytics sits on; CC-BY licensed. Note the older `nfl_data_py` package is deprecated — tutorials referencing it should be translated. Datasets used in the draft build, all via `load_*` functions returning Polars frames:
 
 - `load_player_stats(seasons)` — weekly per-player stat lines (passing/rushing/receiving components, targets, `target_share`, `air_yards_share`, `wopr`, EPA columns, kicker FG distance brackets, team defensive columns, and a precomputed `fantasy_points_ppr`). This is the workhorse table.
-- `load_pbp(seasons)` — full play-by-play (~370 columns, back to 1999). Used only for what weekly stats can't answer: touchdown *distances*, needed for the league's 40+/50+ bonus scoring. Filter to `touchdown == 1` and keep the player-ID and yardage columns; don't load the whole thing wide.
+- `load_team_stats(seasons)` — official team attempts, sacks/dropbacks, and carries.
+- `load_pbp(seasons)` — full play-by-play (~370 columns, back to 1999). Reduced immediately for touchdown distance, red-zone/end-zone targets, goal-line carries, and conversion rates.
+- `load_participation(seasons)` — offensive players on each play, used for the explicitly labeled route-opportunity proxy and targets per route opportunity.
 - `load_rosters(season)` — birth dates (age computation), team assignments, `gsis_id` join keys.
+- `load_depth_charts(season)` — latest published NFL team, position, depth rank, and snapshot date.
+- `load_injuries(seasons)` — official practice/injury-report history for expected-games modeling.
 - `load_schedules(season)` — game results for points-allowed (DST), bye weeks, and matchup lookups.
 
 **ESPN Fantasy, via the `espn-api` package (PyPI, cwendt94).** ESPN's fantasy API is unofficial and undocumented but stable and community-maintained; the raw v3 endpoints live under `lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/...` if the package ever lags an endpoint change. Provides: league settings, all rosters, free agents, box scores, live/projected points, draft results, and the transaction log (FAAB bid history — market intelligence). Private-league auth requires two cookies copied from a logged-in browser session (`SWID`, `espn_s2`) passed to the `League` constructor. Treat these as secrets; they expire rarely but do expire.
@@ -61,7 +65,7 @@ These are the aspects actually used, with definitions and the reasoning each one
 
 **DST proxy score.** As in §3, with the year-over-year caveat: sack rate persists, takeaways regress — weight accordingly when re-ranking.
 
-**Live-state overlays (from ESPN rather than nflverse):** injury status per player, percent-rostered and percent-started (market sentiment — the "24% start rate" tell), ESPN's own weekly projection (a useful *second opinion*, never the ranking key), opponent, and game time (Thursday-lock awareness).
+**Live-state overlays (from ESPN rather than nflverse):** fantasy ownership/free agency, fantasy lineup placement, transactions, injury display, and percent-rostered/started market sentiment. ESPN's projected points and fantasy lineup slots are not V2 inputs; nflverse supplies production, usage, NFL depth charts, and injury-history modeling.
 
 ## 5. Architecture
 

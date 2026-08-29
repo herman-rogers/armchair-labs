@@ -98,6 +98,13 @@ def league(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
     """Teams, standings, and who I am."""
     state = _state(service, version)
     snapshot = state.snapshot
+    config = get_league()
+    strengths = reports.team_strengths(
+        state.tagged_board,
+        snapshot.to_frame(),
+        (team.team_id for team in snapshot.teams),
+        season_games=config.metrics.projection_season_games,
+    )
 
     return {
         **_envelope(state),
@@ -113,6 +120,9 @@ def league(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
                 "losses": team.losses,
                 "faab_remaining": team.faab_remaining,
                 "is_mine": team.team_id == snapshot.my_team_id,
+                "division_id": team.division_id,
+                "division_name": team.division_name,
+                **strengths.get(team.team_id, {}),
             }
             for team in snapshot.teams
         ],

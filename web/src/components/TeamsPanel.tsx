@@ -44,42 +44,81 @@ export function TeamsPanel({
     byTeam.set(row.owner_team_name, list)
   }
 
+  const rankedTeams = teams.slice().sort((a, b) => a.team_rank - b.team_rank)
+  const hasDivisions = rankedTeams.some(
+    (team) => team.division_id !== null || Boolean(team.division_name),
+  )
+  const divisions = new Map<string, { name: string; teams: LeagueTeam[] }>()
+  for (const team of rankedTeams) {
+    const key = hasDivisions
+      ? (team.division_id?.toString() ?? team.division_name ?? 'unassigned')
+      : 'league'
+    const name = hasDivisions
+      ? (team.division_name ??
+        (team.division_id !== null ? `Division ${team.division_id}` : 'Unassigned'))
+      : 'League'
+    const group = divisions.get(key) ?? { name, teams: [] }
+    group.teams.push(team)
+    divisions.set(key, group)
+  }
+
   return (
     <section>
-      <div className="team-grid">
-        {teams.map((team) => {
-          const rows = (byTeam.get(team.team_name) ?? [])
-            .slice()
-            .sort((a, b) => a.best_vor - b.best_vor)
-          return (
-            <button
-              type="button"
-              key={team.team_id}
-              className={`team-card ${team.is_mine ? 'mine' : ''}`}
-              onClick={() => onSelectTeam(team)}
-            >
-              <div className="team-head">
-                <span className="team-name">{team.team_name}</span>
-                {team.is_mine && <span className="badge mine">You</span>}
-              </div>
-              <div className="team-meta faint">
-                {team.owner ?? 'unknown'} · {team.wins}-{team.losses}
-                {team.faab_remaining !== null && <> · ${team.faab_remaining} FAAB</>}
-              </div>
-              {rows.length > 0 && (
-                <div className="team-thin">
-                  <span className="faint">thinnest:</span>{' '}
-                  {rows.slice(0, 2).map((row) => (
-                    <span key={row.position} className="thin-item">
-                      <span className={`pos ${row.position}`}>{row.position}</span>
-                      <span className="dim">{row.best_vor.toFixed(1)}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
-          )
-        })}
+      <p className="faint tight team-score-note">
+        Overall roster strength under {version.toUpperCase()}. Starters count fully and
+        positive bench depth counts 20%; 5.0 is league average.
+      </p>
+      <div className="division-list">
+        {[...divisions.entries()].map(([key, division]) => (
+          <section className="division-group" key={key}>
+            {hasDivisions && <h3 className="division-head">{division.name}</h3>}
+            <div className="team-grid">
+              {division.teams.map((team) => {
+                const rows = (byTeam.get(team.team_name) ?? [])
+                  .slice()
+                  .sort((a, b) => a.best_vor - b.best_vor)
+                return (
+                  <button
+                    type="button"
+                    key={team.team_id}
+                    className={`team-card ${team.is_mine ? 'mine' : ''}`}
+                    onClick={() => onSelectTeam(team)}
+                  >
+                    <div className="team-head">
+                      <span className="team-rank">#{team.team_rank}</span>
+                      <span className="team-name">{team.team_name}</span>
+                      {team.is_mine && <span className="badge mine">You</span>}
+                      <span
+                        className="team-score"
+                        title={`League-relative ${version.toUpperCase()} roster strength`}
+                      >
+                        {team.team_score.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="team-meta faint">
+                      {team.owner ?? 'unknown'} · {team.wins}-{team.losses}
+                      {team.faab_remaining !== null && <> · ${team.faab_remaining} FAAB</>}
+                      {team.fallback_players > 0 && (
+                        <> · {team.fallback_players} ESPN fallback</>
+                      )}
+                    </div>
+                    {rows.length > 0 && (
+                      <div className="team-thin">
+                        <span className="faint">thinnest:</span>{' '}
+                        {rows.slice(0, 2).map((row) => (
+                          <span key={row.position} className="thin-item">
+                            <span className={`pos ${row.position}`}>{row.position}</span>
+                            <span className="dim">{row.best_vor.toFixed(1)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        ))}
       </div>
 
       <h3 className="section-head">Recent transactions</h3>

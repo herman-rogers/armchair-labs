@@ -22,10 +22,15 @@ from nflreadpy.config import update_config
 
 from patron.config.settings import Settings, get_settings
 from patron.scoring.columns import (
+    DEPTH_CHART_COLUMNS,
+    INJURY_COLUMNS,
+    PARTICIPATION_COLUMNS,
     PBP_TOUCHDOWN_COLUMNS,
+    PBP_USAGE_COLUMNS,
     ROSTER_COLUMNS,
     SCHEDULE_COLUMNS,
     SKILL_PLAYER_COLUMNS,
+    TEAM_VOLUME_COLUMNS,
     require_columns,
 )
 
@@ -84,6 +89,49 @@ def load_touchdown_plays(seasons: list[int]) -> pl.DataFrame:
         logger.info("loaded %s touchdown plays for %s", frames[-1].height, season)
 
     return pl.concat(frames, how="vertical_relaxed")
+
+
+def load_projection_plays(seasons: list[int]) -> pl.DataFrame:
+    """Small play-by-play slice used for dropbacks and high-value opportunities."""
+    configure_cache()
+    frames: list[pl.DataFrame] = []
+    for season in seasons:
+        pbp = nfl.load_pbp([season])
+        require_columns(pbp.columns, PBP_USAGE_COLUMNS, f"nflverse projection pbp {season}")
+        frames.append(pbp.select(PBP_USAGE_COLUMNS))
+    return pl.concat(frames, how="vertical_relaxed")
+
+
+def load_team_weeks(seasons: list[int], season_type: str = "REG") -> pl.DataFrame:
+    """Official nflverse team attempts and carries by week."""
+    configure_cache()
+    frame = nfl.load_team_stats(seasons, summary_level="week")
+    require_columns(frame.columns, TEAM_VOLUME_COLUMNS, "nflverse team stats")
+    return frame.filter(pl.col("season_type") == season_type).select(TEAM_VOLUME_COLUMNS)
+
+
+def load_participation(seasons: list[int]) -> pl.DataFrame:
+    """Play-level offensive participation used to derive route opportunities."""
+    configure_cache()
+    frame = nfl.load_participation(seasons)
+    require_columns(frame.columns, PARTICIPATION_COLUMNS, "nflverse participation")
+    return frame.select(PARTICIPATION_COLUMNS)
+
+
+def load_depth_charts(seasons: list[int]) -> pl.DataFrame:
+    """Published nflverse depth-chart snapshots, including GSIS identifiers."""
+    configure_cache()
+    frame = nfl.load_depth_charts(seasons)
+    require_columns(frame.columns, DEPTH_CHART_COLUMNS, "nflverse depth charts")
+    return frame.select(DEPTH_CHART_COLUMNS)
+
+
+def load_injuries(seasons: list[int]) -> pl.DataFrame:
+    """Official injury-report history from nflverse."""
+    configure_cache()
+    frame = nfl.load_injuries(seasons)
+    require_columns(frame.columns, INJURY_COLUMNS, "nflverse injuries")
+    return frame.select(INJURY_COLUMNS)
 
 
 def load_birth_dates(season: int) -> pl.DataFrame:

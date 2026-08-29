@@ -313,14 +313,160 @@ def test_balanced_score_uses_mean_floor_and_ceiling_vor(league_config) -> None:
     )
     metrics = league_config.metrics
     expected = (
-        metrics.projection_mean_weight * row["proj_vor"]
-        + metrics.projection_floor_weight * row["floor_vor"]
-        + metrics.projection_ceiling_weight * row["ceiling_vor"]
-    ) / (
-        metrics.projection_mean_weight
-        + metrics.projection_floor_weight
-        + metrics.projection_ceiling_weight
+        (
+            metrics.projection_mean_weight * row["proj_vor"]
+            + metrics.projection_floor_weight * row["floor_vor"]
+            + metrics.projection_ceiling_weight * row["ceiling_vor"]
+        )
+        / (
+            metrics.projection_mean_weight
+            + metrics.projection_floor_weight
+            + metrics.projection_ceiling_weight
+        )
+        * row["availability_factor"]
     )
 
     assert row["projected_floor"] < row["proj_ppg"] < row["projected_ceiling"]
     assert row["v2_score"] == pytest.approx(expected)
+
+
+def test_route_participation_and_tprr_drive_targets(league_config) -> None:
+    full_route = season_row(
+        "full",
+        "Full Route",
+        "WR",
+        "SEA",
+        12.0,
+        targets=100,
+        receptions=65,
+        receiving_yards=850,
+        route_opportunities=400,
+        route_participation=0.90,
+        targets_per_route_opportunity=0.25,
+    )
+    part_route = season_row(
+        "part",
+        "Part Route",
+        "WR",
+        "SEA",
+        12.0,
+        targets=100,
+        receptions=65,
+        receiving_yards=850,
+        route_opportunities=400,
+        route_participation=0.50,
+        targets_per_route_opportunity=0.25,
+    )
+    qb = season_row(
+        "qb",
+        "Quarterback",
+        "QB",
+        "SEA",
+        20.0,
+        passing_yards=4200,
+        passing_tds=30,
+        attempts=600,
+        team_pass_attempts=600,
+        team_dropbacks=640,
+        team_games=17,
+    )
+    rows = build_projection_board(
+        pl.DataFrame([full_route, part_route, qb]),
+        v1_board(full_route, part_route),
+        wr_only_config(league_config),
+        assumptions=ProjectionAssumptions(),
+    ).to_dicts()
+    by_id = {row["player_id"]: row for row in rows}
+
+    assert (
+        by_id["full"]["projected_route_opportunities_pg"]
+        > by_id["part"]["projected_route_opportunities_pg"]
+    )
+    assert by_id["full"]["projected_targets_pg"] > by_id["part"]["projected_targets_pg"]
+
+
+def test_current_depth_chart_changes_team_and_role_automatically(league_config) -> None:
+    receiver = season_row("wr", "Moved Receiver", "WR", "OLD", 14.0, targets=120)
+    old_qb = season_row("old-qb", "Old QB", "QB", "OLD", 16.0, passing_yards=3200)
+    new_qb = season_row("new-qb", "New QB", "QB", "NEW", 22.0, passing_yards=4600)
+    new_mate = season_row("new-mate", "New Mate", "WR", "NEW", 10.0, targets=90)
+    current = pl.DataFrame(
+        {
+            "player_id": ["wr"],
+            "current_team": ["NEW"],
+            "depth_chart_rank": [2],
+            "depth_chart_position": ["Wide Receiver"],
+            "depth_chart_date": ["2026-08-01"],
+        }
+    )
+
+    row = (
+        build_projection_board(
+            pl.DataFrame([receiver, old_qb, new_qb, new_mate]),
+            v1_board(receiver, new_mate),
+            wr_only_config(league_config),
+            assumptions=ProjectionAssumptions(),
+            current_players=current,
+        )
+        .filter(pl.col("player_id") == "wr")
+        .to_dicts()[0]
+    )
+
+    assert row["projected_team"] == "NEW"
+    assert row["depth_chart_rank"] == 2
+    assert row["depth_role_factor"] < 1.0
+    assert "nflverse depth chart" in row["projection_reason"]
+
+
+def test_injury_and_participation_history_reduce_expected_games_and_v2_score(
+    league_config,
+) -> None:
+    healthy = season_row(
+        "healthy",
+        "Healthy Receiver",
+        "WR",
+        "SEA",
+        14.0,
+        targets=120,
+        active_games=17,
+        team_games=17,
+    )
+    injured = season_row(
+        "injured",
+        "Injured Receiver",
+        "WR",
+        "SEA",
+        14.0,
+        targets=120,
+        active_games=8,
+        team_games=17,
+        injury_report_weeks=9,
+        out_report_weeks=5,
+    )
+    baseline = season_row(
+        "baseline",
+        "Baseline Receiver",
+        "WR",
+        "SEA",
+        8.0,
+        targets=70,
+        active_games=17,
+        team_games=17,
+    )
+    qb = season_row("qb", "Quarterback", "QB", "SEA", 20.0, passing_yards=4200)
+    config = wr_only_config(league_config).model_copy(update={"vor_baseline_rank": {"WR": 3}})
+    rows = build_projection_board(
+        pl.DataFrame([healthy, injured, baseline, qb]),
+        v1_board(healthy, injured, baseline),
+        config,
+        assumptions=ProjectionAssumptions(),
+    ).to_dicts()
+    by_id = {row["player_id"]: row for row in rows}
+
+    assert by_id["injured"]["proj_ppg"] == pytest.approx(by_id["healthy"]["proj_ppg"])
+    assert by_id["injured"]["expected_games"] < by_id["healthy"]["expected_games"]
+    assert (
+        by_id["injured"]["availability_adjusted_vor"]
+        < by_id["healthy"]["availability_adjusted_vor"]
+    )
+    assert by_id["injured"]["v2_score"] < by_id["healthy"]["v2_score"]

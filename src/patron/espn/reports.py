@@ -14,15 +14,19 @@ preseason one, and using the stale number understates every pickup on the list.
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Iterable
 
 import polars as pl
 
 from patron.board.overrides import ADJUSTED_VOR
 from patron.espn.crosswalk import (
     CHANGED_TEAM,
+    ESPN_ID,
     INJURY_STATUS,
     IS_FREE_AGENT,
     IS_MINE,
+    OWNER_TEAM_ID,
     OWNER_TEAM_NAME,
     PERCENT_OWNED,
 )
@@ -37,11 +41,26 @@ CONCERNING_INJURY_TAGS = frozenset(
     {"QUESTIONABLE", "DOUBTFUL", "OUT", "INJURY_RESERVE", "SUSPENSION", "DAY_TO_DAY"}
 )
 
+# A bench is useful insurance and trade inventory, but it should never be valued like
+# another starting lineup. Injured reserve does not contribute current roster strength.
+BENCH_STRENGTH_WEIGHT = 0.20
+BENCH_SLOTS = frozenset({"BE", "BENCH"})
+IR_SLOTS = frozenset({"IR", "INJURED RESERVE"})
+
+
+def _projection_ppg_column(frame: pl.DataFrame) -> str:
+    """Season-equivalent V2 production, historical PPG for V1."""
+    return "season_equivalent_ppg" if "season_equivalent_ppg" in frame.columns else "ppg"
+
+
+def _board_value_column(frame: pl.DataFrame) -> str:
+    return "v2_score" if "v2_score" in frame.columns else ADJUSTED_VOR
+
 
 def wire_replacement_levels(
     tagged_board: pl.DataFrame,
     baseline_ranks: dict[str, int],
-    ppg_column: str = "ppg",
+    ppg_column: str | None = None,
 ) -> dict[str, float]:
     """Replacement level measured against the free-agent pool, not the preseason board.
 
@@ -52,6 +71,7 @@ def wire_replacement_levels(
     Falls back to the best available player when the pool is thinner than the baseline
     rank, which is the common case at tight end.
     """
+    ppg_column = ppg_column or _projection_ppg_column(tagged_board)
     levels: dict[str, float] = {}
     available = tagged_board.filter(pl.col(IS_FREE_AGENT))
 
@@ -94,7 +114,8 @@ def ranked_wire(
         limit: Cap on rows returned.
         healthy_only: Drop players who cannot be started this week.
     """
-    levels = wire_replacement_levels(tagged_board, baseline_ranks)
+    ppg_column = _projection_ppg_column(tagged_board)
+    levels = wire_replacement_levels(tagged_board, baseline_ranks, ppg_column=ppg_column)
     logger.info(
         "wire replacement: %s",
         ", ".join(f"{position} {ppg:.1f}" for position, ppg in sorted(levels.items())),
@@ -105,7 +126,7 @@ def ranked_wire(
         .replace_strict(levels, default=None, return_dtype=pl.Float64)
         .alias(WIRE_REPLACEMENT)
     )
-    wire = wire.with_columns((pl.col("ppg") - pl.col(WIRE_REPLACEMENT)).alias(WIRE_VOR))
+    wire = wire.with_columns((pl.col(ppg_column) - pl.col(WIRE_REPLACEMENT)).alias(WIRE_VOR))
 
     if min_vor is not None:
         wire = wire.filter(pl.col(WIRE_VOR) >= min_vor)
@@ -128,9 +149,10 @@ def roster_health(
     injury tag outranks a team change, which outranks a healthy starter.
     """
     mine = tagged_board.filter(pl.col(IS_MINE)) if my_team_id is not None else tagged_board
+    value_column = _board_value_column(tagged_board)
     return mine.with_columns(
         pl.col(INJURY_STATUS).is_in(list(CONCERNING_INJURY_TAGS)).fill_null(False).alias("flagged")
-    ).sort(["flagged", CHANGED_TEAM, ADJUSTED_VOR], descending=[True, True, True])
+    ).sort(["flagged", CHANGED_TEAM, value_column], descending=[True, True, True])
 
 
 def opponent_weaknesses(
@@ -144,19 +166,135 @@ def opponent_weaknesses(
     """
     rostered = tagged_board.filter(~pl.col(IS_FREE_AGENT) & pl.col(OWNER_TEAM_NAME).is_not_null())
 
+    value_column = _board_value_column(tagged_board)
     best = (
         rostered.filter(pl.col("position").is_in(list(baseline_ranks)))
         .group_by([OWNER_TEAM_NAME, "position"])
         .agg(
-            pl.col(ADJUSTED_VOR).max().alias("best_vor"),
+            pl.col(value_column).max().alias("best_vor"),
             pl.col("player_display_name")
-            .sort_by(ADJUSTED_VOR, descending=True)
+            .sort_by(value_column, descending=True)
             .first()
             .alias("best_player"),
             pl.len().alias("depth"),
         )
     )
     return best.sort([OWNER_TEAM_NAME, "best_vor"])
+
+
+def team_strengths(
+    tagged_board: pl.DataFrame,
+    espn_players: pl.DataFrame,
+    team_ids: Iterable[int],
+    *,
+    season_games: int = 17,
+) -> dict[int, dict[str, int | float]]:
+    """Rank complete fantasy rosters using the selected metric generation.
+
+    A matched player's holistic board value is the input: ``v2_score`` for V2 and
+    adjusted VOR for V1. Current ESPN starters count fully; positive bench value counts
+    at 20% as depth. Rookies with no nflverse history use ESPN projected PPG above the
+    selected board's positional replacement level, which prevents a strong rookie class
+    from disappearing from the league comparison merely because V2 cannot model it yet.
+
+    ``team_score`` is a league-relative 0–10 index centered at 5.0. A 1.5-point change
+    represents one league standard deviation, so the number stays useful without
+    forcing the best and worst teams to artificial 10.0 and 0.0 endpoints.
+    """
+
+    ids = [int(team_id) for team_id in team_ids]
+    raw_strength = {team_id: 0.0 for team_id in ids}
+    scored_players = {team_id: 0 for team_id in ids}
+    fallback_players = {team_id: 0 for team_id in ids}
+    if not ids or espn_players.height == 0:
+        return {
+            team_id: {
+                "team_rank": rank,
+                "team_score": 5.0,
+                "scored_players": 0,
+                "fallback_players": 0,
+            }
+            for rank, team_id in enumerate(ids, start=1)
+        }
+
+    value_column = _board_value_column(tagged_board)
+    ppg_column = _projection_ppg_column(tagged_board)
+    replacement_column = (
+        "proj_repl_ppg" if "proj_repl_ppg" in tagged_board.columns else "repl_ppg"
+    )
+
+    board_values: dict[int, float] = {}
+    if ESPN_ID in tagged_board.columns:
+        for row in tagged_board.select(ESPN_ID, value_column).iter_rows(named=True):
+            espn_id = row.get(ESPN_ID)
+            value = row.get(value_column)
+            if espn_id is not None and isinstance(value, int | float) and math.isfinite(value):
+                board_values[int(espn_id)] = float(value)
+
+    replacement: dict[str, float] = {}
+    if replacement_column in tagged_board.columns:
+        for position, value in (
+            tagged_board.select("position", replacement_column)
+            .drop_nulls()
+            .unique(subset=["position"])
+            .iter_rows()
+        ):
+            if isinstance(value, int | float) and math.isfinite(value):
+                replacement[str(position)] = float(value)
+    elif ppg_column in tagged_board.columns:
+        # Defensive fallback for small synthetic frames and legacy artifacts.
+        replacement = {
+            str(position): float(value)
+            for position, value in tagged_board.group_by("position")
+            .agg(pl.col(ppg_column).median())
+            .iter_rows()
+            if value is not None
+        }
+
+    for row in espn_players.iter_rows(named=True):
+        owner_id = row.get(OWNER_TEAM_ID)
+        position = str(row.get("position") or "").upper()
+        if owner_id is None or int(owner_id) not in raw_strength or position not in replacement:
+            continue
+
+        team_id = int(owner_id)
+        espn_id = row.get(ESPN_ID)
+        value = board_values.get(int(espn_id)) if espn_id is not None else None
+        if value is None:
+            projected_points = row.get("projected_points")
+            if not isinstance(projected_points, int | float) or not math.isfinite(projected_points):
+                continue
+            value = float(projected_points) / max(season_games, 1) - replacement[position]
+            fallback_players[team_id] += 1
+
+        slot = str(row.get("lineup_slot") or "").upper()
+        if slot in IR_SLOTS:
+            weight = 0.0
+        elif slot in BENCH_SLOTS or not slot:
+            weight = BENCH_STRENGTH_WEIGHT
+            value = max(value, 0.0)
+        else:
+            weight = 1.0
+
+        raw_strength[team_id] += value * weight
+        scored_players[team_id] += 1
+
+    values = list(raw_strength.values())
+    mean = sum(values) / len(values)
+    deviation = math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+    ordered = sorted(ids, key=lambda team_id: (-raw_strength[team_id], team_id))
+
+    result: dict[int, dict[str, int | float]] = {}
+    for rank, team_id in enumerate(ordered, start=1):
+        z_score = (raw_strength[team_id] - mean) / deviation if deviation > 0 else 0.0
+        rating = max(0.0, min(10.0, 5.0 + 1.5 * z_score))
+        result[team_id] = {
+            "team_rank": rank,
+            "team_score": round(rating, 1),
+            "scored_players": scored_players[team_id],
+            "fallback_players": fallback_players[team_id],
+        }
+    return result
 
 
 def unrankable_players(

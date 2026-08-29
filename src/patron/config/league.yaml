@@ -71,3 +71,14 @@ metrics:
   projection_mean_weight: 0.75
   projection_floor_weight: 0.15
   projection_ceiling_weight: 0.10
+  # Expected-games projections preserve PPG as ability per active game, then scale
+  # VOR by availability for the actual draft rank.
+  projection_season_games: 17
+  projection_availability_prior: 0.94
+  projection_availability_shrinkage_games: 17.0
+  # When nflverse participation is present, route-opportunity x TPRR supplies this
+  # share of the projected target estimate. Participation identifies who was on a
+  # dropback; it does not prove every TE/RB released into a route.
+  projection_route_weight: 0.55
+  # Maximum automatic role change from the current nflverse depth-chart rank.
+  projection_depth_chart_cap: 0.18

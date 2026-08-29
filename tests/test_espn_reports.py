@@ -7,9 +7,11 @@ import pytest
 
 from patron.espn.crosswalk import (
     CHANGED_TEAM,
+    ESPN_ID,
     INJURY_STATUS,
     IS_FREE_AGENT,
     IS_MINE,
+    OWNER_TEAM_ID,
     OWNER_TEAM_NAME,
     PERCENT_OWNED,
 )
@@ -18,6 +20,7 @@ from patron.espn.reports import (
     opponent_weaknesses,
     ranked_wire,
     roster_health,
+    team_strengths,
     unrankable_players,
     wire_replacement_levels,
 )
@@ -73,6 +76,35 @@ class TestWireReplacement:
 
 
 class TestRankedWire:
+    def test_v2_wire_uses_availability_adjusted_projection(self) -> None:
+        wire = ranked_wire(
+            tagged(
+                {
+                    "player_display_name": "Durable",
+                    "ppg": 8.0,
+                    "season_equivalent_ppg": 14.0,
+                    "v2_score": 5.0,
+                },
+                {
+                    "player_display_name": "Fragile",
+                    "ppg": 20.0,
+                    "season_equivalent_ppg": 9.0,
+                    "v2_score": 3.0,
+                },
+                {
+                    "player_display_name": "Bar",
+                    "ppg": 5.0,
+                    "season_equivalent_ppg": 5.0,
+                    "v2_score": 0.0,
+                },
+            ),
+            {"RB": 3},
+            min_vor=None,
+        )
+
+        assert wire["player_display_name"].to_list() == ["Durable", "Fragile", "Bar"]
+        assert wire[WIRE_VOR][0] == pytest.approx(9.0)
+
     def test_rostered_players_never_appear(self) -> None:
         wire = ranked_wire(
             tagged(
@@ -151,6 +183,27 @@ class TestRankedWire:
 
 
 class TestRosterHealth:
+    def test_v2_roster_sorts_on_v2_score(self) -> None:
+        health = roster_health(
+            tagged(
+                {
+                    "player_display_name": "Historical",
+                    "adj_vor": 10.0,
+                    "v2_score": 1.0,
+                    IS_MINE: True,
+                },
+                {
+                    "player_display_name": "Projected",
+                    "adj_vor": 1.0,
+                    "v2_score": 10.0,
+                    IS_MINE: True,
+                },
+            ),
+            my_team_id=3,
+        )
+
+        assert health["player_display_name"].to_list() == ["Projected", "Historical"]
+
     def test_decisions_surface_above_non_decisions(self) -> None:
         health = roster_health(
             tagged(
@@ -207,6 +260,65 @@ class TestOpponentWeaknesses:
     def test_free_agents_are_not_anyone_s_weakness(self) -> None:
         weak = opponent_weaknesses(tagged({"position": "TE", IS_FREE_AGENT: True}), BASELINES)
         assert weak.height == 0
+
+
+class TestTeamStrengths:
+    def test_v2_value_ranks_starters_and_discounted_depth(self) -> None:
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2, 3, None],
+                "position": ["RB", "WR", "RB", "WR"],
+                "v2_score": [6.0, 5.0, 4.0, 0.0],
+                "adj_vor": [1.0, 1.0, 100.0, 0.0],
+                "season_equivalent_ppg": [16.0, 15.0, 14.0, 10.0],
+                "proj_repl_ppg": [10.0, 10.0, 10.0, 10.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2, 3, 99],
+                "position": ["RB", "WR", "RB", "WR"],
+                OWNER_TEAM_ID: [1, 1, 2, 2],
+                "projected_points": [272.0, 255.0, 238.0, 204.0],
+                "lineup_slot": ["RB", "BE", "RB", "WR"],
+            }
+        )
+
+        strengths = team_strengths(board, espn, [1, 2])
+
+        # Team 1: 6 starter + 20% of 5 bench = 7. Team 2: 4 starter +
+        # (204 / 17 - 10 replacement) rookie fallback = 6.
+        assert strengths[1]["team_rank"] == 1
+        assert strengths[2]["team_rank"] == 2
+        assert strengths[1]["team_score"] == pytest.approx(6.5)
+        assert strengths[2]["team_score"] == pytest.approx(3.5)
+        assert strengths[2]["fallback_players"] == 1
+        assert strengths[1]["fallback_players"] == 0
+
+    def test_equal_rosters_are_centered_at_five(self) -> None:
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "position": ["RB", "RB"],
+                "v2_score": [4.0, 4.0],
+                "season_equivalent_ppg": [14.0, 14.0],
+                "proj_repl_ppg": [10.0, 10.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "position": ["RB", "RB"],
+                OWNER_TEAM_ID: [1, 2],
+                "projected_points": [238.0, 238.0],
+                "lineup_slot": ["RB", "RB"],
+            }
+        )
+
+        strengths = team_strengths(board, espn, [1, 2])
+
+        assert strengths[1]["team_score"] == pytest.approx(5.0)
+        assert strengths[2]["team_score"] == pytest.approx(5.0)
 
 
 class TestUnrankable:

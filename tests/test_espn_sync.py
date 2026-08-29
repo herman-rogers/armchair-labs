@@ -141,7 +141,18 @@ class TestSnapshotFrame:
         original = self._snapshot(
             [PlayerState(1, "A", "WR", "SF", "ACTIVE", 50.0, 10.0, 8.0, 3, "Mine", "BE")]
         )
-        original.teams = [TeamState(3, "Mine", "me", 1, 0, 120)]
+        original.teams = [
+            TeamState(
+                3,
+                "Mine",
+                "me",
+                1,
+                0,
+                120,
+                division_id=2,
+                division_name="NFC",
+            )
+        ]
         original.transactions = [TransactionState("2026-08-01", "WAIVER", "Mine", "A", 17)]
 
         path = original.write(tmp_path / "snap.json")
@@ -150,7 +161,24 @@ class TestSnapshotFrame:
         assert restored.league_name == "Sweaty Plays"
         assert restored.players[0].player_display_name == "A"
         assert restored.teams[0].faab_remaining == 120
+        assert restored.teams[0].division_id == 2
+        assert restored.teams[0].division_name == "NFC"
         assert restored.transactions[0].bid_amount == 17
+
+    def test_an_old_snapshot_without_divisions_still_loads(self, tmp_path: Path) -> None:
+        original = self._snapshot([])
+        original.teams = [TeamState(3, "Mine", "me", 1, 0, 120)]
+        path = original.write(tmp_path / "snap.json")
+
+        raw = path.read_text().replace(
+            ',\n      "division_id": null,\n      "division_name": null',
+            "",
+        )
+        path.write_text(raw)
+        restored = LeagueSnapshot.read(path)
+
+        assert restored.teams[0].division_id is None
+        assert restored.teams[0].division_name is None
 
 
 class TestTimestamps:

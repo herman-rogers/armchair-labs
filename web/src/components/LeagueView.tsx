@@ -21,9 +21,12 @@ export function LeagueView({ version }: { version: MetricVersion }) {
   const [selectedTeam, setSelectedTeam] = useState<LeagueTeam | null>(null)
   const queryClient = useQueryClient()
 
-  const league = useQuery({ queryKey: ['league'], queryFn: fetchLeague })
+  const league = useQuery({
+    queryKey: ['league', version],
+    queryFn: () => fetchLeague(version),
+  })
   const refresh = useMutation({
-    mutationFn: refreshLeague,
+    mutationFn: () => refreshLeague(version),
     // Everything on these screens derives from one snapshot, so a refresh invalidates
     // all of it rather than leaving panels disagreeing about what week it is.
     onSuccess: () => queryClient.invalidateQueries(),

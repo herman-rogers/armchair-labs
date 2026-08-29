@@ -21,11 +21,16 @@ import pytest
 from patron.data import nflverse
 from patron.scoring.columns import (
     DEFENSE_COLUMNS,
+    DEPTH_CHART_COLUMNS,
+    INJURY_COLUMNS,
     KICKING_COLUMNS,
     NFLVERSE_POINTS_COLUMN,
+    PARTICIPATION_COLUMNS,
     PBP_TOUCHDOWN_COLUMNS,
+    PBP_USAGE_COLUMNS,
     SCHEDULE_COLUMNS,
     SKILL_PLAYER_COLUMNS,
+    TEAM_VOLUME_COLUMNS,
 )
 
 pytestmark = pytest.mark.network
@@ -87,6 +92,19 @@ class TestPlayByPlaySchema:
 
 
 class TestSupportingSchemas:
+    def test_projection_inputs_are_present(self) -> None:
+        team = nflverse.load_team_weeks([SEASON])
+        plays = nflverse.load_projection_plays([SEASON])
+        participation = nflverse.load_participation([SEASON])
+        depth = nflverse.load_depth_charts([SEASON])
+        injuries = nflverse.load_injuries([SEASON])
+
+        assert set(TEAM_VOLUME_COLUMNS) <= set(team.columns)
+        assert set(PBP_USAGE_COLUMNS) <= set(plays.columns)
+        assert set(PARTICIPATION_COLUMNS) <= set(participation.columns)
+        assert set(DEPTH_CHART_COLUMNS) <= set(depth.columns)
+        assert set(INJURY_COLUMNS) <= set(injuries.columns)
+
     def test_roster_columns_are_present(self) -> None:
         rosters = nflverse.load_birth_dates(SEASON)
         assert set(rosters.columns) == {"player_id", "birth_date"}

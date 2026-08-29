@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MetricVersion, Player } from '../api/types'
 import { Flags } from './Flags'
 
@@ -187,9 +187,27 @@ const V2_COLUMNS: Column[] = [
   },
   {
     key: 'adj_proj_vor',
-    label: 'Proj VOR',
-    title: 'Expected projected points per game above projected positional replacement, including manual overrides.',
+    label: 'V2 Mean VOR',
+    title: 'V2 combined mean points per game above replacement, including manual overrides.',
     render: (p) => <span className="dim">{number(p.adj_proj_vor)}</span>,
+  },
+  {
+    key: 'availability_adjusted_vor',
+    label: 'Season VOR',
+    title: 'Projected VOR scaled by expected games. This is the availability-aware expected-value input to the V2 rank.',
+    render: (p) => <span className="dim">{number(p.availability_adjusted_vor)}</span>,
+  },
+  {
+    key: 'expected_games',
+    label: 'Exp G',
+    title: 'Expected games from nflverse participation and injury-report history, shrunk toward the league availability prior.',
+    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+  },
+  {
+    key: 'expected_season_points',
+    label: 'Season Pts',
+    title: 'Projected points per active game multiplied by expected games.',
+    render: (p) => <span className="dim">{number(p.expected_season_points, 0)}</span>,
   },
   {
     key: 'projected_floor',
@@ -205,13 +223,13 @@ const V2_COLUMNS: Column[] = [
   },
   {
     key: 'proj_ppg',
-    label: 'Proj PPG',
-    title: 'Forward PPG after individual shrinkage, regression, age, role, and team context.',
+    label: 'V2 PPG',
+    title: 'Combined V2 PPG: 35% normalized historical branch plus 65% bottom-up stat-line forecast.',
     render: (p) => number(p.proj_ppg),
   },
   {
     key: 'ppg',
-    label: 'Last PPG',
+    label: 'Actual PPG',
     title: 'Most recent season’s actual league-scored PPG; evidence, not the v2 sort key.',
     render: (p) => <span className="dim">{number(p.ppg)}</span>,
   },
@@ -240,6 +258,12 @@ const V2_COLUMNS: Column[] = [
     render: (p) => <span className="dim">{percent(p.teammate_competition)}</span>,
   },
   {
+    key: 'depth_chart_rank',
+    label: 'Depth',
+    title: 'Latest published nflverse depth-chart rank. This automatically affects projected role; it is not ESPN fantasy lineup status.',
+    render: (p) => <span className="dim">{p.depth_chart_rank ?? '—'}</span>,
+  },
+  {
     key: 'projected_targets_pg',
     label: 'Tgt/G',
     title: 'Projected targets per game from target share, WOPR, raw weighted opportunity, team pass volume, and competition.',
@@ -250,6 +274,36 @@ const V2_COLUMNS: Column[] = [
     label: 'Car/G',
     title: 'Projected carries per game from carry share, team rushing volume, and backfield competition.',
     render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
+  },
+  {
+    key: 'projected_route_participation',
+    label: 'Route%',
+    title: 'Projected share of team dropbacks with an eligible-player route opportunity. Participation cannot distinguish a released route from pass protection.',
+    render: (p) => <span className="dim">{percent(p.projected_route_participation)}</span>,
+  },
+  {
+    key: 'projected_targets_per_route_opportunity',
+    label: 'TPRR',
+    title: 'Projected targets per route opportunity, regressed by nflverse participation sample.',
+    render: (p) => <span className="dim">{percent(p.projected_targets_per_route_opportunity)}</span>,
+  },
+  {
+    key: 'projected_end_zone_targets_pg',
+    label: 'EZ Tgt/G',
+    title: 'Projected end-zone targets per game from nflverse play-by-play usage.',
+    render: (p) => <span className="dim">{number(p.projected_end_zone_targets_pg, 2)}</span>,
+  },
+  {
+    key: 'projected_goal_line_carries_pg',
+    label: 'GL Car/G',
+    title: 'Projected carries from the opponent five-yard line or closer per game.',
+    render: (p) => <span className="dim">{number(p.projected_goal_line_carries_pg, 2)}</span>,
+  },
+  {
+    key: 'projected_pass_attempts_pg',
+    label: 'Att/G',
+    title: 'Projected official pass attempts per game for quarterbacks.',
+    render: (p) => <span className="dim">{number(p.projected_pass_attempts_pg)}</span>,
   },
   {
     key: 'projected_target_share',
@@ -295,6 +349,11 @@ export function BoardTable({ players, version }: { players: Player[]; version: M
   const [sortKey, setSortKey] = useState<SortKey>('rank')
   const [direction, setDirection] = useState<Direction>('asc')
   const columns = version === 'v2' ? [...IDENTITY_COLUMNS.slice(0, 3), ...V2_COLUMNS] : [...IDENTITY_COLUMNS, ...V1_COLUMNS]
+
+  useEffect(() => {
+    setSortKey('rank')
+    setDirection('asc')
+  }, [version])
 
   const sorted = useMemo(() => {
     const rows = [...players]

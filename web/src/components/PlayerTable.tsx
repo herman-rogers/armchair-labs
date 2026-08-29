@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { LeaguePlayer } from '../api/types'
 import { Flags } from './Flags'
 import { InjuryBadge, MovedBadge, OwnerBadge } from './Availability'
@@ -26,6 +26,13 @@ export const percent = (value: number | null | undefined, scale = 100) =>
 
 /** Columns shared by every league-aware table. */
 export const IDENTITY: PlayerColumn[] = [
+  {
+    key: 'rank',
+    label: '#',
+    title: 'Overall rank in the selected V1 or V2 model.',
+    initial: 'asc',
+    render: (p) => <span className="rank">{p.rank}</span>,
+  },
   {
     key: 'player_display_name',
     label: 'Player',
@@ -109,6 +116,14 @@ export function PlayerTable({
 }) {
   const [sortKey, setSortKey] = useState<keyof LeaguePlayer>(defaultSort)
   const [direction, setDirection] = useState<Direction>('desc')
+
+  // This component stays mounted when the metric tab changes. Resetting is required:
+  // otherwise V2 can keep sorting on V1's adj_vor (or V1 can keep V2's score), making
+  // two genuinely different boards appear identical.
+  useEffect(() => {
+    setSortKey(defaultSort)
+    setDirection('desc')
+  }, [defaultSort])
 
   const sorted = useMemo(() => {
     const rows = [...players]

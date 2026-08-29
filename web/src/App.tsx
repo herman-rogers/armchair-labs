@@ -15,22 +15,21 @@ const VIEWS: { id: View; label: string; hint: string }[] = [
 /**
  * The two metric generations, named by what they answer rather than by version.
  *
- * "v1" and "v2" are internal vocabulary; nobody choosing between them is asking which
- * came first. Labelling them by season makes the choice self-evident — one is what
- * happened, the other is what is expected — and the seasons come from config so the
- * labels stay correct next year.
+ * V1 is the actual historical board. V2 is the combined model: normalized actual
+ * history plus the bottom-up forecast. Keep both the version and the meaning visible
+ * so "V2" is never mistaken for a projection-only dataset.
  */
 function versionOptions(boardSeason?: number, draftSeason?: number) {
   return [
     {
       id: 'v1' as MetricVersion,
-      label: boardSeason ? `${boardSeason} Actual` : 'Actual',
+      label: boardSeason ? `V1 · ${boardSeason} Actual` : 'V1 · Actual',
       hint: 'What each player actually scored last season, under this league\u2019s scoring.',
     },
     {
       id: 'v2' as MetricVersion,
-      label: draftSeason ? `${draftSeason} Projected` : 'Projected',
-      hint: 'What each player is expected to score, from role, team context, and age.',
+      label: draftSeason ? `V2 · ${draftSeason} Combined` : 'V2 · Combined',
+      hint: 'Normalized actual history blended with the bottom-up stat-line forecast.',
     },
   ]
 }

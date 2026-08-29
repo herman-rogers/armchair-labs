@@ -19,6 +19,13 @@ from patron.config.league import LeagueConfig, get_league
 from patron.config.settings import Settings, get_settings
 from patron.data import nflverse
 from patron.data.derived import cached_frame
+from patron.metrics.enrichment import (
+    build_injury_history,
+    build_player_usage,
+    build_team_volume,
+    current_depth_chart,
+    enrich_player_seasons,
+)
 from patron.metrics.projection import METRIC_VERSION, build_projection_board
 from patron.scoring.bonuses import BonusAudit, extract_touchdown_bonuses
 from patron.scoring.dst import build_dst_proxy
@@ -87,6 +94,26 @@ def build(
     bonuses, audit = load_bonuses(config, force=force)
 
     player_seasons = build_player_seasons(weeks, bonuses, config)
+    team_volume = build_team_volume(nflverse.load_team_weeks(config.seasons))
+    usage = cached_frame(
+        "projection_usage_v2",
+        config.seasons,
+        lambda: build_player_usage(
+            weeks,
+            nflverse.load_projection_plays(config.seasons),
+            nflverse.load_participation(config.seasons),
+        ),
+        force=force,
+        settings=settings,
+    )
+    injury_history = build_injury_history(nflverse.load_injuries(config.seasons))
+    player_seasons = enrich_player_seasons(
+        player_seasons,
+        usage,
+        team_volume,
+        injury_history,
+    )
+    depth_chart = current_depth_chart(nflverse.load_depth_charts([config.board_season]))
     birth_dates = nflverse.load_birth_dates(config.board_season)
     board = build_board(
         player_seasons,
@@ -94,7 +121,12 @@ def build(
         config=config,
         strict_overrides=strict_overrides,
     ).with_columns(pl.lit("v1").alias(METRIC_VERSION))
-    board_v2 = build_projection_board(player_seasons, board, config)
+    board_v2 = build_projection_board(
+        player_seasons,
+        board,
+        config,
+        current_players=depth_chart,
+    )
 
     board_weeks = weeks.filter(pl.col("season") == config.board_season)
     kickers = aggregate_kicker_seasons(
@@ -148,6 +180,11 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "player_id",
     # v2 forward-projection columns. v1 exports omit these cleanly.
     "projected_team",
+    "depth_chart_rank",
+    "depth_chart_position",
+    "depth_chart_position_group",
+    "depth_chart_date",
+    "depth_role_factor",
     "v2_score",
     "adj_proj_vor",
     "proj_vor",
@@ -163,6 +200,15 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "floor_vor",
     "ceiling_vor",
     "projection_confidence",
+    "availability_confidence",
+    "projected_availability",
+    "availability_factor",
+    "expected_games",
+    "expected_season_points",
+    "season_equivalent_ppg",
+    "availability_adjusted_vor",
+    "historical_injury_report_weeks",
+    "injury_missed_equivalents",
     "effective_games",
     "age_factor",
     "td_regression_adjustment",
@@ -171,6 +217,7 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "qb_context",
     "team_scoring_context",
     "team_pass_volume",
+    "team_dropbacks",
     "team_rush_volume",
     "teammate_competition",
     "season_target_share",
@@ -180,12 +227,20 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "projected_wopr",
     "projected_air_yards_share",
     "projected_targets_pg",
+    "projected_route_opportunities_pg",
+    "projected_route_participation",
+    "projected_targets_per_route_opportunity",
     "projected_carries_pg",
     "projected_receptions_pg",
     "projected_receiving_yards_pg",
     "projected_rushing_yards_pg",
     "projected_receiving_tds_pg",
     "projected_rushing_tds_pg",
+    "projected_red_zone_targets_pg",
+    "projected_end_zone_targets_pg",
+    "projected_red_zone_carries_pg",
+    "projected_goal_line_carries_pg",
+    "projected_pass_attempts_pg",
     "projected_passing_yards_pg",
     "projected_passing_tds_pg",
     "projected_interceptions_pg",
