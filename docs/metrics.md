@@ -321,23 +321,44 @@ charts, and injury modeling are nflverse-first.
 
 ### League team-strength rating
 
-The League dashboard rolls the selected board into an overall fantasy-roster rating.
-For V2, each matched player's balanced `v2_score` is the value input; V1 uses adjusted
-historical VOR. Current starters count fully, injured-reserve players count zero, and
-positive bench value counts 20% so useful depth matters without treating the bench as
-a second starting lineup. Kickers and defenses remain outside this score because the
-player board tiers rather than ranks them.
+The League dashboard evaluates the complete roster rather than trusting the lineup a
+manager happens to have saved in ESPN. For each of 12,000 deterministic scenarios, it:
 
-An ESPN full-season projection is used only as a replacement-relative fallback for a
-rostered rookie or returnee with no nflverse tape. The UI reports the number of these
-fallbacks on each affected team rather than presenting them as V2 projections.
+1. samples every player's active/inactive state from `projected_availability`;
+2. selects the highest-projected legal active lineup using the ESPN league shape—one
+   QB, two RBs, three WRs, one TE, and one RB/WR/TE flex;
+3. sums the selected V2 per-active-game means and their projected variances; and
+4. records whether every starting slot was filled and how many points came from a
+   player outside the full-strength lineup.
 
-The raw roster values determine overall `team_rank`. The displayed `team_score` is a
-league-relative 0–10 index centered at 5.0, with 1.5 rating points representing one
-standard deviation of roster strength. This avoids forcing the current best and worst
-teams to artificial 10.0 and 0.0 endpoints. ESPN division IDs and names group the team
-cards when the league supplies them; division grouping does not change the overall
-rank.
+The scenario average is `expected_weekly_points`. It inherently values bench depth:
+a reserve contributes only in scenarios where that player actually enters the best
+active lineup. `bench_rescue_points` reports that expected contribution explicitly,
+and `lineup_coverage` is the probability that all eight skill-position slots can be
+filled by active rostered players.
+
+Weekly uncertainty uses the law of total variance:
+
+`team variance = average(selected player variances) + variance(scenario lineup means)`
+
+The first term is normal week-to-week scoring volatility. The second is availability
+and replacement risk—the stars-and-scrubs penalty when an absent star exposes a weak
+bench. `weekly_risk` is the square root of that variance, in fantasy points, and
+`weekly_floor = expected weekly points - 0.674 × weekly risk` approximates a 25th-
+percentile outcome. Player outcomes are currently treated as independent, so shared
+QB/receiver and game-environment covariance remains a future refinement.
+
+Overall `team_rank` sorts expected weekly points. Risk is intentionally separate rather
+than silently penalizing or rewarding volatility. The displayed `team_score` maps the
+expected-points distribution to a league-relative 0–10 index centered at 5.0, with 1.5
+rating points representing one league standard deviation.
+
+An ESPN full-season projection is used only for a rostered rookie or returnee with no
+nflverse tape; its volatility is estimated from the position's V2 ratio and its
+availability is set to the configured 94% prior. The UI reports the number of these
+fallbacks. Kicker and defense points are excluded because the V2 player projection
+does not produce their weekly mean and variance. ESPN division IDs and names group the
+cards but do not change the overall rank.
 
 ## V2 additions and updates
 

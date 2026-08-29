@@ -121,3 +121,9 @@ def load_overrides_config() -> dict[str, Any]:
 def load_projections_config() -> dict[str, Any]:
     """Forward-looking team and player assumptions used only by the v2 board."""
     return _load_yaml("projections.yaml")
+
+
+@functools.lru_cache(maxsize=1)
+def load_metric_report_config() -> dict[str, Any]:
+    """Metric catalog and evaluation settings for the rolling v2 backtest."""
+    return _load_yaml("metric_report.yaml")

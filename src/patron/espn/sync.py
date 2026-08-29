@@ -52,6 +52,22 @@ class PlayerState:
 
 
 @dataclass
+class ScheduleEntry:
+    """One week of a team's season."""
+
+    week: int
+    opponent_team_id: int
+    #: Points scored, once the week has been played. 0.0 for a future week.
+    score: float
+    #: ESPN's outcome code: W, L, T, or U for unplayed.
+    outcome: str
+
+    @property
+    def played(self) -> bool:
+        return self.outcome in {"W", "L", "T"}
+
+
+@dataclass
 class TeamState:
     team_id: int
     team_name: str
@@ -63,6 +79,7 @@ class TeamState:
     # before division ingestion backward-compatible.
     division_id: int | None = None
     division_name: str | None = None
+    schedule: list[ScheduleEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -86,6 +103,12 @@ class LeagueSnapshot:
     season: int
     week: int
     my_team_id: int | None
+    #: Weeks in the regular season, so the UI knows how far the schedule runs.
+    regular_season_weeks: int = 0
+    #: Starting lineup shape, e.g. {"QB": 1, "RB": 2, "WR": 3, "RB/WR/TE": 1}. Read
+    #: from ESPN rather than configured: league settings are authoritative, and a
+    #: commissioner adding a flex should not require a code change here.
+    roster_slots: dict[str, int] = field(default_factory=dict)
     teams: list[TeamState] = field(default_factory=list)
     players: list[PlayerState] = field(default_factory=list)
     transactions: list[TransactionState] = field(default_factory=list)
@@ -120,7 +143,17 @@ class LeagueSnapshot:
         return cls(
             **{
                 **raw,
-                "teams": [TeamState(**team) for team in raw.get("teams", [])],
+                "teams": [
+                    TeamState(
+                        **{
+                            **team,
+                            "schedule": [
+                                ScheduleEntry(**entry) for entry in team.get("schedule", [])
+                            ],
+                        }
+                    )
+                    for team in raw.get("teams", [])
+                ],
                 "players": [PlayerState(**player) for player in raw.get("players", [])],
                 "transactions": [
                     TransactionState(**entry) for entry in raw.get("transactions", [])
@@ -224,6 +257,7 @@ def fetch_snapshot(
             wins=int(_attribute(team, "wins", default=0)),
             losses=int(_attribute(team, "losses", default=0)),
             faab_remaining=_remaining_faab(league, team),
+            schedule=_read_schedule(team),
             division_id=(
                 int(division_id)
                 if (division_id := _attribute(team, "division_id")) is not None
@@ -250,6 +284,8 @@ def fetch_snapshot(
         season=season,
         week=int(league.current_week),
         my_team_id=credentials.team_id,
+        regular_season_weeks=int(_attribute(league.settings, "reg_season_count", default=0) or 0),
+        roster_slots=_starting_slots(league),
         teams=teams,
         players=players,
         transactions=transactions,
@@ -262,6 +298,48 @@ def fetch_snapshot(
         len(transactions),
     )
     return snapshot
+
+
+#: Slots that are not part of a starting lineup.
+_NON_STARTING_SLOTS = frozenset({"BE", "IR", "ER", ""})
+
+
+def _starting_slots(league: Any) -> dict[str, int]:
+    """The league's starting lineup shape, bench and IR excluded."""
+    counts = _attribute(league.settings, "position_slot_counts", default={}) or {}
+    return {
+        slot: int(count)
+        for slot, count in counts.items()
+        if slot not in _NON_STARTING_SLOTS and int(count) > 0
+    }
+
+
+def _read_schedule(team: Any) -> list[ScheduleEntry]:
+    """A team's season, week by week.
+
+    espn-api exposes the schedule as three parallel lists — opponents, scores, and
+    outcomes — so they are zipped back into one row per week here. A future week comes
+    through with a zero score and outcome "U", which is how the UI tells a played week
+    from a scheduled one.
+    """
+    opponents = _attribute(team, "schedule", default=[]) or []
+    scores = _attribute(team, "scores", default=[]) or []
+    outcomes = _attribute(team, "outcomes", default=[]) or []
+
+    entries: list[ScheduleEntry] = []
+    for index, opponent in enumerate(opponents):
+        opponent_id = getattr(opponent, "team_id", None)
+        if opponent_id is None:
+            continue
+        entries.append(
+            ScheduleEntry(
+                week=index + 1,
+                opponent_team_id=int(opponent_id),
+                score=float(scores[index]) if index < len(scores) else 0.0,
+                outcome=str(outcomes[index]) if index < len(outcomes) else "U",
+            )
+        )
+    return entries
 
 
 def _owner_name(team: Any) -> str | None:

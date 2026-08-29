@@ -11,6 +11,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -19,6 +20,12 @@ from patron.config.league import LeagueConfig, get_league
 from patron.config.settings import Settings, get_settings
 from patron.data import nflverse
 from patron.data.derived import cached_frame
+from patron.metrics.backtest import (
+    MetricReportConfig,
+    build_backtest_predictions,
+    render_metric_report_markdown,
+)
+from patron.metrics.backtest import build_metric_report as analyze_metric_report
 from patron.metrics.enrichment import (
     build_injury_history,
     build_player_usage,
@@ -45,6 +52,14 @@ class BuildResult:
     defenses: pl.DataFrame
     bonus_audit: BonusAudit | None
     replacement_levels: dict[str, float]
+
+
+@dataclass
+class MetricReportBuildResult:
+    """Persistable rolling forecasts and their metric-level analysis."""
+
+    report: dict[str, Any]
+    predictions: pl.DataFrame
 
 
 def load_bonuses(
@@ -150,6 +165,81 @@ def build(
         bonus_audit=audit,
         replacement_levels=levels,
     )
+
+
+def build_metric_report(
+    config: LeagueConfig | None = None,
+    settings: Settings | None = None,
+    report_config: MetricReportConfig | None = None,
+    force: bool = False,
+) -> MetricReportBuildResult:
+    """Build historical v2 forecast folds and analyze the configured metric catalog."""
+    config = config or get_league()
+    settings = settings or get_settings()
+    report_config = report_config or MetricReportConfig.from_config()
+    settings.ensure_dirs()
+
+    history_config = config.model_copy(update={"seasons": list(report_config.input_seasons)})
+    weeks = nflverse.load_player_weeks(history_config.seasons)
+    bonuses, _ = load_bonuses(history_config, force=force)
+    player_seasons = build_player_seasons(weeks, bonuses, history_config)
+    team_volume = build_team_volume(nflverse.load_team_weeks(history_config.seasons))
+    usage = cached_frame(
+        "metric_report_usage_v2",
+        history_config.seasons,
+        lambda: build_player_usage(
+            weeks,
+            nflverse.load_projection_plays(history_config.seasons),
+            nflverse.load_participation(history_config.seasons),
+        ),
+        force=force,
+        settings=settings,
+    )
+    injuries = build_injury_history(nflverse.load_injuries(history_config.seasons))
+    player_seasons = enrich_player_seasons(player_seasons, usage, team_volume, injuries)
+
+    birth_frames: list[pl.DataFrame] = []
+    for season in report_config.input_seasons:
+        try:
+            birth_frames.append(nflverse.load_birth_dates(season))
+        except Exception:  # noqa: BLE001 - one historical roster should not erase the report
+            logger.warning("birth dates unavailable for %s", season, exc_info=True)
+    if not birth_frames:
+        raise RuntimeError("no roster birth dates were available for the metric report")
+    birth_dates = pl.concat(birth_frames, how="diagonal_relaxed").unique(
+        subset=["player_id"], keep="last"
+    )
+
+    depth_frames: list[pl.DataFrame] = []
+    for season in report_config.forecast_seasons:
+        try:
+            depth_frames.append(nflverse.load_depth_charts([season]))
+        except Exception:  # noqa: BLE001 - projection falls back cleanly without depth charts
+            logger.warning("depth charts unavailable for %s", season, exc_info=True)
+    depth_charts = (
+        pl.concat(depth_frames, how="diagonal_relaxed") if depth_frames else None
+    )
+
+    predictions = build_backtest_predictions(
+        player_seasons,
+        birth_dates,
+        config,
+        report_config,
+        depth_charts=depth_charts,
+    )
+    report = analyze_metric_report(predictions, report_config)
+    return MetricReportBuildResult(report=report, predictions=predictions)
+
+
+def export_metric_report(result: MetricReportBuildResult, outputs: Path) -> tuple[Path, Path, Path]:
+    """Write JSON for the API, Markdown for humans, and detailed forecast rows."""
+    json_path = outputs / "metric_report.json"
+    markdown_path = outputs / "metric_report.md"
+    predictions_path = outputs / "metric_backtest_predictions.parquet"
+    json_path.write_text(json.dumps(result.report, indent=2, default=str))
+    markdown_path.write_text(render_metric_report_markdown(result.report))
+    result.predictions.write_parquet(predictions_path)
+    return json_path, markdown_path, predictions_path
 
 
 #: Board columns written to JSON, in display order.

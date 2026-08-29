@@ -1,11 +1,15 @@
 import type {
   BoardResponse,
+  CompareResponse,
   LeaguePlayersResponse,
   LeagueResponse,
   LeagueStatus,
+  MatchupsResponse,
   MetricVersion,
+  MetricReport,
   OpponentsResponse,
   RosterResponse,
+  ScheduleResponse,
   Status,
   TransactionsResponse,
   UnrankableResponse,
@@ -22,6 +26,8 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const fetchStatus = () => get<Status>('/api/status')
+
+export const fetchMetricReport = () => get<MetricReport>('/api/metric-report')
 
 export const fetchBoard = (version: MetricVersion, limit = 400) =>
   get<BoardResponse>(`/api/board?version=${version}&limit=${limit}`)
@@ -64,3 +70,14 @@ export const fetchTransactions = () => get<TransactionsResponse>('/api/league/tr
 /** Force a pull from ESPN, ignoring the TTL. */
 export const refreshLeague = (version: MetricVersion) =>
   post<LeagueStatus>(`/api/league/refresh?version=${version}`)
+
+export const fetchMatchups = (version: MetricVersion, week?: number) =>
+  get<MatchupsResponse>(
+    `/api/league/matchups?version=${version}${week ? `&week=${week}` : ''}`,
+  )
+
+export const fetchSchedule = (version: MetricVersion) =>
+  get<ScheduleResponse>(`/api/league/schedule?version=${version}`)
+
+export const fetchCompare = (left: number, right: number, version: MetricVersion) =>
+  get<CompareResponse>(`/api/league/compare?left=${left}&right=${right}&version=${version}`)

@@ -1,0 +1,89 @@
+# Reproducible v2 metric backtest configuration.
+#
+# Each forecast is built only from the preceding `history_seasons` seasons. Completed
+# forecast seasons are scored against actual league-scored results; a future season is
+# retained as a pending prospective forecast. Add or remove metric entries here to
+# change the report without changing the analysis engine.
+title: V2 Metric Report
+forecast_seasons: [2023, 2024, 2025, 2026]
+history_seasons: 3
+depth_chart_cutoff: "08-31"
+minimum_sample: 20
+baseline_metric: historical_ppg_prior
+
+targets:
+  - key: actual_ppg
+    label: Next-season PPG
+    description: League-scored points per active game in the forecast season.
+    missing_as_zero: false
+  - key: actual_vor
+    label: Next-season VOR
+    description: Actual PPG above that season's positional replacement level.
+    missing_as_zero: false
+  - key: actual_availability_value
+    label: Availability-adjusted VOR
+    description: Actual VOR scaled by games played; absent players count as zero value.
+    missing_as_zero: true
+  - key: actual_games
+    label: Games played
+    description: Games with scored usage in the forecast season; absent players count as zero.
+    missing_as_zero: true
+  - key: actual_season_points
+    label: Season points
+    description: Total league-scored points in the forecast season; absent players count as zero.
+    missing_as_zero: true
+
+metrics:
+  - {key: historical_ppg_prior, label: Historical PPG prior, group: Baseline, description: Recency- and games-weighted multi-year PPG., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: individual_prior_ppg, label: Shrunk individual prior, group: Baseline, description: Historical PPG shrunk toward the rosterable positional prior., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: prior_branch_ppg, label: Prior branch PPG, group: Model branches, description: Historical branch after TD bonus age team and role adjustments., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
+  - {key: component_proj_ppg, label: Component projection PPG, group: Model branches, description: Bottom-up projected stat line scored under league rules., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
+  - {key: proj_ppg, label: Combined projected PPG, group: Model outputs, description: Configured blend of the prior and component branches., targets: [actual_ppg, actual_vor, actual_availability_value], prediction_target: actual_ppg}
+  - {key: proj_vor, label: Projected VOR, group: Model outputs, description: Combined projected PPG above projected replacement., targets: [actual_vor, actual_availability_value], prediction_target: actual_vor}
+  - {key: v2_score, label: V2 score, group: Model outputs, description: Availability-scaled expected floor and ceiling VOR blend., targets: [actual_vor, actual_availability_value]}
+  - {key: availability_adjusted_vor, label: Availability-adjusted projected VOR, group: Model outputs, description: Projected VOR scaled by expected availability., targets: [actual_availability_value], prediction_target: actual_availability_value}
+  - {key: expected_games, label: Expected games, group: Availability, description: Injury- and participation-based games projection., targets: [actual_games, actual_availability_value], prediction_target: actual_games}
+  - {key: expected_season_points, label: Expected season points, group: Availability, description: Projected PPG multiplied by expected games., targets: [actual_season_points, actual_availability_value], prediction_target: actual_season_points}
+  - {key: projected_availability, label: Projected availability, group: Availability, description: Expected share of the season available., targets: [actual_games, actual_availability_value]}
+  - {key: historical_injury_report_weeks, label: Injury report weeks, group: Availability, description: Recency-weighted historical injury-report burden., targets: [actual_games, actual_availability_value]}
+  - {key: injury_missed_equivalents, label: Injury missed equivalents, group: Availability, description: Weighted OUT doubtful and questionable history., targets: [actual_games, actual_availability_value]}
+  - {key: projection_confidence, label: Projection confidence, group: Confidence, description: Support supplied by the effective production sample., targets: [actual_ppg, actual_availability_value]}
+  - {key: availability_confidence, label: Availability confidence, group: Confidence, description: Support supplied by the availability sample., targets: [actual_games, actual_availability_value]}
+  - {key: ppg, label: Latest-season PPG, group: Historical production, description: Actual league-scored PPG in the season immediately before the forecast., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: games, label: Latest-season games, group: Historical production, description: Games in the season immediately before the forecast., targets: [actual_games, actual_availability_value]}
+  - {key: floor, label: Historical floor, group: Weekly distribution, description: Prior-season 25th-percentile weekly score., targets: [actual_ppg, actual_availability_value]}
+  - {key: volatility, label: Historical volatility, group: Weekly distribution, description: Prior-season weekly scoring standard deviation., targets: [actual_ppg, actual_availability_value]}
+  - {key: projected_floor, label: Projected floor, group: Weekly distribution, description: Projected 25th-percentile weekly score., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: projected_ceiling, label: Projected ceiling, group: Weekly distribution, description: Projected 75th-percentile weekly score., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: wtd_opp, label: Weighted opportunity, group: Opportunity, description: Latest carries plus 2.2 times targets., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
+  - {key: season_target_share, label: Season target share, group: Opportunity, description: Latest targets divided by official team attempts., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
+  - {key: season_carry_share, label: Season carry share, group: Opportunity, description: Latest carries divided by official team carries., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [QB, RB]}
+  - {key: projected_target_share, label: Projected target share, group: Opportunity, description: Shrunk receiving share after teammate and role adjustments., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
+  - {key: projected_carry_share, label: Projected carry share, group: Opportunity, description: Shrunk rushing share after backfield and role adjustments., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [QB, RB]}
+  - {key: projected_targets_pg, label: Projected targets/game, group: Opportunity, description: Combined route and team-share target projection., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [RB, WR, TE]}
+  - {key: projected_carries_pg, label: Projected carries/game, group: Opportunity, description: Team-share and historical carry projection., targets: [actual_ppg, actual_vor, actual_availability_value], positions: [QB, RB]}
+  - {key: projected_route_participation, label: Route-opportunity participation, group: Routes, description: Projected share of team dropbacks with an eligible-player route opportunity., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_targets_per_route_opportunity, label: Targets per route opportunity, group: Routes, description: Shrunk target rate on route opportunities., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_wopr, label: Projected WOPR, group: Routes, description: Projected weighted opportunity rating., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_air_yards_share, label: Projected air-yards share, group: Routes, description: Shrunk share of team air yards., targets: [actual_ppg, actual_vor], positions: [WR, TE]}
+  - {key: projected_receptions_pg, label: Projected receptions/game, group: Efficiency, description: Targets multiplied by projected catch rate., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_receiving_yards_pg, label: Projected receiving yards/game, group: Efficiency, description: Targets multiplied by projected yards per target., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_rushing_yards_pg, label: Projected rushing yards/game, group: Efficiency, description: Carries multiplied by projected yards per carry., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
+  - {key: projected_passing_yards_pg, label: Projected passing yards/game, group: Efficiency, description: Attempts multiplied by projected yards per attempt., targets: [actual_ppg, actual_vor], positions: [QB]}
+  - {key: td_over_exp, label: TDs over expectation, group: Touchdowns, description: Latest rushing and receiving TDs above the positional touch-rate expectation., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: td_regression_adjustment, label: TD regression adjustment, group: Touchdowns, description: Bounded PPG adjustment applied for latest TD over- or under-performance., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_receiving_tds_pg, label: Projected receiving TDs/game, group: Touchdowns, description: High-value and general receiving TD-rate projection., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_rushing_tds_pg, label: Projected rushing TDs/game, group: Touchdowns, description: Goal-line and general rushing TD-rate projection., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
+  - {key: projected_end_zone_targets_pg, label: Projected end-zone targets/game, group: High-value usage, description: Projected targets reaching the end zone., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: projected_goal_line_carries_pg, label: Projected goal-line carries/game, group: High-value usage, description: Projected carries from inside the five., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
+  - {key: bonus_regression_adjustment, label: Big-play regression adjustment, group: Big plays, description: Historical bonus rate regression toward position., targets: [actual_ppg, actual_vor]}
+  - {key: projected_bonus_pg, label: Projected bonus points/game, group: Big plays, description: Opportunity-regressed long-touchdown bonus projection., targets: [actual_ppg, actual_vor]}
+  - {key: age_factor, label: Age factor, group: Context, description: Bounded position-specific age-curve multiplier., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: team_context_factor, label: Team context factor, group: Context, description: Bounded change for projected team volume scoring quarterback and competition., targets: [actual_ppg, actual_vor]}
+  - {key: qb_context, label: Quarterback context, group: Context, description: Projected team passing fantasy environment., targets: [actual_ppg, actual_vor], positions: [WR, TE]}
+  - {key: team_scoring_context, label: Team scoring context, group: Context, description: Projected offensive touchdowns per game., targets: [actual_ppg, actual_vor]}
+  - {key: team_pass_volume, label: Team pass volume, group: Context, description: Projected official pass attempts per game., targets: [actual_ppg, actual_vor]}
+  - {key: team_rush_volume, label: Team rush volume, group: Context, description: Projected official carries per game., targets: [actual_ppg, actual_vor], positions: [QB, RB]}
+  - {key: teammate_competition, label: Teammate competition, group: Context, description: Availability of receiving or backfield role after strongest teammate., targets: [actual_ppg, actual_vor], positions: [RB, WR, TE]}
+  - {key: depth_role_factor, label: Depth-chart role factor, group: Depth chart, description: Bounded opportunity multiplier derived from preseason depth rank., targets: [actual_ppg, actual_vor, actual_availability_value]}
+  - {key: depth_chart_rank, label: Depth-chart rank, group: Depth chart, description: Last published offensive depth rank before the configured cutoff., targets: [actual_ppg, actual_vor, actual_availability_value]}

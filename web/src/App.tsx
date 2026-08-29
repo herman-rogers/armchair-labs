@@ -4,12 +4,14 @@ import { fetchLeagueStatus, fetchStatus } from './api/client'
 import type { MetricVersion } from './api/types'
 import { LeagueView } from './components/LeagueView'
 import { PlayersView } from './components/PlayersView'
+import { MetricReportView } from './components/MetricReportView'
 
-type View = 'league' | 'players'
+type View = 'league' | 'players' | 'metrics'
 
 const VIEWS: { id: View; label: string; hint: string }[] = [
   { id: 'league', label: 'League', hint: 'Your roster, the wire, and what rivals hold' },
   { id: 'players', label: 'Players', hint: 'Every ranked player, cross-referenced' },
+  { id: 'metrics', label: 'Metric Report', hint: 'Definitions and rolling backtest evidence' },
 ]
 
 /**
@@ -114,6 +116,7 @@ export default function App() {
         <>
           {view === 'league' && <LeagueView version={version} />}
           {view === 'players' && <PlayersView version={version} />}
+          {view === 'metrics' && <MetricReportView available={status.data.metric_report.available} />}
         </>
       )}
 

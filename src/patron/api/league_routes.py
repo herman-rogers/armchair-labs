@@ -20,7 +20,7 @@ import polars as pl
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from patron.config.league import get_league
-from patron.espn import crosswalk, reports
+from patron.espn import crosswalk, lineup, reports
 from patron.espn.crosswalk import (
     AVAILABILITY,
     IS_FREE_AGENT,
@@ -104,6 +104,7 @@ def league(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
         snapshot.to_frame(),
         (team.team_id for team in snapshot.teams),
         season_games=config.metrics.projection_season_games,
+        fallback_availability=config.metrics.projection_availability_prior,
     )
 
     return {
@@ -274,3 +275,172 @@ def free_agent_counts(service: ServiceDep, version: str = Query("v1")) -> dict[s
         .agg(pl.len().alias("count"))
     )
     return {**_envelope(state), "counts": {row[0]: row[1] for row in counts.iter_rows()}}
+
+
+def _strength(state: LeagueState, team_id: int, team_name: str) -> dict[str, Any]:
+    """One team's best fieldable lineup, as JSON."""
+    roster = state.tagged_board.filter(pl.col(OWNER_TEAM_ID) == team_id)
+    column = lineup.value_column_for(state.tagged_board)
+
+    # Counted from the snapshot, not the board: a player the board cannot rank is
+    # absent from it entirely rather than present with a null, so a roster leaning on
+    # rookies would otherwise report zero unranked and simply look thin.
+    rostered_skill = sum(
+        1
+        for player in state.snapshot.players
+        if player.owner_team_id == team_id and player.position in lineup.RANKED_POSITIONS
+    )
+    built = lineup.best_lineup(
+        roster,
+        state.snapshot.roster_slots,
+        column,
+        team_id,
+        team_name,
+        unranked_count=max(rostered_skill - roster.height, 0),
+    )
+
+    return {
+        "team_id": team_id,
+        "team_name": team_name,
+        "metric": column,
+        "total": round(built.total, 2),
+        "by_position": {k: round(v, 2) for k, v in built.by_position.items()},
+        "unranked_starters": built.unranked_starters,
+        "starters": [
+            {
+                "slot": slot.slot,
+                "player_id": slot.player_id,
+                "player_display_name": slot.player_name,
+                "position": slot.position,
+                "value": round(slot.value, 2),
+            }
+            for slot in built.starters
+        ],
+        "bench": [
+            {
+                "player_id": slot.player_id,
+                "player_display_name": slot.player_name,
+                "position": slot.position,
+                "value": round(slot.value, 2),
+            }
+            for slot in built.bench
+        ],
+    }
+
+
+def _team_names(state: LeagueState) -> dict[int, str]:
+    return {team.team_id: team.team_name for team in state.snapshot.teams}
+
+
+@router.get("/schedule")
+def schedule(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
+    """Every team's full season schedule, with results where they exist."""
+    state = _state(service, version)
+    names = _team_names(state)
+
+    return {
+        **_envelope(state),
+        "regular_season_weeks": state.snapshot.regular_season_weeks,
+        "my_team_id": state.snapshot.my_team_id,
+        "teams": [
+            {
+                "team_id": team.team_id,
+                "team_name": team.team_name,
+                "schedule": [
+                    {
+                        "week": entry.week,
+                        "opponent_team_id": entry.opponent_team_id,
+                        "opponent_team_name": names.get(entry.opponent_team_id),
+                        "score": entry.score,
+                        "outcome": entry.outcome,
+                        "played": entry.played,
+                    }
+                    for entry in team.schedule
+                ],
+            }
+            for team in state.snapshot.teams
+        ],
+    }
+
+
+@router.get("/matchups")
+def matchups(
+    service: ServiceDep,
+    week: int | None = Query(None, ge=1, le=20, description="Defaults to the current week."),
+    version: str = Query("v1"),
+) -> dict[str, Any]:
+    """Every matchup in a week, with each side's fieldable lineup strength.
+
+    Strength is a season-long comparison, not a weekly projection: it knows nothing
+    about byes, this week's injury report, or who is on a good defence. It answers
+    "who has the better team", which is the question a schedule scan actually asks.
+    """
+    state = _state(service, version)
+    target = week or state.snapshot.week
+    names = _team_names(state)
+
+    # A matchup appears on both teams' schedules; keep one copy, ordered so the
+    # viewer's own game is first.
+    seen: set[frozenset[int]] = set()
+    pairs: list[tuple[int, int]] = []
+    for team in state.snapshot.teams:
+        entry = next((e for e in team.schedule if e.week == target), None)
+        if entry is None:
+            continue
+        key = frozenset({team.team_id, entry.opponent_team_id})
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append((team.team_id, entry.opponent_team_id))
+
+    mine = state.snapshot.my_team_id
+    pairs.sort(key=lambda pair: (mine not in pair, pair[0]))
+
+    strengths: dict[int, dict[str, Any]] = {}
+    for team_id in {team_id for pair in pairs for team_id in pair}:
+        strengths[team_id] = _strength(state, team_id, names.get(team_id, str(team_id)))
+
+    return {
+        **_envelope(state),
+        "requested_week": target,
+        "current_week": state.snapshot.week,
+        "regular_season_weeks": state.snapshot.regular_season_weeks,
+        "my_team_id": mine,
+        "matchups": [
+            {
+                "home": strengths[home],
+                "away": strengths[away],
+                "involves_me": mine in (home, away),
+                "margin": round(strengths[home]["total"] - strengths[away]["total"], 2),
+            }
+            for home, away in pairs
+        ],
+    }
+
+
+@router.get("/compare")
+def compare(
+    service: ServiceDep,
+    left: int = Query(..., description="Team id on the left."),
+    right: int = Query(..., description="Team id on the right."),
+    version: str = Query("v1"),
+) -> dict[str, Any]:
+    """Two teams side by side, by best fieldable lineup.
+
+    The same shape as one matchup, but for any pair — which is what a trade
+    conversation needs and a schedule does not provide.
+    """
+    state = _state(service, version)
+    names = _team_names(state)
+    for team_id in (left, right):
+        if team_id not in names:
+            raise HTTPException(status_code=404, detail=f"No team {team_id} in this league.")
+
+    left_strength = _strength(state, left, names[left])
+    right_strength = _strength(state, right, names[right])
+    return {
+        **_envelope(state),
+        "left": left_strength,
+        "right": right_strength,
+        "margin": round(left_strength["total"] - right_strength["total"], 2),
+    }

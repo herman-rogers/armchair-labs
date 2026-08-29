@@ -65,8 +65,9 @@ export function TeamsPanel({
   return (
     <section>
       <p className="faint tight team-score-note">
-        Overall roster strength under {version.toUpperCase()}. Starters count fully and
-        positive bench depth counts 20%; 5.0 is league average.
+        {version.toUpperCase()} team strength ranks simulated best-active lineups by
+        expected skill-position points; 5.0 is league average. Risk remains separate.
+        K/DST are not included.
       </p>
       <div className="division-list">
         {[...divisions.entries()].map(([key, division]) => (
@@ -101,6 +102,24 @@ export function TeamsPanel({
                       {team.fallback_players > 0 && (
                         <> · {team.fallback_players} ESPN fallback</>
                       )}
+                    </div>
+                    <div className="team-outlook">
+                      <span title="Availability-aware points from the best legal active lineup">
+                        <b>{team.expected_weekly_points.toFixed(1)}</b>
+                        <small>avg pts</small>
+                      </span>
+                      <span title="Standard deviation of projected weekly lineup points">
+                        <b>±{team.weekly_risk.toFixed(1)}</b>
+                        <small>risk</small>
+                      </span>
+                      <span title="Probability every skill-position starting slot can be filled by an active rostered player">
+                        <b>{Math.round(team.lineup_coverage * 100)}%</b>
+                        <small>coverage</small>
+                      </span>
+                      <span title="Expected weekly points supplied by players outside the full-strength lineup">
+                        <b>+{team.bench_rescue_points.toFixed(1)}</b>
+                        <small>bench</small>
+                      </span>
                     </div>
                     {rows.length > 0 && (
                       <div className="team-thin">

@@ -263,55 +263,83 @@ class TestOpponentWeaknesses:
 
 
 class TestTeamStrengths:
-    def test_v2_value_ranks_starters_and_discounted_depth(self) -> None:
+    def test_optimizes_the_roster_instead_of_trusting_current_lineup_slots(self) -> None:
         board = pl.DataFrame(
             {
-                ESPN_ID: [1, 2, 3, None],
-                "position": ["RB", "WR", "RB", "WR"],
-                "v2_score": [6.0, 5.0, 4.0, 0.0],
-                "adj_vor": [1.0, 1.0, 100.0, 0.0],
-                "season_equivalent_ppg": [16.0, 15.0, 14.0, 10.0],
-                "proj_repl_ppg": [10.0, 10.0, 10.0, 10.0],
+                ESPN_ID: [1, 2, 3, 4],
+                "player_display_name": ["Low starter", "Bench star", "Mid", "Low bench"],
+                "position": ["WR", "WR", "WR", "WR"],
+                "proj_ppg": [5.0, 20.0, 12.0, 4.0],
+                "projected_volatility": [0.0, 0.0, 0.0, 0.0],
+                "projected_availability": [1.0, 1.0, 1.0, 1.0],
             }
         )
         espn = pl.DataFrame(
             {
-                ESPN_ID: [1, 2, 3, 99],
-                "position": ["RB", "WR", "RB", "WR"],
+                ESPN_ID: [1, 2, 3, 4],
+                "player_display_name": ["Low starter", "Bench star", "Mid", "Low bench"],
+                "position": ["WR", "WR", "WR", "WR"],
                 OWNER_TEAM_ID: [1, 1, 2, 2],
-                "projected_points": [272.0, 255.0, 238.0, 204.0],
-                "lineup_slot": ["RB", "BE", "RB", "WR"],
+                "projected_points": [85.0, 340.0, 204.0, 68.0],
+                "lineup_slot": ["WR", "BE", "WR", "BE"],
             }
         )
 
         strengths = team_strengths(board, espn, [1, 2])
 
-        # Team 1: 6 starter + 20% of 5 bench = 7. Team 2: 4 starter +
-        # (204 / 17 - 10 replacement) rookie fallback = 6.
+        assert strengths[1]["expected_weekly_points"] == pytest.approx(20.0)
+        assert strengths[2]["expected_weekly_points"] == pytest.approx(12.0)
         assert strengths[1]["team_rank"] == 1
         assert strengths[2]["team_rank"] == 2
-        assert strengths[1]["team_score"] == pytest.approx(6.5)
-        assert strengths[2]["team_score"] == pytest.approx(3.5)
-        assert strengths[2]["fallback_players"] == 1
-        assert strengths[1]["fallback_players"] == 0
 
-    def test_equal_rosters_are_centered_at_five(self) -> None:
+    def test_availability_uses_the_bench_and_adds_weekly_risk(self) -> None:
         board = pl.DataFrame(
             {
                 ESPN_ID: [1, 2],
-                "position": ["RB", "RB"],
-                "v2_score": [4.0, 4.0],
-                "season_equivalent_ppg": [14.0, 14.0],
-                "proj_repl_ppg": [10.0, 10.0],
+                "player_display_name": ["Fragile star", "Steady bench"],
+                "position": ["WR", "WR"],
+                "proj_ppg": [20.0, 10.0],
+                "projected_volatility": [4.0, 2.0],
+                "projected_availability": [0.5, 1.0],
             }
         )
         espn = pl.DataFrame(
             {
                 ESPN_ID: [1, 2],
-                "position": ["RB", "RB"],
+                "player_display_name": ["Fragile star", "Steady bench"],
+                "position": ["WR", "WR"],
+                OWNER_TEAM_ID: [1, 1],
+                "projected_points": [340.0, 170.0],
+                "lineup_slot": ["WR", "BE"],
+            }
+        )
+
+        team = team_strengths(board, espn, [1])[1]
+
+        assert team["expected_weekly_points"] == pytest.approx(15.0, abs=0.2)
+        assert team["lineup_coverage"] == pytest.approx(1.0)
+        assert team["bench_rescue_points"] == pytest.approx(5.0, abs=0.2)
+        assert team["weekly_risk"] > 5.0
+
+    def test_weekly_risk_is_separate_from_equal_expected_points(self) -> None:
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "player_display_name": ["Volatile", "Steady"],
+                "position": ["WR", "WR"],
+                "proj_ppg": [10.0, 10.0],
+                "projected_volatility": [6.0, 1.0],
+                "projected_availability": [1.0, 1.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "player_display_name": ["Volatile", "Steady"],
+                "position": ["WR", "WR"],
                 OWNER_TEAM_ID: [1, 2],
-                "projected_points": [238.0, 238.0],
-                "lineup_slot": ["RB", "RB"],
+                "projected_points": [170.0, 170.0],
+                "lineup_slot": ["WR", "WR"],
             }
         )
 
@@ -319,6 +347,35 @@ class TestTeamStrengths:
 
         assert strengths[1]["team_score"] == pytest.approx(5.0)
         assert strengths[2]["team_score"] == pytest.approx(5.0)
+        assert strengths[1]["weekly_risk"] == pytest.approx(6.0)
+        assert strengths[2]["weekly_risk"] == pytest.approx(1.0)
+
+    def test_unmatched_rookie_uses_espn_projection_with_visible_fallback(self) -> None:
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1],
+                "player_display_name": ["Veteran"],
+                "position": ["WR"],
+                "proj_ppg": [10.0],
+                "projected_volatility": [4.0],
+                "projected_availability": [1.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [99],
+                "player_display_name": ["Rookie"],
+                "position": ["WR"],
+                OWNER_TEAM_ID: [1],
+                "projected_points": [255.0],
+                "lineup_slot": ["WR"],
+            }
+        )
+
+        team = team_strengths(board, espn, [1])[1]
+
+        assert team["fallback_players"] == 1
+        assert team["expected_weekly_points"] == pytest.approx(14.1, abs=0.2)
 
 
 class TestUnrankable:

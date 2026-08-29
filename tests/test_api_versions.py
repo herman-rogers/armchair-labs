@@ -29,3 +29,17 @@ def test_board_version_selects_the_matching_artifact(tmp_path, monkeypatch) -> N
         "v1": {"available": True, "player_count": 1},
         "v2": {"available": True, "player_count": 1},
     }
+    assert status["metric_report"] == {"available": False, "built_at": None}
+
+
+def test_metric_report_reads_generated_artifact(tmp_path, monkeypatch) -> None:
+    report = {"schema_version": 1, "title": "Metric Report", "results": []}
+    (tmp_path / "metric_report.json").write_text(json.dumps(report))
+    monkeypatch.setattr(
+        api_module,
+        "get_settings",
+        lambda: SimpleNamespace(outputs_dir=tmp_path),
+    )
+
+    assert api_module.metric_report() == report
+    assert api_module.status()["metric_report"]["available"] is True

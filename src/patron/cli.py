@@ -87,6 +87,28 @@ def board(
     )
 
 
+@app.command("metric-report")
+def metric_report(
+    force: bool = typer.Option(False, "--force", help="Rebuild derived caches from scratch."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Run rolling v2 backtests and write the frontend metric report."""
+    _configure_logging(verbose)
+    settings = get_settings()
+    result = pipeline.build_metric_report(
+        config=get_league(),
+        settings=settings,
+        force=force,
+    )
+    paths = pipeline.export_metric_report(result, settings.outputs_dir)
+    summary = result.report["data_summary"]
+    typer.echo(
+        f"Built {summary['forecast_rows']} forecast rows; completed seasons "
+        f"{summary['completed_forecasts']}, pending {summary['pending_forecasts']}."
+    )
+    typer.echo("Wrote " + ", ".join(str(path) for path in paths))
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),

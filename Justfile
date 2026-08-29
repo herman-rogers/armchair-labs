@@ -44,6 +44,10 @@ auth-status:
 board *ARGS:
     uv run patron board {{ARGS}}
 
+# Rebuild the rolling v2 metric backtest and frontend report.
+metric-report *ARGS:
+    uv run patron metric-report {{ARGS}}
+
 # Rebuild ignoring every cache.
 rebuild:
     uv run patron board --force

@@ -118,6 +118,7 @@ export interface Status {
   built_at: string | null
   player_count: number
   metric_versions: Record<MetricVersion, { available: boolean; player_count: number }>
+  metric_report: { available: boolean; built_at: string | null }
   league: {
     name: string
     team_count: number
@@ -128,6 +129,94 @@ export interface Status {
   }
   espn_connected: boolean
   phase: number
+}
+
+// ---------------------------------------------------------------- metric report
+
+export type MetricAssessment = 'strong' | 'useful' | 'redundant' | 'weak' | 'mixed' | 'insufficient'
+
+export interface MetricCatalogEntry {
+  key: string
+  label: string
+  group: string
+  description: string
+  targets: string[]
+  positions: string[]
+  prediction_target: string | null
+  available: boolean
+  coverage: number | null
+}
+
+export interface MetricFoldResult {
+  forecast_season: number
+  n: number
+  spearman: number | null
+}
+
+export interface MetricBacktestResult {
+  metric: string
+  label: string
+  group: string
+  target: string
+  target_label: string
+  position: string
+  n: number
+  eligible: number
+  coverage: number | null
+  folds: number
+  spearman: number | null
+  spearman_ci_low: number | null
+  spearman_ci_high: number | null
+  pearson: number | null
+  partial_spearman: number | null
+  direction_consistency: number | null
+  assessment: MetricAssessment
+  fold_results: MetricFoldResult[]
+}
+
+export interface MetricModelResult {
+  metric: string
+  label: string
+  target: string
+  target_label: string
+  position: string
+  n: number
+  mae: number
+  rmse: number
+  bias: number
+  spearman: number | null
+}
+
+export interface MetricReport {
+  schema_version: number
+  title: string
+  generated_at: string
+  configuration: {
+    forecast_seasons: number[]
+    input_seasons: number[]
+    history_seasons: number
+    depth_chart_cutoff: string
+    minimum_sample: number
+    baseline_metric: string
+  }
+  data_summary: {
+    completed_forecasts: number[]
+    pending_forecasts: number[]
+    forecast_rows: number
+    completed_rows: number
+    returning_player_scope: boolean
+    assessment_counts: Record<string, number>
+    limitations: string[]
+  }
+  targets: Array<{
+    key: string
+    label: string
+    description: string
+    missing_as_zero: boolean
+  }>
+  metrics: MetricCatalogEntry[]
+  results: MetricBacktestResult[]
+  model_results: MetricModelResult[]
 }
 
 // ---------------------------------------------------------------- league state
@@ -180,6 +269,16 @@ export interface LeagueTeam {
   scored_players: number
   /** Players without nflverse tape whose ESPN projection supplied the fallback. */
   fallback_players: number
+  /** Availability-aware mean from the best legal active skill-position lineup. */
+  expected_weekly_points: number
+  /** Standard deviation of weekly skill-position lineup points. */
+  weekly_risk: number
+  /** Approximate 25th-percentile weekly skill-position score. */
+  weekly_floor: number
+  /** Probability the roster can fill every skill-position starting slot. */
+  lineup_coverage: number
+  /** Expected weekly points supplied by players outside the full-strength lineup. */
+  bench_rescue_points: number
 }
 
 export interface LeagueResponse extends Freshness {
@@ -265,4 +364,70 @@ export interface LeagueStatus {
     unmatched: number
     not_ranked: number
   }
+}
+
+// ---------------------------------------------------------------- matchups
+
+export interface LineupSlot {
+  slot: string
+  player_id: string | null
+  player_display_name: string | null
+  position: string | null
+  value: number
+}
+
+/** A team's best fieldable lineup and what it is worth.
+ *
+ * Not a weekly projection: it knows nothing about byes, this week's injury report, or
+ * opponent. It answers "who has the better team" — the question a schedule scan and a
+ * trade conversation both ask. Kicker and defense slots are excluded because this
+ * league tiers those rather than ranking them.
+ */
+export interface TeamStrength {
+  team_id: number
+  team_name: string
+  /** Which metric the values came from, e.g. adj_proj_vor. */
+  metric: string
+  total: number
+  by_position: Record<string, number>
+  /** Rostered skill players with no prior tape, so the total understates this team. */
+  unranked_starters: number
+  starters: LineupSlot[]
+  bench: LineupSlot[]
+}
+
+export interface Matchup {
+  home: TeamStrength
+  away: TeamStrength
+  involves_me: boolean
+  margin: number
+}
+
+export interface MatchupsResponse extends Freshness {
+  requested_week: number
+  current_week: number
+  regular_season_weeks: number
+  my_team_id: number | null
+  matchups: Matchup[]
+}
+
+export interface ScheduleEntry {
+  week: number
+  opponent_team_id: number
+  opponent_team_name: string | null
+  score: number
+  outcome: string
+  played: boolean
+}
+
+export interface ScheduleResponse extends Freshness {
+  regular_season_weeks: number
+  my_team_id: number | null
+  teams: { team_id: number; team_name: string; schedule: ScheduleEntry[] }[]
+}
+
+export interface CompareResponse extends Freshness {
+  left: TeamStrength
+  right: TeamStrength
+  margin: number
 }

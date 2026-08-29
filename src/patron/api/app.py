@@ -77,6 +77,24 @@ def load_board(version: MetricVersion = "v1") -> list[dict[str, Any]]:
     return json.loads(path.read_text())
 
 
+def metric_report_path() -> Path:
+    return get_settings().outputs_dir / "metric_report.json"
+
+
+def load_metric_report() -> dict[str, Any]:
+    """Read the last generated backtest report."""
+    path = metric_report_path()
+    if not path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No metric report has been built yet. Run `patron metric-report` to "
+                f"generate {path}, then reload."
+            ),
+        )
+    return json.loads(path.read_text())
+
+
 @app.get("/api/status")
 def status() -> dict[str, Any]:
     """Whether a board exists, when it was built, and under what league settings."""
@@ -95,6 +113,7 @@ def status() -> dict[str, Any]:
         else (len(load_board("v1")) if available["v1"] else 0)
     )
 
+    report_path = metric_report_path()
     return {
         "board_available": built,
         "built_at": (
@@ -107,6 +126,14 @@ def status() -> dict[str, Any]:
                 "player_count": len(load_board(version)) if available[version] else 0,
             }
             for version in ("v1", "v2")
+        },
+        "metric_report": {
+            "available": report_path.exists(),
+            "built_at": (
+                datetime.fromtimestamp(report_path.stat().st_mtime, tz=UTC).isoformat()
+                if report_path.exists()
+                else None
+            ),
         },
         "league": {
             "name": config.name,
@@ -121,6 +148,12 @@ def status() -> dict[str, Any]:
         "espn_connected": False,
         "phase": 1,
     }
+
+
+@app.get("/api/metric-report")
+def metric_report() -> dict[str, Any]:
+    """Latest configurable v2 metric catalog and rolling backtest results."""
+    return load_metric_report()
 
 
 @app.get("/api/board")
