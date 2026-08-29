@@ -20,9 +20,7 @@ def env_file(tmp_path: Path) -> Path:
 
 
 def sample(**overrides) -> EspnCredentials:
-    return EspnCredentials(
-        **{"espn_s2": "AEB" + "x" * 300, "swid": "{ABC-123}", **overrides}
-    )
+    return EspnCredentials(**{"espn_s2": "AEB" + "x" * 300, "swid": "{ABC-123}", **overrides})
 
 
 class TestRead:

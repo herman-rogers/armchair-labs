@@ -20,9 +20,7 @@ class TestCookieExtraction:
         assert found == {"espn_s2": "AEB123", "SWID": "{ABC}"}
 
     def test_ignores_unrelated_cookies(self) -> None:
-        found = _extract(
-            [cookie("espn_s2", "A"), cookie("SWID", "{B}"), cookie("_ga", "tracking")]
-        )
+        found = _extract([cookie("espn_s2", "A"), cookie("SWID", "{B}"), cookie("_ga", "tracking")])
         assert set(found) == set(REQUIRED_COOKIES)
 
     def test_a_signed_out_visitor_yields_only_swid(self) -> None:
