@@ -1,4 +1,11 @@
-"""Command-line entry points."""
+"""Command-line entry points — system operations only.
+
+The CLI does the things a person or a scheduler does *to* the system: sign in, build
+the board, run the server, clear caches, check correctness. It deliberately does not
+read league data. Pulling ESPN state and rendering it belongs to the server and the
+frontend, which is where it can be cached, shared between viewers, and refreshed
+without anyone remembering to run a command.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,6 @@ import typer
 
 from patron import pipeline
 from patron.cli_auth import app as auth_app
-from patron.cli_espn import app as espn_app
 from patron.config.league import get_league
 from patron.config.settings import get_settings
 from patron.data.derived import clear as clear_derived
@@ -19,7 +25,6 @@ app = typer.Typer(
     help="Patron Saints analytics engine — league-exact valuation for Sweaty Plays.",
 )
 app.add_typer(auth_app, name="auth")
-app.add_typer(espn_app, name="espn")
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -80,6 +85,19 @@ def board(
         f"\nWrote v1 ({result.board.height} players) and "
         f"v2 ({result.board_v2.height} players) to {outputs}/"
     )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
+    port: int = typer.Option(8000, "--port"),
+    reload: bool = typer.Option(False, "--reload", help="Restart on code changes."),
+) -> None:
+    """Run the API server, which owns ESPN syncing and serves the frontend's data."""
+    import uvicorn
+
+    typer.echo(f"Serving on http://{host}:{port}  (frontend dev server: just web)")
+    uvicorn.run("patron.api.app:app", host=host, port=port, reload=reload)
 
 
 @app.command()

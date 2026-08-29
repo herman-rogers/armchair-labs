@@ -56,9 +56,9 @@ validate:
 refresh:
     uv run patron refresh
 
-# Serve the read API at :8000.
+# Serve the API at :8000. It owns ESPN syncing; the frontend reads from it.
 api:
-    uv run uvicorn patron.api.app:app --reload --port 8000
+    uv run patron serve --reload
 
 # React dev server at :5173, proxying /api to the backend.
 web:
@@ -69,7 +69,7 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'kill 0' EXIT
-    uv run uvicorn patron.api.app:app --reload --port 8000 &
+    uv run patron serve --reload &
     (cd web && npm run dev) &
     wait
 

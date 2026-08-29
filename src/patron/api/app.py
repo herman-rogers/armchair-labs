@@ -20,8 +20,14 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from patron.api.league_routes import router as league_router
 from patron.config.league import get_league
 from patron.config.settings import get_settings
+from patron.observability import configure_logging
+
+# Under uvicorn our loggers are otherwise silent, which hides ESPN fetches,
+# join health, and stale-data warnings from the server log entirely.
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,10 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# Live ESPN state. Its own router so the board endpoints below stay independent
+# of anything that can fail because a third-party API is down.
+app.include_router(league_router)
 
 
 MetricVersion = Literal["v1", "v2"]
