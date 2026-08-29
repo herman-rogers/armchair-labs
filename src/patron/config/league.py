@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import functools
+from typing import Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from patron.config.settings import load_league_config
 
@@ -17,6 +18,26 @@ class MetricsConfig(BaseModel):
     rb_age_cliff: float
     floor_quantile: float
     td_rate_window: str = Field(pattern="^(all|season)$")
+    projection_season_decay: float = Field(default=0.55, gt=0, le=1)
+    projection_shrinkage_games: float = Field(default=8.0, gt=0)
+    projection_td_regression: float = Field(default=0.5, ge=0, le=1)
+    projection_bonus_retention: float = Field(default=0.35, ge=0, le=1)
+    projection_team_context_cap: float = Field(default=0.18, ge=0, le=0.5)
+    projection_component_weight: float = Field(default=0.65, ge=0, le=1)
+    projection_mean_weight: float = Field(default=0.75, ge=0, le=1)
+    projection_floor_weight: float = Field(default=0.15, ge=0, le=1)
+    projection_ceiling_weight: float = Field(default=0.10, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def score_weights_have_mass(self) -> Self:
+        total = (
+            self.projection_mean_weight
+            + self.projection_floor_weight
+            + self.projection_ceiling_weight
+        )
+        if total <= 0:
+            raise ValueError("at least one v2 score weight must be greater than zero")
+        return self
 
 
 class LeagueConfig(BaseModel):

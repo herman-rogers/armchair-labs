@@ -44,8 +44,13 @@ def board(
     result = pipeline.build(config=config, settings=settings, force=force)
 
     outputs = settings.outputs_dir
+    # Keep board.json as the v1 compatibility alias. New consumers select an explicit
+    # version; the dashboard/API can switch without rebuilding.
     pipeline.export_board(result.board, outputs / "board.json")
-    pipeline.export_markdown(result.board, outputs / "board.md", limit=limit)
+    pipeline.export_board(result.board, outputs / "board_v1.json")
+    pipeline.export_board(result.board_v2, outputs / "board_v2.json")
+    pipeline.export_markdown(result.board, outputs / "board_v1.md", limit=limit)
+    pipeline.export_markdown(result.board_v2, outputs / "board_v2.md", limit=limit)
     result.player_seasons.write_parquet(outputs / "player_seasons.parquet")
     result.kickers.write_parquet(outputs / "kickers.parquet")
     result.defenses.write_parquet(outputs / "defenses.parquet")
@@ -57,13 +62,24 @@ def board(
     if result.bonus_audit:
         typer.echo(result.bonus_audit.summary())
 
-    display = result.board.head(show).select(
-        "rank", "player_display_name", "position", "team", "adj_vor", "ppg", "flags"
+    display = result.board_v2.head(show).select(
+        "rank",
+        "player_display_name",
+        "position",
+        "projected_team",
+        "v2_score",
+        "adj_proj_vor",
+        "proj_ppg",
+        "projection_confidence",
+        "flags",
     )
     with pl.Config(tbl_rows=show, tbl_hide_dataframe_shape=True, fmt_str_lengths=24):
         typer.echo(f"\n{display}")
 
-    typer.echo(f"\nWrote {result.board.height} players to {outputs}/")
+    typer.echo(
+        f"\nWrote v1 ({result.board.height} players) and "
+        f"v2 ({result.board_v2.height} players) to {outputs}/"
+    )
 
 
 @app.command()

@@ -15,7 +15,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,18 +41,27 @@ app.add_middleware(
 )
 
 
-def board_path() -> Path:
-    return get_settings().outputs_dir / "board.json"
+MetricVersion = Literal["v1", "v2"]
 
 
-def load_board() -> list[dict[str, Any]]:
+def board_path(version: MetricVersion = "v1") -> Path:
+    """Artifact path for one metric generation, with the legacy v1 alias supported."""
+    outputs = get_settings().outputs_dir
+    explicit = outputs / f"board_{version}.json"
+    if version == "v1" and not explicit.exists():
+        return outputs / "board.json"
+    return explicit
+
+
+def load_board(version: MetricVersion = "v1") -> list[dict[str, Any]]:
     """Read the built board, or explain how to build it."""
-    path = board_path()
+    path = board_path(version)
     if not path.exists():
         raise HTTPException(
             status_code=503,
             detail=(
-                f"No board has been built yet. Run `patron board` to generate {path}, then reload."
+                f"No {version} board has been built yet. Run `patron board` to generate "
+                f"{path}, then reload."
             ),
         )
     return json.loads(path.read_text())
@@ -61,16 +70,34 @@ def load_board() -> list[dict[str, Any]]:
 @app.get("/api/status")
 def status() -> dict[str, Any]:
     """Whether a board exists, when it was built, and under what league settings."""
-    path = board_path()
+    paths = {version: board_path(version) for version in ("v1", "v2")}
     config = get_league()
-    built = path.exists()
+    available = {version: path.exists() for version, path in paths.items()}
+    built = any(available.values())
+    newest = max(
+        (path for path in paths.values() if path.exists()),
+        key=lambda path: path.stat().st_mtime,
+        default=None,
+    )
+    player_count = (
+        len(load_board("v2"))
+        if available["v2"]
+        else (len(load_board("v1")) if available["v1"] else 0)
+    )
 
     return {
         "board_available": built,
         "built_at": (
-            datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat() if built else None
+            datetime.fromtimestamp(newest.stat().st_mtime, tz=UTC).isoformat() if newest else None
         ),
-        "player_count": len(load_board()) if built else 0,
+        "player_count": player_count,
+        "metric_versions": {
+            version: {
+                "available": available[version],
+                "player_count": len(load_board(version)) if available[version] else 0,
+            }
+            for version in ("v1", "v2")
+        },
         "league": {
             "name": config.name,
             "team_count": config.team_count,
@@ -88,6 +115,7 @@ def status() -> dict[str, Any]:
 
 @app.get("/api/board")
 def board(
+    version: Annotated[MetricVersion, Query(description="Metric generation to return.")] = "v1",
     position: str | None = Query(None, description="Filter to one position."),
     flag: str | None = Query(None, description="Filter to rows carrying this flag."),
     search: str | None = Query(None, description="Case-insensitive name substring."),
@@ -95,7 +123,7 @@ def board(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     """The ranked board, with optional filters."""
-    rows = load_board()
+    rows = load_board(version)
 
     if position:
         wanted = position.upper()
@@ -108,6 +136,7 @@ def board(
 
     return {
         "total": len(rows),
+        "version": version,
         "offset": offset,
         "limit": limit,
         "players": rows[offset : offset + limit],
@@ -115,23 +144,33 @@ def board(
 
 
 @app.get("/api/players/{player_id}")
-def player(player_id: str) -> dict[str, Any]:
+def player(
+    player_id: str,
+    version: Annotated[MetricVersion, Query(description="Metric generation to search.")] = "v1",
+) -> dict[str, Any]:
     """One player's full metric line."""
-    for row in load_board():
+    for row in load_board(version):
         if row.get("player_id") == player_id:
             return row
     raise HTTPException(status_code=404, detail=f"No player with id {player_id} on the board.")
 
 
 @app.get("/api/positions")
-def positions() -> dict[str, Any]:
+def positions(
+    version: Annotated[MetricVersion, Query(description="Metric generation to summarize.")] = "v1",
+) -> dict[str, Any]:
     """Per-position counts and replacement level, for the frontend's filter chips."""
-    rows = load_board()
+    rows = load_board(version)
     summary: dict[str, dict[str, Any]] = {}
     for row in rows:
         entry = summary.setdefault(
             row["position"],
-            {"count": 0, "replacement_ppg": row.get("repl_ppg")},
+            {
+                "count": 0,
+                "replacement_ppg": (
+                    row.get("proj_repl_ppg") if version == "v2" else row.get("repl_ppg")
+                ),
+            },
         )
         entry["count"] += 1
-    return {"positions": summary}
+    return {"version": version, "positions": summary}

@@ -5,13 +5,17 @@ big-play TD bonuses). Computes every NFL player's value from raw nflverse data u
 the league's own scoring rules, ranks by value over replacement, and — in later
 phases — joins that against live ESPN league state.
 
-See `docs/fantasy_engine_implementation_plan.md` for the full design, and
-`docs/saints_metrics_example.py` for the original draft-prep script this ports.
+See [`docs/metrics.md`](docs/metrics.md) for the reviewed v1 catalog and v2 forward
+projection model, `docs/fantasy_engine_implementation_plan.md` for the full system
+design, and `docs/saints_metrics_example.py` for the original draft-prep script.
 
 ## Status
 
-**Phase 1 — the static board.** Scoring engine, metrics catalog, and VOR board,
-validated against the Aug 2026 draft board in `data/static/2026_draft_list.md`.
+**Static boards v1 + v2.** V1 preserves the league-scored historical VOR board
+validated against the Aug 2026 fixture. V2 blends a normalized multi-year PPG prior
+with projected player stat lines driven by role, efficiency, age, team/QB context,
+and teammate competition, then balances expected/floor/ceiling VOR. The API and
+dashboard can switch between both versions.
 
 Phases 2–4 (ESPN sync, the polling loop, in-season intelligence) are not built yet;
 `src/patron/{espn,store,alerts,scheduler}/` are placeholders.

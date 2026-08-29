@@ -1,0 +1,30 @@
+# v2 forward-projection assumptions.
+#
+# The statistical model supplies the default: a player's most recent team is the
+# projected team, and the team's latest pass/rush/scoring/competition profile carries
+# forward. Put only information the historical data cannot know here: a trade, a new
+# quarterback, a materially changed target tree, or a clearly different role.
+#
+# Team multipliers alter the destination environment for every projected player on
+# that team. A value of 1.08 means eight percent above the latest historical profile.
+teams: {}
+# Example:
+#  PIT:
+#    qb_context_multiplier: 1.08
+#    pass_volume_multiplier: 1.03
+#    rush_volume_multiplier: 0.98
+#    scoring_multiplier: 1.05
+#    target_availability_multiplier: 1.00
+#    backfield_availability_multiplier: 1.00
+#    reason: "New quarterback and coordinator projection."
+
+# Player entries match normalized display name + position. projected_team makes a
+# move use the destination team's context. opportunity_multiplier handles depth-chart
+# information which team totals cannot infer: 1.10 is a ten-percent role increase.
+players: []
+# Example:
+#  - player: Example Receiver
+#    position: WR
+#    projected_team: BUF
+#    opportunity_multiplier: 1.05
+#    reason: "Trade plus expected starting role."

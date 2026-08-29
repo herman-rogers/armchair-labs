@@ -35,6 +35,10 @@ DST is the one place the draft build approximated: the proxy (sacks + 2×takeawa
 
 ## 4. Metrics catalog
 
+> This section records the original v1 design. The reviewed formulas, known defects,
+> and implemented v2 forward/team-context model are now specified in
+> [`metrics.md`](metrics.md), which is authoritative for metric behavior.
+
 These are the aspects actually used, with definitions and the reasoning each one earned during the draft:
 
 **PPG (league points per game).** Season league-scored points ÷ games. The base currency; season *totals* mislead whenever games were missed (the Skattebo/Nabers lesson).

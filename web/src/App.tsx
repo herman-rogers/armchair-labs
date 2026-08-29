@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchBoard, fetchStatus } from './api/client'
-import type { Position } from './api/types'
+import type { MetricVersion, Position } from './api/types'
 import { BoardTable } from './components/BoardTable'
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE']
@@ -11,13 +11,21 @@ export default function App() {
   const [positions, setPositions] = useState<Set<Position>>(new Set())
   const [flag, setFlag] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [version, setVersion] = useState<MetricVersion>('v2')
 
   const status = useQuery({ queryKey: ['status'], queryFn: fetchStatus })
   const board = useQuery({
-    queryKey: ['board'],
-    queryFn: () => fetchBoard(),
-    enabled: status.data?.board_available === true,
+    queryKey: ['board', version],
+    queryFn: () => fetchBoard(version),
+    enabled: status.data?.metric_versions?.[version]?.available === true,
   })
+
+  useEffect(() => {
+    if (status.data && !status.data.metric_versions[version].available) {
+      const fallback: MetricVersion = status.data.metric_versions.v2.available ? 'v2' : 'v1'
+      setVersion(fallback)
+    }
+  }, [status.data, version])
 
   const players = useMemo(() => {
     const rows = board.data?.players ?? []
@@ -80,6 +88,22 @@ export default function App() {
 
       {board.data && (
         <>
+          <div className="version-tabs" role="tablist" aria-label="Metric version">
+            {(['v1', 'v2'] as MetricVersion[]).map((name) => (
+              <button
+                key={name}
+                type="button"
+                role="tab"
+                aria-selected={version === name}
+                disabled={!status.data?.metric_versions[name].available}
+                onClick={() => setVersion(name)}
+              >
+                <span>{name.toUpperCase()}</span>
+                <small>{name === 'v1' ? 'Historical production' : 'Forward projection'}</small>
+              </button>
+            ))}
+          </div>
+
           <div className="controls">
             {POSITIONS.map((position) => (
               <button
@@ -120,17 +144,23 @@ export default function App() {
             </span>
           </div>
 
-          <BoardTable players={players} />
+          <BoardTable players={players} version={version} />
 
           <p className="legend">
-            <b>VOR</b> — points per game above the replacement-level player at the position
+            <b>{version === 'v2' ? 'V2 Score' : 'VOR'}</b> — {version === 'v2' ? 'a balanced blend of expected, floor, and ceiling VOR' : 'points per game above the replacement-level player at the position'}
             {league
               ? ` (QB${league.vor_baseline_rank.QB} · RB${league.vor_baseline_rank.RB} · WR${league.vor_baseline_rank.WR} · TE${league.vor_baseline_rank.TE} in a ${league.team_count}-team league)`
               : ''}
-            . This is what the board sorts by, and why a tight end can outrank a receiver
-            who scores more.
+            . {version === 'v2'
+              ? 'V2 projects a stat line from role and team volume, blends it with the normalized historical PPG prior, then sorts 75% expected VOR, 15% floor VOR, and 10% ceiling VOR.'
+              : 'V1 sorts last season’s league-scored production and preserves the original draft-board model.'}
             <br />
             <b>*</b> beside a name marks a manual override — hover it for the reason.
+            {version === 'v2' && (
+              <>
+                {' '}<b>◇</b> marks an explicit future team/role assumption. Confidence measures sample support, not certainty.
+              </>
+            )}
             Hover any column header for what the metric means.
           </p>
         </>

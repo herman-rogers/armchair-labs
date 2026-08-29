@@ -19,6 +19,7 @@ from patron.config.league import LeagueConfig, get_league
 from patron.config.settings import Settings, get_settings
 from patron.data import nflverse
 from patron.data.derived import cached_frame
+from patron.metrics.projection import METRIC_VERSION, build_projection_board
 from patron.scoring.bonuses import BonusAudit, extract_touchdown_bonuses
 from patron.scoring.dst import build_dst_proxy
 from patron.scoring.kickers import aggregate_kicker_seasons, score_kicker_weeks
@@ -31,6 +32,7 @@ class BuildResult:
     """Everything one board build produced, plus how the build went."""
 
     board: pl.DataFrame
+    board_v2: pl.DataFrame
     player_seasons: pl.DataFrame
     kickers: pl.DataFrame
     defenses: pl.DataFrame
@@ -91,7 +93,8 @@ def build(
         birth_dates,
         config=config,
         strict_overrides=strict_overrides,
-    )
+    ).with_columns(pl.lit("v1").alias(METRIC_VERSION))
+    board_v2 = build_projection_board(player_seasons, board, config)
 
     board_weeks = weeks.filter(pl.col("season") == config.board_season)
     kickers = aggregate_kicker_seasons(
@@ -108,6 +111,7 @@ def build(
 
     return BuildResult(
         board=board,
+        board_v2=board_v2,
         player_seasons=player_seasons,
         kickers=kickers,
         defenses=defenses,
@@ -118,6 +122,7 @@ def build(
 
 #: Board columns written to JSON, in display order.
 BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
+    "metric_version",
     "rank",
     "player_display_name",
     "position",
@@ -141,6 +146,55 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "override_delta",
     "override_reason",
     "player_id",
+    # v2 forward-projection columns. v1 exports omit these cleanly.
+    "projected_team",
+    "v2_score",
+    "adj_proj_vor",
+    "proj_vor",
+    "proj_ppg",
+    "proj_repl_ppg",
+    "historical_ppg_prior",
+    "individual_prior_ppg",
+    "prior_branch_ppg",
+    "component_proj_ppg",
+    "projected_floor",
+    "projected_ceiling",
+    "projected_volatility",
+    "floor_vor",
+    "ceiling_vor",
+    "projection_confidence",
+    "effective_games",
+    "age_factor",
+    "td_regression_adjustment",
+    "bonus_regression_adjustment",
+    "team_context_factor",
+    "qb_context",
+    "team_scoring_context",
+    "team_pass_volume",
+    "team_rush_volume",
+    "teammate_competition",
+    "season_target_share",
+    "season_carry_share",
+    "projected_target_share",
+    "projected_carry_share",
+    "projected_wopr",
+    "projected_air_yards_share",
+    "projected_targets_pg",
+    "projected_carries_pg",
+    "projected_receptions_pg",
+    "projected_receiving_yards_pg",
+    "projected_rushing_yards_pg",
+    "projected_receiving_tds_pg",
+    "projected_rushing_tds_pg",
+    "projected_passing_yards_pg",
+    "projected_passing_tds_pg",
+    "projected_interceptions_pg",
+    "projected_bonus_pg",
+    "air_yard_factor",
+    "opportunity_multiplier",
+    "projection_reason",
+    "historical_vor",
+    "historical_repl_ppg",
 )
 
 
@@ -161,17 +215,22 @@ def export_markdown(board: pl.DataFrame, path: Path, limit: int | None = None) -
     can be diffed by eye as well as by the fixture test.
     """
     rows = board.head(limit) if limit else board
+    is_v2 = "proj_ppg" in rows.columns
+    version = "v2 projected" if is_v2 else "v1 historical"
+    vor_column = "v2_score" if is_v2 else "adj_vor"
+    ppg_column = "proj_ppg" if is_v2 else "ppg"
+    team_column = "projected_team" if is_v2 else "team"
     lines = [
-        f"# Overall Draft Board — {rows.height} players",
+        f"# Overall Draft Board ({version}) — {rows.height} players",
         "",
-        "Rank | Player | Pos | Team | VOR | PPG | Flags | Notes",
+        f"Rank | Player | Pos | Team | {'V2 Score' if is_v2 else 'VOR'} | PPG | Flags | Notes",
         "---|---|---|---|---|---|---|---",
     ]
     for row in rows.iter_rows(named=True):
         note = row.get("override_reason") or ""
         lines.append(
             f"{row['rank']} | {row['player_display_name']} | {row['position']} | "
-            f"{row['team']} | {row['adj_vor']:.1f} | {row['ppg']:.1f} | "
+            f"{row[team_column]} | {row[vor_column]:.1f} | {row[ppg_column]:.1f} | "
             f"{row['flags']} | {note}"
         )
     lines.append("")

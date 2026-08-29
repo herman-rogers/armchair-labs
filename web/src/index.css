@@ -40,6 +40,21 @@ header.masthead { margin-bottom: 20px; }
 header.masthead h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
 header.masthead p { margin: 0; color: var(--text-dim); font-size: 13px; }
 
+.version-tabs {
+  display: inline-flex; gap: 3px; padding: 3px; margin-top: 4px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+}
+.version-tabs button {
+  display: flex; gap: 8px; align-items: baseline; padding: 7px 12px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-dim);
+  cursor: pointer;
+}
+.version-tabs button:hover { color: var(--text); }
+.version-tabs button[aria-selected='true'] { background: var(--surface-raised); color: var(--text); }
+.version-tabs button:disabled { opacity: .35; cursor: not-allowed; }
+.version-tabs span { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.version-tabs small { color: var(--text-faint); font-size: 11px; }
+
 .controls {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   margin: 18px 0 12px;

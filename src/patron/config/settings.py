@@ -115,3 +115,9 @@ def load_scoring_config() -> dict[str, Any]:
 @functools.lru_cache(maxsize=1)
 def load_overrides_config() -> dict[str, Any]:
     return _load_yaml("overrides.yaml")
+
+
+@functools.lru_cache(maxsize=1)
+def load_projections_config() -> dict[str, Any]:
+    """Forward-looking team and player assumptions used only by the v2 board."""
+    return _load_yaml("projections.yaml")

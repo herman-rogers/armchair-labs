@@ -49,3 +49,25 @@ metrics:
   # Position-average TD rate window. The reference script pooled all seasons into a
   # single blended rate; "all" preserves that. "season" computes it per season.
   td_rate_window: all
+
+  # v2 projection controls. The model weights the most recent season at 1.0, the
+  # prior season at this decay, and the season before that at decay squared.
+  projection_season_decay: 0.55
+  # Effective games needed before a player's multi-year PPG prior mostly stands on
+  # its own. Smaller samples are pulled toward the position mean.
+  projection_shrinkage_games: 8.0
+  # Fraction of last season's rushing/receiving TD over-expectation removed.
+  projection_td_regression: 0.50
+  # Share of a player's historical big-play bonus rate retained; the rest regresses
+  # toward the positional rate because long touchdowns are volatile.
+  projection_bonus_retention: 0.35
+  # Maximum team-context change in either direction before a manual role multiplier.
+  projection_team_context_cap: 0.18
+  # V2 combines a bottom-up projected stat line with the normalized historical PPG
+  # branch. This is the bottom-up branch's share of projected PPG.
+  projection_component_weight: 0.65
+  # Overall v2 draft score weights. These sum to 1 and keep expected value primary
+  # while allowing historical floor/volatility to describe roster utility.
+  projection_mean_weight: 0.75
+  projection_floor_weight: 0.15
+  projection_ceiling_weight: 0.10
