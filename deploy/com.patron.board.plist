@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd job for the nightly board rebuild.
+
+  nflverse data lands after games and finalises overnight, so polling it faster is
+  wasted motion. This runs at 04:00 daily, plus the Tuesday-morning slot that matters
+  most: the week's data has completed and waiver bids process at 11 AM ET.
+
+  Install:
+    cp deploy/com.patron.board.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.patron.board.plist
+
+  Edit the two absolute paths below first — launchd does not expand ~ or read your
+  shell profile, so uv must be given its full path.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.patron.board</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/CHANGEME/.local/bin/uv</string>
+        <string>run</string>
+        <string>patron</string>
+        <string>board</string>
+        <string>--force</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/CHANGEME/dev/fantasy</string>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key><integer>4</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/patron-board.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/patron-board.error.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

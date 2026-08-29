@@ -1,0 +1,22 @@
+# secrets
+.env
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# generated data — never committed
+data/cache/
+data/outputs/
+
+# node
+web/node_modules/
+web/dist/
+
+# macos
+.DS_Store
