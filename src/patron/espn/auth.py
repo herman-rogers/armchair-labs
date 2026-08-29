@@ -5,20 +5,17 @@ cookies that a normal browser session sets after a Disney ID login. Rather than 
 someone to open devtools and copy them by hand, this opens a real browser, waits for
 the login to complete, and reads the cookies out of the session.
 
-Two deliberate choices:
+The browser is started by the operating system and attached to afterwards, rather than
+launched as a child of this process; see `patron.espn.browser` for why that distinction
+decides whether the window can accept a keystroke at all.
 
-**The system Chrome is driven, not a bundled Chromium.** Playwright's own browser
-download is around 150MB and buys nothing here; `channel="chrome"` uses the copy
-already installed. If it is missing, the error says how to get one.
-
-**The browser profile persists** in the data directory. The first run needs a real
-login; later runs usually find the session still valid and finish without any
-interaction, which matters because these cookies expire eventually and re-auth should
-be cheap rather than a chore.
+The profile persists in the data directory, so the first run needs a real login and
+later runs usually find the session still valid and finish without interaction. That
+matters because these cookies do eventually expire, and re-auth should be cheap.
 
 Nothing is automated inside the login form. Credentials are typed by the person who
-owns them, into a real browser, exactly as they would be normally — this only watches
-for the resulting session.
+owns them, into an ordinary browser window, exactly as they would be normally — this
+only watches for the resulting session.
 """
 
 from __future__ import annotations
@@ -30,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from patron.espn import browser
+from patron.espn.browser import BrowserUnavailableError
 from patron.espn.credentials import EspnCredentials
 
 logger = logging.getLogger(__name__)
@@ -41,12 +40,10 @@ LOGIN_URL = "https://www.espn.com/fantasy/football/"
 #: Cookies that together grant private-league access.
 REQUIRED_COOKIES = ("espn_s2", "SWID")
 
+__all__ = ["BrowserUnavailableError", "LoginResult", "LoginTimeoutError", "login"]
+
 DEFAULT_TIMEOUT_SECONDS = 300
 POLL_INTERVAL_SECONDS = 1.0
-
-
-class BrowserUnavailableError(RuntimeError):
-    """Raised when no usable browser could be launched."""
 
 
 class LoginTimeoutError(RuntimeError):
@@ -106,35 +103,13 @@ def login(
         if callable(on_status):
             on_status(message)
 
-    profile_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    session = browser.launch(profile_dir)
 
     with sync_playwright() as playwright:
+        connection = playwright.chromium.connect_over_cdp(session.cdp_url)
         try:
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                channel="chrome",
-                headless=False,
-                viewport={"width": 1280, "height": 900},
-                # Playwright defaults this to False, which passes --no-sandbox and
-                # makes Chrome show a "stability and security will suffer" banner.
-                # Real credentials get typed into this window, so the sandbox stays on.
-                chromium_sandbox=True,
-                # Stops Chrome advertising navigator.webdriver, which some login
-                # widgets react badly to. This is an interactive sign-in by the account
-                # owner — the flag only keeps the form working, and nothing here
-                # automates the login itself.
-                args=["--disable-blink-features=AutomationControlled"],
-            )
-        except Exception as error:
-            raise BrowserUnavailableError(
-                "Could not launch Google Chrome. Install it from "
-                "https://www.google.com/chrome/, or run "
-                "`uv run playwright install chromium` to use a bundled browser instead "
-                "(a ~150MB download) and set channel=None in patron/espn/auth.py."
-            ) from error
-
-        try:
+            context = connection.contexts[0] if connection.contexts else connection.new_context()
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
 
@@ -152,7 +127,7 @@ def login(
 
             # Land on the login form rather than the marketing page, so there is one
             # less thing to hunt for. Best-effort: if the affordance moves, the status
-            # message below still explains what to do.
+            # message below still says what to do.
             opened_form = False
             try:
                 page.get_by_text("Log In", exact=True).first.click(timeout=8000)
@@ -185,10 +160,8 @@ def login(
                     status("Login page reached. Complete sign-in to finish…")
                     announced = True
 
-                if page.is_closed():
-                    raise LoginTimeoutError(
-                        "The browser window was closed before sign-in completed."
-                    )
+                if not session.is_up():
+                    raise LoginTimeoutError("The browser was closed before sign-in completed.")
                 time.sleep(POLL_INTERVAL_SECONDS)
 
             raise LoginTimeoutError(
@@ -196,4 +169,5 @@ def login(
                 "Re-run `patron auth login`, or pass --timeout to wait longer."
             )
         finally:
-            context.close()
+            connection.close()
+            session.quit()
