@@ -130,9 +130,16 @@ def load_nextgen_stats(seasons: list[int], stat_type: str) -> pl.DataFrame:
 
 
 def load_fantasy_rankings() -> pl.DataFrame:
-    """The dated FantasyPros ECR archive used as a preseason market baseline."""
+    """The dated FantasyPros ECR archive used as a preseason market baseline.
+
+    Extended by `market_backfill`: the 2020 combined-offense pages are normalized
+    into canonical page types, and 2010–2019 come from timestamped Wayback captures
+    committed under ``data/static``. Every row keeps a pre-cutoff scrape date.
+    """
     configure_cache()
-    return nfl.load_ff_rankings(type="all")
+    from patron.data import market_backfill
+
+    return market_backfill.extend_rankings(nfl.load_ff_rankings(type="all"))
 
 
 def load_participation(seasons: list[int]) -> pl.DataFrame:
@@ -140,6 +147,22 @@ def load_participation(seasons: list[int]) -> pl.DataFrame:
     configure_cache()
     frame = nfl.load_participation(seasons)
     require_columns(frame.columns, PARTICIPATION_COLUMNS, "nflverse participation")
+    return frame.select(PARTICIPATION_COLUMNS)
+
+
+def load_participation_flexible(seasons: list[int]) -> pl.DataFrame:
+    """Participation with nullable positions for the older (2016–2022) schema.
+
+    The rich weekly research panel resolves those missing positions from the player
+    stat feed. Keeping this separate from the strict production loader makes the
+    report-only compatibility behavior explicit.
+    """
+    configure_cache()
+    frame = nfl.load_participation(seasons)
+    required = tuple(name for name in PARTICIPATION_COLUMNS if name != "offense_positions")
+    require_columns(frame.columns, required, "nflverse participation")
+    if "offense_positions" not in frame.columns:
+        frame = frame.with_columns(pl.lit(None, dtype=pl.String).alias("offense_positions"))
     return frame.select(PARTICIPATION_COLUMNS)
 
 
@@ -208,6 +231,36 @@ def load_birth_dates(season: int) -> pl.DataFrame:
     )
 
 
+def load_weekly_rosters(seasons: list[int]) -> pl.DataFrame:
+    """Week-level roster/status history used by report-only preseason experiments."""
+    configure_cache()
+    return nfl.load_rosters_weekly(seasons)
+
+
+def load_snap_counts(seasons: list[int]) -> pl.DataFrame:
+    """Game-level offensive snap counts (PFR, available from 2013 in practice)."""
+    configure_cache()
+    return nfl.load_snap_counts(seasons)
+
+
+def load_players() -> pl.DataFrame:
+    """Canonical player identity plus draft capital and cross-source IDs."""
+    configure_cache()
+    return nfl.load_players()
+
+
+def load_contracts() -> pl.DataFrame:
+    """Historical OverTheCap contracts for cutoff-safe roster-investment features."""
+    configure_cache()
+    return nfl.load_contracts()
+
+
+def load_combine() -> pl.DataFrame:
+    """Historical combine measurements for cutoff-safe athleticism experiments."""
+    configure_cache()
+    return nfl.load_combine()
+
+
 def load_schedules(season: int) -> pl.DataFrame:
     """Game results, for points allowed and (later) bye weeks and matchups."""
     configure_cache()
@@ -226,7 +279,9 @@ def load_id_crosswalk() -> pl.DataFrame:
     ID, and name matching becomes a logged fallback rather than the primary path.
     """
     configure_cache()
-    return nfl.load_ff_playerids()
+    from patron.data import market_backfill
+
+    return market_backfill.extend_crosswalk(nfl.load_ff_playerids())
 
 
 def clear_cache() -> None:

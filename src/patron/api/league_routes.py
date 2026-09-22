@@ -20,7 +20,7 @@ import polars as pl
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from patron.config.league import get_league
-from patron.espn import crosswalk, lineup, reports
+from patron.espn import lineup, reports, sync
 from patron.espn.crosswalk import (
     AVAILABILITY,
     IS_FREE_AGENT,
@@ -239,9 +239,7 @@ def unrankable(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any
     omits a hyped rookie is worse than one that says it cannot price him.
     """
     state = _state(service, version)
-    board_ids, board_names = crosswalk.board_lookups(state.tagged_board)
-    resolved, _ = crosswalk.resolve_player_ids(state.snapshot.to_frame(), board_ids, board_names)
-    listing = reports.unrankable_players(resolved)
+    listing = reports.unrankable_players(state.tagged_board)
     return {**_envelope(state), "total": listing.height, "players": _rows(listing)}
 
 
@@ -271,6 +269,17 @@ def transactions(service: ServiceDep, limit: int = Query(50, ge=1, le=200)) -> d
     return {**_envelope(state), "total": len(state.snapshot.transactions), "transactions": entries}
 
 
+@router.get("/draft")
+def draft(service: ServiceDep, version: str = Query("v2")) -> dict[str, Any]:
+    """The draft recap scored against the board: every pick, exact best-available, grades."""
+    state = _state(service, version)
+    snapshot = state.snapshot
+    analysis = reports.draft_analysis(
+        state.tagged_board, snapshot.draft, my_team_id=snapshot.my_team_id
+    )
+    return {**_envelope(state), **analysis, "pick_count": len(snapshot.draft)}
+
+
 @router.get("/free-agent-counts")
 def free_agent_counts(service: ServiceDep, version: str = Query("v1")) -> dict[str, Any]:
     """How many claimable players exist at each position, for the UI's filter chips."""
@@ -283,54 +292,133 @@ def free_agent_counts(service: ServiceDep, version: str = Query("v1")) -> dict[s
     return {**_envelope(state), "counts": {row[0]: row[1] for row in counts.iter_rows()}}
 
 
+def _projected_row(slot: lineup.LineupSlot) -> dict[str, Any]:
+    """One modelled slot, in the same shape an actual week's row uses.
+
+    The two paths share a renderer, so they have to share a shape. The fields that
+    only a played week can fill — what ESPN projected, the pro opponent — are null
+    here rather than absent, which is the difference between the UI showing a blank
+    and the UI showing `undefined`.
+    """
+    return {
+        "slot": slot.slot,
+        "player_id": slot.player_id,
+        "espn_id": None,
+        "player_display_name": slot.player_name,
+        "position": slot.position,
+        "value": round(slot.value, 2),
+        "projected": None,
+        "opponent": None,
+        "on_bye": False,
+    }
+
+
 def _strength(state: LeagueState, team_id: int, team_name: str) -> dict[str, Any]:
     """One team's best fieldable lineup, as JSON."""
     roster = state.tagged_board.filter(pl.col(OWNER_TEAM_ID) == team_id)
     column = lineup.value_column_for(state.tagged_board)
 
-    # Counted from the snapshot, not the board: a player the board cannot rank is
-    # absent from it entirely rather than present with a null, so a roster leaning on
-    # rookies would otherwise report zero unranked and simply look thin.
-    rostered_skill = sum(
-        1
-        for player in state.snapshot.players
-        if player.owner_team_id == team_id and player.position in lineup.RANKED_POSITIONS
-    )
+    # ESPN-only rows are present so managers can see them, but their model value stays
+    # null. Preserve that uncertainty in lineup comparisons rather than treating an
+    # included fallback row as a scored player.
+    unranked = roster.filter(pl.col(column).is_null()).height
     built = lineup.best_lineup(
         roster,
         state.snapshot.roster_slots,
         column,
         team_id,
         team_name,
-        unranked_count=max(rostered_skill - roster.height, 0),
+        unranked_count=unranked,
     )
 
     return {
         "team_id": team_id,
         "team_name": team_name,
+        # A model answer to "who has the better team", not a record of anything that
+        # happened. The UI must say which of the two it is showing.
+        "source": "projected",
         "metric": column,
         "total": round(built.total, 2),
+        "projected_total": None,
         "by_position": {k: round(v, 2) for k, v in built.by_position.items()},
         "unranked_starters": built.unranked_starters,
-        "starters": [
-            {
-                "slot": slot.slot,
-                "player_id": slot.player_id,
-                "player_display_name": slot.player_name,
-                "position": slot.position,
-                "value": round(slot.value, 2),
-            }
-            for slot in built.starters
-        ],
-        "bench": [
-            {
-                "player_id": slot.player_id,
-                "player_display_name": slot.player_name,
-                "position": slot.position,
-                "value": round(slot.value, 2),
-            }
-            for slot in built.bench
-        ],
+        "starters": [_projected_row(slot) for slot in built.starters],
+        "bench": [_projected_row(slot) for slot in built.bench],
+    }
+
+
+#: The order a manager reads their own lineup in. ESPN returns roster entries in
+#: whatever order it stores them, which interleaves bench players with starters.
+_SLOT_PRIORITY = ("QB", "RB", "WR", "TE")
+
+
+def _slot_sort_key(slot: str) -> tuple[int, int, str]:
+    """Dedicated skill slots, then flex, then kicker and defense."""
+    if lineup.FLEX_SEPARATOR in slot:
+        return (1, 0, slot)
+    if slot in _SLOT_PRIORITY:
+        return (0, _SLOT_PRIORITY.index(slot), slot)
+    return (2, 0, slot)
+
+
+def _lineup_row(entry: sync.LineupEntry) -> dict[str, Any]:
+    return {
+        "slot": entry.slot,
+        # Board ids do not reach here: this is ESPN's own record of the week, and
+        # joining it to the board would reintroduce exactly the gap being fixed.
+        "player_id": None,
+        "espn_id": entry.espn_id,
+        "player_display_name": entry.player_display_name,
+        "position": entry.position,
+        "value": round(entry.points, 2),
+        "projected": round(entry.projected_points, 2)
+        if entry.projected_points is not None
+        else None,
+        "opponent": entry.pro_opponent,
+        "on_bye": entry.on_bye,
+    }
+
+
+def _actual_side(week: sync.WeekLineups, team_id: int, team_name: str) -> dict[str, Any]:
+    """One team's week as they actually played it.
+
+    Deliberately not the best lineup available: the point of a played week is the
+    lineup that was set, bench mistakes and all. Starters keep ESPN's slot; everyone
+    else is bench, ordered by what they scored, because the question a manager asks of
+    a finished week is what they left there.
+    """
+    entries = week.lineup_for(team_id)
+    starters = sorted(
+        (entry for entry in entries if entry.started),
+        key=lambda entry: (_slot_sort_key(entry.slot), -entry.points),
+    )
+    bench = sorted(
+        (entry for entry in entries if not entry.started),
+        key=lambda entry: -entry.points,
+    )
+
+    by_position: dict[str, float] = {}
+    for entry in starters:
+        if entry.position:
+            by_position[entry.position] = by_position.get(entry.position, 0.0) + entry.points
+
+    is_home = team_id == week.home_team_id
+    projected = week.home_projected if is_home else week.away_projected
+    return {
+        "team_id": team_id,
+        "team_name": team_name,
+        "source": "actual",
+        # Fantasy points, as scored. Named so the UI labels it as points rather than
+        # reaching for a board metric's name.
+        "metric": "points",
+        "total": round(week.home_score if is_home else week.away_score, 2),
+        "projected_total": round(projected, 2) if projected is not None else None,
+        "by_position": {k: round(v, 2) for k, v in by_position.items()},
+        # Every player here has a real score; nothing is understated for want of a
+        # board value, so the projected view's caveat does not apply.
+        "unranked_starters": 0,
+        "starters": [_lineup_row(entry) for entry in starters],
+        "bench": [_lineup_row(entry) for entry in bench],
     }
 
 
@@ -375,31 +463,68 @@ def matchups(
     week: int | None = Query(None, ge=1, le=20, description="Defaults to the current week."),
     version: str = Query("v1"),
 ) -> dict[str, Any]:
-    """Every matchup in a week, with each side's fieldable lineup strength.
+    """Every matchup in a week, each side's lineup shown as starters and bench.
 
-    Strength is a season-long comparison, not a weekly projection: it knows nothing
-    about byes, this week's injury report, or who is on a good defence. It answers
-    "who has the better team", which is the question a schedule scan actually asks.
+    Two different questions share this endpoint, and the response says which one it
+    answered:
+
+    `source: "actual"` — a week that has been played or is being played. ESPN's own
+    record of the lineup each manager set: real slots, real bench, real points. A
+    player benched that week appears on the bench, however highly the board rates him.
+
+    `source: "projected"` — a week that has not happened. There is no lineup to report,
+    so this falls back to each team's best fieldable lineup by board value. That is a
+    season-long strength comparison, not a weekly forecast: it knows nothing about
+    byes, the injury report, or opponent.
     """
     state = _state(service, version)
     target = week or state.snapshot.week
     names = _team_names(state)
+    mine = state.snapshot.my_team_id
 
+    played = [entry for entry in state.snapshot.week_lineups if entry.week == target]
+    if played:
+        # The week's own box scores are authoritative for who played whom — the
+        # schedule is the plan, this is the record.
+        played.sort(key=lambda entry: (mine not in (entry.home_team_id, entry.away_team_id),))
+        games: list[dict[str, Any]] = []
+        for entry in played:
+            home = _actual_side(entry, entry.home_team_id, names.get(entry.home_team_id, ""))
+            away = _actual_side(entry, entry.away_team_id, names.get(entry.away_team_id, ""))
+            games.append(
+                {
+                    "home": home,
+                    "away": away,
+                    "involves_me": mine in (entry.home_team_id, entry.away_team_id),
+                    "margin": round(home["total"] - away["total"], 2),
+                }
+            )
+        return {
+            **_envelope(state),
+            "requested_week": target,
+            "current_week": state.snapshot.week,
+            "regular_season_weeks": state.snapshot.regular_season_weeks,
+            "my_team_id": mine,
+            "source": "actual",
+            "matchups": games,
+        }
+
+    # A future week: no lineup exists yet, so compare fieldable strength instead.
+    #
     # A matchup appears on both teams' schedules; keep one copy, ordered so the
     # viewer's own game is first.
     seen: set[frozenset[int]] = set()
     pairs: list[tuple[int, int]] = []
     for team in state.snapshot.teams:
-        entry = next((e for e in team.schedule if e.week == target), None)
-        if entry is None:
+        scheduled = next((e for e in team.schedule if e.week == target), None)
+        if scheduled is None:
             continue
-        key = frozenset({team.team_id, entry.opponent_team_id})
+        key = frozenset({team.team_id, scheduled.opponent_team_id})
         if key in seen:
             continue
         seen.add(key)
-        pairs.append((team.team_id, entry.opponent_team_id))
+        pairs.append((team.team_id, scheduled.opponent_team_id))
 
-    mine = state.snapshot.my_team_id
     pairs.sort(key=lambda pair: (mine not in pair, pair[0]))
 
     strengths: dict[int, dict[str, Any]] = {}
@@ -412,6 +537,7 @@ def matchups(
         "current_week": state.snapshot.week,
         "regular_season_weeks": state.snapshot.regular_season_weeks,
         "my_team_id": mine,
+        "source": "projected",
         "matchups": [
             {
                 "home": strengths[home],

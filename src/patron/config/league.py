@@ -10,13 +10,8 @@ from patron.config.settings import load_league_config
 
 
 class MetricsConfig(BaseModel):
-    target_weight: float
-    td_regress_down: float
-    td_regress_up: float
-    td_regress_up_min_opp: float
     rb_age_cliff: float
     floor_quantile: float
-    td_rate_window: str = Field(pattern="^(all|season)$")
     projection_season_decay: float = Field(default=0.55, gt=0, le=1)
     projection_shrinkage_games: float = Field(default=8.0, gt=0)
     projection_component_weight: float = Field(default=0.65, ge=0, le=1)
@@ -51,6 +46,9 @@ class MetricsConfig(BaseModel):
 
 
 class LeagueConfig(BaseModel):
+    # nflverse position corrections by GSIS id. Two-way players are filed at their
+    # defensive position in the weekly stats and would otherwise never reach the board.
+    position_overrides: dict[str, str] = Field(default_factory=dict)
     name: str
     team_count: int
     seasons: list[int]

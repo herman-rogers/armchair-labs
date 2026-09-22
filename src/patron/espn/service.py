@@ -101,7 +101,9 @@ class LeagueService:
     def board_path(self, version: str = "v1") -> Path:
         """Where the built board lives, preferring the versioned file."""
         versioned = self._settings.outputs_dir / f"board_{version}.json"
-        return versioned if versioned.exists() else self._settings.outputs_dir / "board.json"
+        if version == "v1" and not versioned.exists():
+            return self._settings.outputs_dir / "board.json"
+        return versioned
 
     def is_authenticated(self) -> bool:
         stored = creds.read(self._settings.env_path)
@@ -141,6 +143,7 @@ class LeagueService:
         ids, names = crosswalk.board_lookups(board)
         players, report = crosswalk.resolve_player_ids(snapshot.to_frame(), ids, names)
         tagged = crosswalk.attach_ownership(board, players, snapshot.my_team_id)
+        tagged = crosswalk.append_espn_fallbacks(tagged, players, snapshot.my_team_id)
 
         # §8's instruction: log unmatched loudly. The API surfaces this too, so a
         # degraded join is visible in the UI rather than only in a log nobody reads.
@@ -233,8 +236,15 @@ class LeagueService:
                 return self._derive(version)
 
             try:
-                snapshot = sync.fetch_snapshot(self._credentials(), self._config.draft_season)
+                snapshot = sync.fetch_snapshot(
+                    self._credentials(),
+                    self._config.draft_season,
+                    # Settled week lineups carry forward, so a poll costs one week of
+                    # box scores rather than one per week played so far.
+                    previous=self._snapshot,
+                )
                 snapshot.write(self.snapshot_path)
+                snapshot.write_adp_snapshot(self._settings.outputs_dir / "market_snapshots")
                 self._snapshot = snapshot
                 self._fetched_at = time.monotonic()
                 self._stale = False

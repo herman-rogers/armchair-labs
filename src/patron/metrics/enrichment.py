@@ -94,17 +94,9 @@ def build_player_efficiency(player_weeks: pl.DataFrame) -> pl.DataFrame:
             .otherwise(None)
             .alias("passing_first_down_rate"),
             pl.when(carries > 0)
-            .then(pl.col("rushing_epa").fill_null(0).sum() / carries)
-            .otherwise(None)
-            .alias("rushing_epa_per_carry"),
-            pl.when(carries > 0)
             .then(pl.col("rushing_first_downs").fill_null(0).sum() / carries)
             .otherwise(None)
             .alias("rushing_first_down_rate"),
-            pl.when(targets > 0)
-            .then(pl.col("receiving_epa").fill_null(0).sum() / targets)
-            .otherwise(None)
-            .alias("receiving_epa_per_target"),
             pl.when(targets > 0)
             .then(pl.col("receiving_first_downs").fill_null(0).sum() / targets)
             .otherwise(None)
@@ -146,19 +138,12 @@ def build_team_tendencies(pbp: pl.DataFrame) -> pl.DataFrame:
         & ((pl.col("qb_dropback") == 1) | (pl.col("rush_attempt") == 1))
         & (pl.col("qb_kneel").fill_null(0) != 1)
     )
-    early_down = pl.col("down") <= 2
     return (
         neutral.group_by(["season", pl.col("posteam").alias("team")])
         .agg(
             pl.len().alias("neutral_plays"),
             pl.col("game_id").n_unique().alias("neutral_games"),
             pl.col("qb_dropback").fill_null(0).mean().alias("neutral_pass_rate"),
-            pl.col("qb_dropback")
-            .fill_null(0)
-            .filter(early_down)
-            .mean()
-            .alias("neutral_early_down_pass_rate"),
-            pl.col("no_huddle").fill_null(0).mean().alias("neutral_no_huddle_rate"),
             pl.col("epa").mean().alias("neutral_epa_per_play"),
             pl.col("pass_oe").mean().alias("neutral_pass_oe"),
         )
@@ -198,14 +183,10 @@ def build_expected_opportunity(
         .agg(
             pl.col("game_id").n_unique().alias("xfp_games"),
             pl.col("total_fantasy_points_exp").fill_null(0).sum().alias("xfp_total"),
-            pl.col("total_yards_gained_exp").fill_null(0).sum().alias("expected_yards_total"),
-            pl.col("total_touchdown_exp").fill_null(0).sum().alias("expected_tds_total"),
             pl.col("total_first_down_exp").fill_null(0).sum().alias("expected_first_downs_total"),
         )
         .with_columns(
             (pl.col("xfp_total") / pl.col("xfp_games")).alias("xfp_pg"),
-            (pl.col("expected_yards_total") / pl.col("xfp_games")).alias("expected_yards_pg"),
-            (pl.col("expected_tds_total") / pl.col("xfp_games")).alias("expected_tds_pg"),
             (pl.col("expected_first_downs_total") / pl.col("xfp_games")).alias(
                 "expected_first_downs_pg"
             ),
@@ -233,44 +214,21 @@ def build_nextgen_features(
 
     pass_rows = season_rows(
         passing,
-        (
-            "completion_percentage_above_expectation",
-            "avg_time_to_throw",
-            "avg_intended_air_yards",
-            "aggressiveness",
-        ),
-    ).rename(
-        {
-            "completion_percentage_above_expectation": "ngs_cpoe",
-            "avg_time_to_throw": "ngs_time_to_throw",
-            "avg_intended_air_yards": "ngs_qb_air_yards",
-            "aggressiveness": "ngs_aggressiveness",
-        }
-    )
+        ("completion_percentage_above_expectation",),
+    ).rename({"completion_percentage_above_expectation": "ngs_cpoe"})
     rec_rows = season_rows(
         receiving,
-        ("avg_separation", "avg_yac_above_expectation", "avg_intended_air_yards"),
+        ("avg_separation", "avg_yac_above_expectation"),
     ).rename(
         {
             "avg_separation": "ngs_separation",
             "avg_yac_above_expectation": "ngs_yac_oe",
-            "avg_intended_air_yards": "ngs_target_air_yards",
         }
     )
     rush_rows = season_rows(
         rushing,
-        (
-            "rush_yards_over_expected_per_att",
-            "rush_pct_over_expected",
-            "percent_attempts_gte_eight_defenders",
-        ),
-    ).rename(
-        {
-            "rush_yards_over_expected_per_att": "ngs_ryoe_per_att",
-            "rush_pct_over_expected": "ngs_rush_pct_over_expected",
-            "percent_attempts_gte_eight_defenders": "ngs_box_rate",
-        }
-    )
+        ("rush_yards_over_expected_per_att",),
+    ).rename({"rush_yards_over_expected_per_att": "ngs_ryoe_per_att"})
     return (
         pass_rows.join(rec_rows, on=["player_id", "season"], how="full", coalesce=True)
         .join(rush_rows, on=["player_id", "season"], how="full", coalesce=True)
@@ -283,10 +241,16 @@ def build_market_rankings(
     id_crosswalk: pl.DataFrame,
     cutoff: str = "08-31",
 ) -> pl.DataFrame:
-    """Latest pre-cutoff positional redraft ECR per forecast season and GSIS id."""
+    """Latest pre-cutoff FantasyPros price snapshots per season and GSIS id.
+
+    Positional ECR remains the apples-to-apples baseline for position boards.  The
+    overall redraft page is retained separately because it is the dated market-price
+    ordering needed to measure two-round disagreements across positions.  ECR is not
+    called ADP here: it is an expert-consensus price proxy, not an observed draft.
+    """
     require_columns(
         rankings.columns,
-        ("page_type", "id", "pos", "ecr", "sd", "rank_delta", "scrape_date"),
+        ("page_type", "id", "pos", "ecr", "sd", "scrape_date"),
         "FantasyPros rankings input",
     )
     require_columns(
@@ -299,18 +263,31 @@ def build_market_rankings(
         pl.col("scrape_date").cast(pl.String).str.to_date(strict=False).alias("_date"),
         pl.col("id").cast(pl.Int64, strict=False).alias("_fantasypros_id"),
     ).with_columns(pl.col("_date").dt.year().alias("forecast_season"))
-    eligible = dated.filter(
+    positional = dated.filter(
         pl.col("page_type").is_in(["redraft-qb", "redraft-rb", "redraft-wr", "redraft-te"])
         & pl.col("ecr").is_not_null()
         & (pl.col("_date") <= pl.date(pl.col("forecast_season"), month, day))
     )
-    latest = eligible.group_by("forecast_season").agg(pl.col("_date").max().alias("_date"))
+    overall = dated.filter(
+        (pl.col("page_type") == "redraft-overall")
+        & pl.col("ecr").is_not_null()
+        & (pl.col("_date") <= pl.date(pl.col("forecast_season"), month, day))
+    )
     crosswalk = id_crosswalk.select(
         pl.col("fantasypros_id").cast(pl.Int64, strict=False).alias("_fantasypros_id"),
         pl.col("gsis_id").alias("player_id"),
     ).drop_nulls()
-    return (
-        eligible.join(latest, on=["forecast_season", "_date"], how="inner")
+
+    # Latest snapshot per page, not per season: archive scrapes cover every page the
+    # same day, but the Wayback backfill can carry different capture dates per page,
+    # and a season-wide max would silently drop every page but the newest.
+    positional_latest = positional.group_by(["forecast_season", "page_type"]).agg(
+        pl.col("_date").max().alias("_date")
+    )
+    positional_rows = (
+        positional.join(
+            positional_latest, on=["forecast_season", "page_type", "_date"], how="inner"
+        )
         .join(crosswalk, on="_fantasypros_id", how="inner")
         .select(
             "forecast_season",
@@ -319,11 +296,38 @@ def build_market_rankings(
             pl.col("ecr").alias("market_ecr"),
             (-pl.col("ecr")).alias("market_ecr_score"),
             pl.col("sd").alias("market_ecr_sd"),
-            pl.col("rank_delta").alias("market_rank_delta"),
             pl.col("_date").cast(pl.String).alias("market_snapshot"),
         )
         .unique(subset=["forecast_season", "player_id"], keep="first")
-        .sort(["forecast_season", "market_position", "market_ecr"])
+    )
+    if overall.height == 0:
+        return positional_rows.sort(["forecast_season", "market_position", "market_ecr"])
+
+    overall_latest = overall.group_by("forecast_season").agg(
+        pl.col("_date").max().alias("_date")
+    )
+    overall_rows = (
+        overall.join(overall_latest, on=["forecast_season", "_date"], how="inner")
+        .join(crosswalk, on="_fantasypros_id", how="inner")
+        .select(
+            "forecast_season",
+            "player_id",
+            pl.col("ecr").alias("market_overall_ecr"),
+            (-pl.col("ecr")).alias("market_overall_ecr_score"),
+            pl.col("sd").alias("market_overall_ecr_sd"),
+            pl.col("_date").cast(pl.String).alias("market_overall_snapshot"),
+        )
+        .unique(subset=["forecast_season", "player_id"], keep="first")
+    )
+    return (
+        positional_rows.join(
+            overall_rows,
+            on=["forecast_season", "player_id"],
+            how="full",
+            coalesce=True,
+        )
+        .with_columns(pl.lit("fantasypros_ecr").alias("market_price_source"))
+        .sort(["forecast_season", "market_overall_ecr", "market_position", "market_ecr"])
     )
 
 
@@ -495,7 +499,6 @@ def build_player_usage(
                 "player_id": player_id,
                 "season": season,
                 "active_games": len(games),
-                "active_game_dropbacks": active_dropbacks,
                 "route_opportunities": route_opp,
                 "route_participation": route_opp / active_dropbacks if active_dropbacks else None,
                 "targets_per_route_opportunity": targets / route_opp if route_opp else None,
@@ -674,7 +677,6 @@ def enrich_player_seasons(
         frame = frame.join(team_tendencies, on=["season", "team"], how="left")
     count_columns = [
         "active_games",
-        "active_game_dropbacks",
         "route_opportunities",
         "red_zone_carries",
         "goal_line_carries",

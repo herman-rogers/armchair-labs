@@ -1,4 +1,4 @@
-"""Unit tests for the rate, opportunity, regression, and age metrics."""
+"""Unit tests for the rate, opportunity, and age metrics."""
 
 from __future__ import annotations
 
@@ -6,15 +6,8 @@ import polars as pl
 import pytest
 
 from patron.metrics.age import AGE_COLUMN, add_age, add_age_flags
-from patron.metrics.opportunity import WEIGHTED_OPPORTUNITY, aggregate_opportunity
+from patron.metrics.opportunity import aggregate_opportunity
 from patron.metrics.rates import weekly_rates
-from patron.metrics.regression import (
-    EXPECTED_TDS,
-    TD_OVER_EXPECTATION,
-    add_regression_flags,
-    add_td_over_expectation,
-    positional_td_rates,
-)
 from patron.scoring.engine import LEAGUE_POINTS
 
 
@@ -85,7 +78,6 @@ class TestOpportunity:
             "receptions": 0.0,
             "target_share": 0.0,
             "air_yards_share": 0.0,
-            "wopr": 0.0,
         }
         return pl.DataFrame(
             [
@@ -94,17 +86,13 @@ class TestOpportunity:
             ]
         )
 
-    def test_weighted_opportunity_prices_a_target_above_a_carry(self) -> None:
-        row = aggregate_opportunity(self._frame([{"carries": 10.0, "targets": 5.0}])).to_dicts()[0]
-
-        # 10 carries + 2.2 x 5 targets = 21
-        assert row[WEIGHTED_OPPORTUNITY] == pytest.approx(21.0)
-
-    def test_target_weight_is_configurable(self) -> None:
+    def test_raw_volume_is_summed(self) -> None:
         row = aggregate_opportunity(
-            self._frame([{"carries": 10.0, "targets": 5.0}]), target_weight=1.0
+            self._frame([{"carries": 10.0, "targets": 5.0}, {"carries": 4.0, "targets": 3.0}])
         ).to_dicts()[0]
-        assert row[WEIGHTED_OPPORTUNITY] == pytest.approx(15.0)
+
+        assert row["carries"] == pytest.approx(14.0)
+        assert row["targets"] == pytest.approx(8.0)
 
     def test_shares_are_usage_weighted_not_flat_averaged(self) -> None:
         """The defect this fixes: a flat mean lets a 2-target injury week count as
@@ -135,101 +123,6 @@ class TestOpportunity:
             )
         ).to_dicts()[0]
         assert row["target_share"] == pytest.approx(0.25)
-
-
-class TestTdOverExpectation:
-    def _seasons(self, rows: list[dict]) -> pl.DataFrame:
-        base = {"season": 2025, "carries": 0.0, "targets": 0.0, "total_tds": 0.0}
-        return pl.DataFrame([{"player_id": f"p{i}", **base, **row} for i, row in enumerate(rows)])
-
-    def test_positional_rate_is_touchdowns_per_touch(self) -> None:
-        frame = self._seasons(
-            [
-                {"position": "RB", "carries": 200.0, "targets": 50.0, "total_tds": 10.0},
-                {"position": "RB", "carries": 100.0, "targets": 50.0, "total_tds": 10.0},
-            ]
-        )
-        # 20 TDs on 400 touches = 0.05
-        assert positional_td_rates(frame).to_dicts()[0]["pos_td_rate"] == pytest.approx(0.05)
-
-    def test_expectation_is_touches_times_the_positional_rate(self) -> None:
-        frame = self._seasons(
-            [
-                {"position": "RB", "carries": 200.0, "targets": 0.0, "total_tds": 20.0},
-                {"position": "RB", "carries": 200.0, "targets": 0.0, "total_tds": 0.0},
-            ]
-        )
-        # Pooled: 20 TDs / 400 carries = 0.05; each expects 200 * 0.05 = 10.
-        rows = add_td_over_expectation(frame).sort("player_id").to_dicts()
-
-        assert rows[0][EXPECTED_TDS] == pytest.approx(10.0)
-        assert rows[0][TD_OVER_EXPECTATION] == pytest.approx(10.0)
-        assert rows[1][TD_OVER_EXPECTATION] == pytest.approx(-10.0)
-
-    def test_window_all_pools_seasons_window_season_does_not(self) -> None:
-        frame = pl.DataFrame(
-            [
-                {
-                    "player_id": "a",
-                    "season": 2024,
-                    "position": "RB",
-                    "carries": 100.0,
-                    "targets": 0.0,
-                    "total_tds": 20.0,
-                },
-                {
-                    "player_id": "b",
-                    "season": 2025,
-                    "position": "RB",
-                    "carries": 100.0,
-                    "targets": 0.0,
-                    "total_tds": 0.0,
-                },
-            ]
-        )
-        pooled = positional_td_rates(frame, window="all").to_dicts()
-        assert len(pooled) == 1
-        assert pooled[0]["pos_td_rate"] == pytest.approx(0.10)
-
-        per_season = {
-            row["season"]: row["pos_td_rate"]
-            for row in positional_td_rates(frame, window="season").to_dicts()
-        }
-        assert per_season == {2024: pytest.approx(0.20), 2025: pytest.approx(0.0)}
-
-    def test_an_unknown_window_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="window must be"):
-            positional_td_rates(self._seasons([{"position": "RB"}]), window="rolling")
-
-
-class TestRegressionFlags:
-    def _row(self, tdoe: float, opportunity: float) -> dict:
-        frame = pl.DataFrame(
-            {"player_id": ["p1"], TD_OVER_EXPECTATION: [tdoe], "wtd_opp": [opportunity]}
-        )
-        return add_regression_flags(frame).to_dicts()[0]
-
-    @pytest.mark.parametrize(("tdoe", "expected"), [(3.9, False), (4.0, True), (6.0, True)])
-    def test_sell_flag_boundary(self, tdoe: float, expected: bool) -> None:
-        assert self._row(tdoe, 200.0)["td_regress_down"] is expected
-
-    @pytest.mark.parametrize(("tdoe", "expected"), [(-2.4, False), (-2.5, True), (-5.0, True)])
-    def test_buy_flag_boundary(self, tdoe: float, expected: bool) -> None:
-        assert self._row(tdoe, 200.0)["td_regress_up"] is expected
-
-    def test_buy_flag_requires_volume(self) -> None:
-        """Without the volume gate this fires on every deep reserve who caught four
-        passes, and a good signal turns into noise."""
-        assert self._row(-5.0, 149.0)["td_regress_up"] is False
-        assert self._row(-5.0, 150.0)["td_regress_up"] is True
-
-    def test_volume_alone_does_not_fire_the_buy_flag(self) -> None:
-        assert self._row(0.0, 400.0)["td_regress_up"] is False
-
-    def test_flags_are_mutually_exclusive(self) -> None:
-        for tdoe in (-5.0, 0.0, 5.0):
-            row = self._row(tdoe, 200.0)
-            assert not (row["td_regress_up"] and row["td_regress_down"])
 
 
 class TestAge:

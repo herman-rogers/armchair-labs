@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +19,8 @@ import polars as pl
 from patron.board.builder import build_board, build_player_seasons
 from patron.board.rank import apply_rank_key
 from patron.config.league import LeagueConfig, get_league
-from patron.config.settings import Settings, get_settings
-from patron.data import nflverse
+from patron.config.settings import CONFIG_DIR, Settings, get_settings
+from patron.data import nfl_transactions, nflverse
 from patron.data.derived import cached_frame
 from patron.metrics.backtest import (
     MetricReportConfig,
@@ -41,6 +42,15 @@ from patron.metrics.enrichment import (
     normalize_ppg_for_active_games,
     validate_participation_usage,
 )
+from patron.metrics.experimental import (
+    build_combine_features,
+    build_contract_features,
+    build_forecast_features,
+    build_player_background,
+    build_rookie_features,
+    build_snap_features,
+    build_transaction_features,
+)
 from patron.metrics.fit import (
     FittedArtifactError,
     apply_fitted_models,
@@ -50,6 +60,12 @@ from patron.metrics.fit import (
     models_for_season,
 )
 from patron.metrics.projection import METRIC_VERSION, build_projection_board
+from patron.metrics.prospective import load_verified_snapshot
+from patron.metrics.rich_weekly import (
+    build_rich_weekly_features,
+    build_rich_weekly_panel,
+    build_weekly_route_panel,
+)
 from patron.scoring.bonuses import BonusAudit, extract_touchdown_bonuses
 from patron.scoring.dst import build_dst_proxy
 from patron.scoring.kickers import aggregate_kicker_seasons, score_kicker_weeks
@@ -63,6 +79,7 @@ class BuildResult:
 
     board: pl.DataFrame
     board_v2: pl.DataFrame
+    board_adaptive: pl.DataFrame
     player_seasons: pl.DataFrame
     kickers: pl.DataFrame
     defenses: pl.DataFrame
@@ -110,14 +127,131 @@ def load_bonuses(
     return frame, audit
 
 
-def _season_equivalent(board: pl.DataFrame, season_games: int) -> pl.DataFrame:
+MARKET_COLUMNS = (
+    "market_position",
+    "market_ecr",
+    "market_ecr_score",
+    "market_ecr_sd",
+    "market_snapshot",
+)
+
+
+def load_draft_market(
+    config: LeagueConfig, report_config: MetricReportConfig
+) -> pl.DataFrame | None:
+    """FantasyPros consensus for the draft season, resolved to GSIS ids with names."""
+    try:
+        crosswalk = nflverse.load_id_crosswalk()
+        market = build_market_rankings(
+            nflverse.load_fantasy_rankings(), crosswalk, report_config.depth_chart_cutoff
+        ).filter(pl.col("forecast_season") == config.draft_season)
+    except Exception:  # noqa: BLE001 - the market is evidence, never a build dependency
+        logger.warning("FantasyPros market rankings unavailable for %s", config.draft_season)
+        return None
+    if market.height == 0:
+        logger.warning("no FantasyPros market snapshot for %s", config.draft_season)
+        return None
+    identity = crosswalk.select(
+        pl.col("gsis_id").alias("player_id"),
+        pl.col("name").alias("market_name"),
+        pl.col("team").alias("market_team"),
+    ).drop_nulls(subset=["player_id"])
+    market = market.join(identity, on="player_id", how="left")
+    logger.info(
+        "market snapshot %s: %s ranked players", market["market_snapshot"][0], market.height
+    )
+    return market
+
+
+def attach_market(board: pl.DataFrame, market: pl.DataFrame | None) -> pl.DataFrame:
+    """Join consensus ranks onto rated rows and add market-only players as rows.
+
+    A player the market ranks but the model cannot (no tape) enters the board with
+    identity and market fields only; ``board.rank`` gives him a rank-matched value on
+    the model's scale and tags the row ``rank_source = market``.
+    """
+    if market is None or market.height == 0:
+        return board.with_columns(pl.lit(None, dtype=pl.Float64).alias("market_ecr"))
+    joined = board.join(market.select("player_id", *MARKET_COLUMNS), on="player_id", how="left")
+    missing = market.filter(~pl.col("player_id").is_in(board["player_id"].to_list()))
+    if missing.height == 0:
+        return joined
+    extra = missing.select(
+        "player_id",
+        pl.col("market_name").alias("player_display_name"),
+        pl.col("market_position").alias("position"),
+        pl.col("market_team").alias("team"),
+        pl.col("market_team").alias("projected_team"),
+        *MARKET_COLUMNS,
+    ).with_columns(
+        pl.lit(0, dtype=pl.Int64).alias("games"),
+        pl.lit(0.0).alias("override_delta"),
+        pl.lit("").alias("flags"),
+        pl.lit("v2").alias(METRIC_VERSION),
+    )
+    logger.info("market-only players added to the board: %s", extra.height)
+    return pl.concat([joined, extra], how="diagonal_relaxed")
+
+
+def _season_equivalent(
+    board: pl.DataFrame,
+    season_games: int,
+    source_column: str = "fitted_season_points",
+) -> pl.DataFrame:
     """Fitted season points as a per-scheduled-game rate; the waiver-comparison value."""
     source = (
-        pl.col("fitted_season_points") / float(season_games)
-        if "fitted_season_points" in board.columns
+        pl.col(source_column) / float(season_games)
+        if source_column in board.columns
         else pl.lit(None, dtype=pl.Float64)
     )
     return board.with_columns(source.alias("season_equivalent_ppg"))
+
+
+def build_adaptive_board(
+    board: pl.DataFrame,
+    snapshot: pl.DataFrame,
+    config: LeagueConfig,
+    selected_sources: dict[str, str] | None = None,
+) -> pl.DataFrame:
+    """Rank the live player pool with the immutable adaptive forecast for this season.
+
+    Only the frozen adaptive score is joined from the prospective snapshot. Current
+    identity, team, ownership, and explicitly labelled market-only fallback rows stay
+    on the live board, so this behaves like the other selectable metric systems
+    without refitting or mutating the forecast being prospectively graded.
+    """
+    season = config.draft_season
+    frozen = (
+        snapshot.filter(pl.col("forecast_season") == season)
+        .select(
+            "player_id",
+            pl.col("fitted_adaptive_ppg_hybrid").alias("adaptive_season_points"),
+        )
+        .unique(subset=["player_id"])
+    )
+    if not frozen.height:
+        raise ValueError(f"prospective snapshot has no adaptive forecast for {season}")
+    sources = selected_sources or {}
+    source_expr = pl.col("position").replace_strict(sources, default=None, return_dtype=pl.String)
+    frame = board.join(frozen, on="player_id", how="left").with_columns(
+        pl.lit("adaptive").alias(METRIC_VERSION),
+        pl.lit("frozen_shadow").alias("adaptive_forecast_status"),
+        pl.when(pl.col("adaptive_season_points").is_not_null())
+        .then(source_expr)
+        .otherwise(None)
+        .alias("adaptive_selected_source"),
+    )
+    adaptive_config = config.model_copy(deep=True)
+    adaptive_config.metrics.projection_rank_key = {
+        position: "adaptive_season_points" for position in config.vor_baseline_rank
+    }
+    adaptive_config.metrics.projection_overall_key = "adaptive_season_points"
+    ranked = apply_rank_key(frame, adaptive_config)
+    return _season_equivalent(
+        ranked,
+        config.metrics.projection_season_games,
+        source_column="adaptive_season_points",
+    )
 
 
 def load_fitted_models(
@@ -146,7 +280,11 @@ def load_fitted_models(
             live_depth_latest,
         )
     except FittedArtifactError as error:
-        logger.warning("fitted ranker rejected: %s; falling back to %s", error, "v2_score")
+        logger.warning(
+            "fitted ranker rejected: %s; positions fall back to the configured "
+            "projection_rank_fallback (adj_proj_vor)",
+            error,
+        )
         return {}
     models = models_for_season(report.get("fitted_models") or [], forecast_season)
     if not models:
@@ -238,6 +376,7 @@ def build(
     live_depth_latest = (
         depth_chart["depth_chart_date"].cast(pl.String).max() if depth_chart is not None else None
     )
+    live_depth_latest = str(live_depth_latest) if live_depth_latest is not None else None
     birth_dates = nflverse.load_birth_dates(config.board_season)
     board = build_board(
         player_seasons,
@@ -257,21 +396,34 @@ def build(
         config,
         current_players=depth_chart,
     )
-    board_v2 = apply_rank_key(
-        _season_equivalent(
-            apply_fitted_models(
-                board_v2,
-                load_fitted_models(
-                    settings.outputs_dir / "metric_report.json",
-                    config.draft_season,
-                    report_config,
-                    live_depth_latest,
-                ),
-                report_config.fit,
-            ),
-            config.metrics.projection_season_games,
+    board_v2 = apply_fitted_models(
+        board_v2,
+        load_fitted_models(
+            settings.outputs_dir / "metric_report.json",
+            config.draft_season,
+            report_config,
+            live_depth_latest,
         ),
+        report_config.fit,
+    )
+    # Consensus ranks join every row; players the model cannot rate but the market
+    # ranks are added as rows and given a rank-matched value inside apply_rank_key.
+    board_v2_base = attach_market(board_v2, load_draft_market(config, report_config))
+    snapshot, freeze = load_verified_snapshot(
+        settings.static_dir / f"experimental_{config.draft_season}_predictions.csv",
+        CONFIG_DIR / f"experimental_freeze_{config.draft_season}.yaml",
+    )
+    selected_sources = freeze["selectors"]["fitted_adaptive_ppg_hybrid"][
+        "selected_source_by_position"
+    ]
+    board_adaptive = build_adaptive_board(
+        board_v2_base,
+        snapshot,
         config,
+        selected_sources={str(k): str(v) for k, v in selected_sources.items()},
+    )
+    board_v2 = _season_equivalent(
+        apply_rank_key(board_v2_base, config), config.metrics.projection_season_games
     )
 
     board_weeks = weeks.filter(pl.col("season") == config.board_season)
@@ -290,6 +442,7 @@ def build(
     return BuildResult(
         board=board,
         board_v2=board_v2,
+        board_adaptive=board_adaptive,
         player_seasons=projection_seasons,
         kickers=kickers,
         defenses=defenses,
@@ -314,29 +467,31 @@ def build_metric_report(
     weeks = nflverse.load_player_weeks(history_config.seasons)
     bonuses, _ = load_bonuses(history_config, force=force)
     player_seasons = build_player_seasons(weeks, bonuses, history_config)
-    team_volume = build_team_volume(nflverse.load_team_weeks(history_config.seasons))
+    team_weeks = nflverse.load_team_weeks(history_config.seasons)
+    team_volume = build_team_volume(team_weeks)
     participation_seasons = [season for season in history_config.seasons if season >= 2016]
     projection_plays = nflverse.load_projection_plays(history_config.seasons)
+    participation = nflverse.load_participation_flexible(participation_seasons)
     usage = cached_frame(
         "metric_report_usage_v4",
         history_config.seasons,
         lambda: build_player_usage(
             weeks,
             projection_plays,
-            nflverse.load_participation(participation_seasons),
+            participation,
         ),
         force=force,
         settings=settings,
     )
     injury_seasons = [season for season in history_config.seasons if season >= 2009]
-    injuries = build_injury_history(nflverse.load_injuries(injury_seasons))
+    injury_rows = nflverse.load_injuries(injury_seasons)
+    injuries = build_injury_history(injury_rows)
     expected_seasons = [season for season in history_config.seasons if season >= 2006]
+    expected_rows = nflverse.load_expected_opportunity(expected_seasons)
     expected_opportunity = cached_frame(
         "metric_report_expected_opportunity_v1",
         expected_seasons,
-        lambda: build_expected_opportunity(
-            nflverse.load_expected_opportunity(expected_seasons), weeks
-        ),
+        lambda: build_expected_opportunity(expected_rows, weeks),
         force=force,
         settings=settings,
     )
@@ -398,17 +553,154 @@ def build_metric_report(
             logger.warning("depth charts unavailable for %s", season)
     depth_charts = pl.concat(depth_frames, how="diagonal_relaxed") if depth_frames else None
 
+    # Report-only additive evidence. These feeds are deliberately assembled outside
+    # the production projection so an unsuccessful experiment cannot change the live
+    # board. Dated transactions drive the canonical August cutoff roster fields;
+    # historical Week 1 rosters remain separate sensitivity-only proxy columns.
+    players = nflverse.load_players()
+    market_rankings = build_market_rankings(
+        nflverse.load_fantasy_rankings(),
+        nflverse.load_id_crosswalk(),
+        report_config.depth_chart_cutoff,
+    )
+    market_cutoffs: dict[int, date] = {}
+    if market_rankings.height:
+        snapshot_column = (
+            "market_overall_snapshot"
+            if "market_overall_snapshot" in market_rankings.columns
+            else "market_snapshot"
+        )
+        for row in (
+            market_rankings.select("forecast_season", snapshot_column)
+            .drop_nulls()
+            .unique(subset=["forecast_season"], keep="first")
+            .to_dicts()
+        ):
+            market_cutoffs[int(row["forecast_season"])] = date.fromisoformat(
+                str(row[snapshot_column])
+            )
+    transaction_seasons = list(report_config.forecast_seasons)
+    transactions = cached_frame(
+        "nfl_transactions_cutoff_v1",
+        transaction_seasons,
+        lambda: nfl_transactions.load_transactions(
+            transaction_seasons, report_config.depth_chart_cutoff
+        ),
+        force=force,
+        settings=settings,
+    )
+    official_seasons = sorted(season for season in market_cutoffs if season >= 2020)
+    if official_seasons:
+        official_transactions = cached_frame(
+            "nfl_official_transactions_cutoff_v1",
+            official_seasons,
+            lambda: nfl_transactions.load_official_transactions(
+                official_seasons, report_config.depth_chart_cutoff
+            ),
+            force=force,
+            settings=settings,
+        )
+        if official_transactions.height:
+            official_coverage = official_transactions.select("transaction_year", "to_team").unique()
+            transactions = pl.concat(
+                [
+                    transactions.join(
+                        official_coverage,
+                        on=["transaction_year", "to_team"],
+                        how="anti",
+                    ),
+                    official_transactions,
+                ],
+                how="diagonal_relaxed",
+            ).sort(["transaction_date", "to_team", "description"])
+    transaction_features = build_transaction_features(
+        transactions,
+        player_seasons,
+        players,
+        report_config.forecast_seasons,
+        report_config.depth_chart_cutoff,
+        cutoff_by_season=market_cutoffs,
+    )
+    snap_seasons = [season for season in history_config.seasons if season >= 2013]
+    snap_rows = nflverse.load_snap_counts(snap_seasons)
+    snap_features = cached_frame(
+        "metric_report_snap_features_v1",
+        snap_seasons,
+        lambda: build_snap_features(snap_rows, players),
+        force=force,
+        settings=settings,
+    )
+    combine_features = build_combine_features(nflverse.load_combine(), players)
+    roster_seasons = [
+        season
+        for season in report_config.forecast_seasons
+        if season <= max(report_config.input_seasons)
+    ]
+    roster_rows = nflverse.load_weekly_rosters(roster_seasons)
+    experimental_features = build_forecast_features(
+        roster_rows,
+        player_seasons,
+        report_config.forecast_seasons,
+        report_config.depth_chart_cutoff,
+        depth_charts=depth_charts,
+        snap_features=snap_features,
+        player_background=build_player_background(players),
+        contract_features=build_contract_features(
+            nflverse.load_contracts(), report_config.forecast_seasons
+        ),
+        combine_features=combine_features,
+        transaction_features=transaction_features,
+        cutoff_by_season=market_cutoffs,
+    )
+
     predictions = build_backtest_predictions(
         player_seasons,
         birth_dates,
         config,
         report_config,
         depth_charts=depth_charts,
-        market_rankings=build_market_rankings(
-            nflverse.load_fantasy_rankings(),
-            nflverse.load_id_crosswalk(),
-            report_config.depth_chart_cutoff,
+        market_rankings=market_rankings,
+        experimental_features=experimental_features,
+        rookie_features=build_rookie_features(
+            players,
+            combine_features,
+            report_config.forecast_seasons,
         ),
+        cutoff_by_season=market_cutoffs,
+    )
+    rich_source_seasons = [season for season in history_config.seasons if season >= 2013]
+    rich_panel = cached_frame(
+        "metric_report_rich_weekly_panel_v1",
+        history_config.seasons,
+        lambda: build_rich_weekly_panel(
+            weeks,
+            team_weeks,
+            snap_rows,
+            players,
+            injury_rows.filter(pl.col("season").is_in(rich_source_seasons)),
+            roster_rows.filter(pl.col("season").is_in(rich_source_seasons)),
+            expected_rows,
+            build_weekly_route_panel(weeks, projection_plays, participation),
+        ),
+        force=force,
+        settings=settings,
+    )
+    rich_features = cached_frame(
+        "metric_report_rich_weekly_features_v1",
+        list(report_config.forecast_seasons),
+        lambda: build_rich_weekly_features(
+            rich_panel,
+            predictions.select("forecast_season", "player_id"),
+            history_seasons=report_config.history_seasons,
+        ),
+        force=force,
+        settings=settings,
+    )
+    predictions = predictions.join(
+        rich_features,
+        on=["forecast_season", "player_id"],
+        how="left",
+        validate="m:1",
     )
     report, predictions = _analyze_with_fit(predictions, report_config)
     return MetricReportBuildResult(report=report, predictions=predictions)
@@ -480,11 +772,8 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "bonus_pts",
     "floor",
     "volatility",
-    "wtd_opp",
     "target_share",
     "air_yards_share",
-    "wopr",
-    "td_over_exp",
     "age_at_season",
     "repl_ppg",
     "override_delta",
@@ -499,9 +788,17 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "depth_role_factor",
     "v2_overall_vor",
     "v2_position_rank",
+    "rank_source",
+    "market_position",
+    "market_ecr",
+    "market_ecr_sd",
+    "market_snapshot",
     "v2_rank_key",
     "v2_rank_value",
     "v2_rank_vor",
+    "adaptive_season_points",
+    "adaptive_selected_source",
+    "adaptive_forecast_status",
     "fitted_ppg",
     "fitted_games",
     "fitted_season_points",
@@ -518,7 +815,6 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "prior_branch_ppg",
     "component_proj_ppg",
     "projected_floor",
-    "projected_ceiling",
     "projected_volatility",
     "projection_confidence",
     "availability_confidence",
@@ -529,17 +825,14 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "injury_missed_equivalents",
     "effective_games",
     "age_factor",
-    "qb_context",
     "team_scoring_context",
     "team_pass_volume",
     "team_dropbacks",
     "team_rush_volume",
-    "teammate_competition",
     "season_target_share",
     "season_carry_share",
     "projected_target_share",
     "projected_carry_share",
-    "projected_wopr",
     "projected_air_yards_share",
     "projected_targets_pg",
     "projected_route_opportunities_pg",
@@ -559,7 +852,6 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
     "projected_passing_yards_pg",
     "projected_passing_tds_pg",
     "projected_interceptions_pg",
-    "projected_bonus_pg",
     "air_yard_factor",
     "opportunity_multiplier",
     "projection_reason",
@@ -587,11 +879,7 @@ def export_markdown(board: pl.DataFrame, path: Path, limit: int | None = None) -
     rows = board.head(limit) if limit else board
     is_v2 = "proj_ppg" in rows.columns
     version = "v2 projected" if is_v2 else "v1 historical"
-    vor_column = (
-        ("v2_overall_vor" if "v2_overall_vor" in rows.columns else "v2_score")
-        if is_v2
-        else "adj_vor"
-    )
+    vor_column = "v2_overall_vor" if is_v2 else "adj_vor"
     ppg_column = "proj_ppg" if is_v2 else "ppg"
     team_column = "projected_team" if is_v2 else "team"
     lines = [
@@ -602,15 +890,17 @@ def export_markdown(board: pl.DataFrame, path: Path, limit: int | None = None) -
     ]
     for row in rows.iter_rows(named=True):
         note = row.get("override_reason") or ""
+        vor_value = row.get(vor_column)
+        ppg_value = row.get(ppg_column)
+        source = " (market)" if row.get("rank_source") == "market" else ""
         lines.append(
-            f"{row['rank']} | {row['player_display_name']} | {row['position']} | "
-            f"{row[team_column]} | {row[vor_column]:.1f} | {row[ppg_column]:.1f} | "
-            f"{row['flags']} | {note}"
+            f"{row['rank']} | {row['player_display_name']}{source} | {row['position']} | "
+            f"{row.get(team_column) or ''} | "
+            f"{'' if vor_value is None else f'{vor_value:.1f}'} | "
+            f"{'' if ppg_value is None else f'{ppg_value:.1f}'} | "
+            f"{row.get('flags') or ''} | {note}"
         )
     lines.append("")
-    lines.append(
-        "Flags: BUY=TD under-exp w/ volume | TD-luck=over-exp, price down | "
-        "age=RB 27.5+ | Xgms=small sample."
-    )
+    lines.append("Flags: age=RB 27.5+ | Xgms=small sample.")
     path.write_text("\n".join(lines))
     return path

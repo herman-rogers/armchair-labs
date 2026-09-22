@@ -20,6 +20,7 @@ from patron.espn.crosswalk import (
     ROSTERED,
     UNKNOWN,
     JoinReport,
+    append_espn_fallbacks,
     attach_ownership,
     board_lookups,
     resolve_player_ids,
@@ -249,6 +250,58 @@ class TestOwnership:
     def test_only_confirmed_free_agents_are_claimable(self) -> None:
         tagged = self._tagged()
         assert tagged.filter(pl.col(IS_FREE_AGENT)).height == 1
+
+
+class TestEspnFallbacks:
+    def test_unresolved_rookie_is_inserted_without_inventing_model_metrics(self) -> None:
+        rows = board(("g1", "Veteran", "WR", "SEA")).with_columns(
+            pl.lit(1).alias("rank"),
+            pl.lit(12.0).alias("ppg"),
+            pl.lit(4.0).alias("adj_vor"),
+            pl.lit("").alias("flags"),
+        )
+        players = espn(
+            (1, "Veteran", "WR", "SEA", 3),
+            (888, "Jeremiyah Love", "RB", "ARI", None),
+        ).with_columns(
+            pl.Series("player_id", ["g1", None], dtype=pl.String),
+            pl.Series("espn_draft_rank", [20, 1], dtype=pl.Int64),
+            pl.Series("espn_position_rank", [8, 1], dtype=pl.Int64),
+            pl.Series("espn_adp", [22.0, 1.5], dtype=pl.Float64),
+        )
+
+        tagged = attach_ownership(rows, players, my_team_id=3)
+        combined = append_espn_fallbacks(tagged, players, my_team_id=3)
+        rookie = combined.filter(pl.col("player_id") == "espn:888").row(0, named=True)
+
+        assert combined.height == 2
+        assert rookie["rank"] == 1
+        assert rookie["rank_source"] == "espn_ppr"
+        assert rookie["espn_fallback"] is True
+        assert rookie["flags"] == "ESPN-only"
+        assert rookie["ppg"] is None
+        assert rookie["adj_vor"] is None
+        assert rookie[AVAILABILITY] == FREE_AGENT
+        assert "No prior NFL production" in rookie["projection_reason"]
+
+    def test_model_order_is_preserved_around_fallbacks(self) -> None:
+        rows = board(
+            ("g1", "First", "WR", "SEA"),
+            ("g2", "Second", "WR", "SF"),
+            ("g3", "Third", "RB", "ARI"),
+        ).with_columns(pl.Series("rank", [1, 2, 3]), pl.lit("").alias("flags"))
+        players = espn((888, "Rookie", "RB", "ARI", None)).with_columns(
+            pl.Series("player_id", [None], dtype=pl.String),
+            pl.Series("espn_draft_rank", [2], dtype=pl.Int64),
+            pl.Series("espn_position_rank", [1], dtype=pl.Int64),
+            pl.Series("espn_adp", [2.3], dtype=pl.Float64),
+        )
+
+        tagged = attach_ownership(rows, players)
+        combined = append_espn_fallbacks(tagged, players)
+
+        assert combined["player_id"].to_list() == ["g1", "espn:888", "g2", "g3"]
+        assert combined["rank"].to_list() == [1, 2, 3, 4]
 
 
 class TestChangedTeam:

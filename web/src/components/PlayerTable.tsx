@@ -1,18 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
 import type { LeaguePlayer } from '../api/types'
+import { DataTable, type Column } from './DataTable'
 import { Flags } from './Flags'
 import { InjuryBadge, MovedBadge, OwnerBadge } from './Availability'
 
-type Direction = 'asc' | 'desc'
-
-export interface PlayerColumn {
-  key: keyof LeaguePlayer
-  label: string
-  title: string
-  align?: 'left'
-  initial?: Direction
-  render?: (player: LeaguePlayer) => React.ReactNode
-}
+export type PlayerColumn = Column<LeaguePlayer>
 
 export const number = (value: number | null | undefined, digits = 1) =>
   value === null || value === undefined ? <span className="faint">—</span> : value.toFixed(digits)
@@ -29,7 +20,7 @@ export const IDENTITY: PlayerColumn[] = [
   {
     key: 'rank',
     label: '#',
-    title: 'Overall board rank. V1 uses adjusted historical VOR; V2 uses the common-scale overall projection VOR.',
+    title: 'Combined display rank. Patron model order is preserved; flagged ESPN-only players enter at ESPN’s current PPR draft rank.',
     initial: 'asc',
     render: (p) => <span className="rank">{p.rank}</span>,
   },
@@ -79,6 +70,14 @@ export const OWNERSHIP: PlayerColumn = {
   render: (p) => <OwnerBadge player={p} />,
 }
 
+export const ESPN_RANK: PlayerColumn = {
+  key: 'espn_draft_rank',
+  label: 'ESPN',
+  title: 'Current ESPN PPR draft-room rank among skill players. This is a market ordering, not ESPN projected points or Patron’s model output.',
+  initial: 'asc',
+  render: (p) => <span className="dim">{p.espn_draft_rank ?? '—'}</span>,
+}
+
 export const ROSTERED_PERCENT: PlayerColumn = {
   key: 'percent_owned',
   label: '%Rost',
@@ -96,12 +95,9 @@ export const FLAGS_COLUMN: PlayerColumn = {
 }
 
 /**
- * A sortable table over league-aware player rows.
- *
- * Deliberately separate from BoardTable: that one renders the pure metric board and
- * switches column sets by metric version. This one renders league views, where the
- * columns differ per screen (a wire needs value-against-the-pool, a roster needs
- * injury and bye) and every row carries ownership.
+ * League-aware player rows on the common DataTable. The columns differ per screen
+ * (a wire needs value-against-the-pool, a roster needs injury and bye) and every
+ * row carries ownership.
  */
 export function PlayerTable({
   players,
@@ -114,85 +110,14 @@ export function PlayerTable({
   defaultSort: keyof LeaguePlayer
   emptyMessage?: string
 }) {
-  const [sortKey, setSortKey] = useState<keyof LeaguePlayer>(defaultSort)
-  const [direction, setDirection] = useState<Direction>('desc')
-
-  // This component stays mounted when the metric tab changes. Resetting is required:
-  // otherwise V2 can keep sorting on V1's adj_vor (or V1 can keep V2's score), making
-  // two genuinely different boards appear identical.
-  useEffect(() => {
-    setSortKey(defaultSort)
-    setDirection('desc')
-  }, [defaultSort])
-
-  const sorted = useMemo(() => {
-    const rows = [...players]
-    rows.sort((a, b) => {
-      const left = a[sortKey]
-      const right = b[sortKey]
-      // Nulls sort last in both directions: an unknown value is not a small one, and
-      // floating them to the top would misrepresent the ranking.
-      if (left == null && right == null) return 0
-      if (left === null || left === undefined) return 1
-      if (right === null || right === undefined) return -1
-
-      const comparison =
-        typeof left === 'number' && typeof right === 'number'
-          ? left - right
-          : String(left).localeCompare(String(right))
-      return direction === 'asc' ? comparison : -comparison
-    })
-    return rows
-  }, [players, sortKey, direction])
-
-  if (!players.length) {
-    return <div className="notice">{emptyMessage}</div>
-  }
-
-  const onSort = (column: PlayerColumn) => {
-    if (column.key === sortKey) {
-      setDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortKey(column.key)
-      setDirection(column.initial ?? 'desc')
-    }
-  }
-
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th
-                key={String(column.key)}
-                className={column.align === 'left' ? 'left' : undefined}
-                title={column.title}
-                onClick={() => onSort(column)}
-              >
-                {column.label}
-                {sortKey === column.key && (
-                  <span className="dir">{direction === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((player) => (
-            <tr key={player.player_id} className={player.is_mine ? 'mine-row' : undefined}>
-              {columns.map((column) => (
-                <td
-                  key={String(column.key)}
-                  className={column.align === 'left' ? 'left' : undefined}
-                >
-                  {column.render ? column.render(player) : String(player[column.key] ?? '—')}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      rows={players}
+      columns={columns}
+      defaultSort={defaultSort}
+      rowKey={(player) => player.player_id}
+      rowClass={(player) => (player.is_mine ? 'mine-row' : undefined)}
+      emptyMessage={emptyMessage}
+    />
   )
 }

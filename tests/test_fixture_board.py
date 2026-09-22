@@ -135,3 +135,46 @@ class TestSupportingBoards:
     def test_every_defense_is_scored(self, built) -> None:
         assert built.defenses.height == 32
         assert built.defenses["avg_pts_allowed"].null_count() == 0
+
+
+def test_position_overrides_reclassify_two_way_players(league_config) -> None:
+    """A receiver nflverse files as CB reaches the board when league.yaml says so."""
+    import polars as pl
+
+    from patron.board.builder import build_player_seasons
+
+    weeks = pl.DataFrame(
+        {
+            "player_id": ["00-0040718", "00-0040718", "other"],
+            "player_display_name": ["Travis Hunter", "Travis Hunter", "Some WR"],
+            "position": ["CB", "CB", "WR"],
+            "season": [2025, 2025, 2025],
+            "week": [1, 2, 1],
+            "team": ["JAX", "JAX", "SEA"],
+            "targets": [8, 6, 4],
+            "receptions": [5, 4, 3],
+            "receiving_yards": [33, 22, 40],
+            "receiving_tds": [0, 1, 0],
+            "carries": [0, 0, 0],
+            "rushing_yards": [0, 0, 0],
+            "rushing_tds": [0, 0, 0],
+            "attempts": [0, 0, 0],
+            "passing_yards": [0, 0, 0],
+            "passing_tds": [0, 0, 0],
+            "passing_interceptions": [0, 0, 0],
+        }
+    )
+    bonuses = pl.DataFrame(
+        {"season": [2025], "week": [1], "player_id": ["other"], "bonus_pts": [0.0]}
+    )
+    plain = build_player_seasons(
+        weeks, bonuses, league_config.model_copy(update={"position_overrides": {}})
+    )
+    fixed = build_player_seasons(
+        weeks,
+        bonuses,
+        league_config.model_copy(update={"position_overrides": {"00-0040718": "WR"}}),
+    )
+    assert "00-0040718" not in plain["player_id"].to_list()
+    hunter = fixed.filter(pl.col("player_id") == "00-0040718").to_dicts()[0]
+    assert hunter["position"] == "WR" and hunter["games"] == 2 and hunter["targets"] == 14

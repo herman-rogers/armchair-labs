@@ -1,7 +1,7 @@
 /** Shapes returned by the Patron read API. Mirrors `patron.pipeline.BOARD_EXPORT_COLUMNS`. */
 
 export type Position = 'QB' | 'RB' | 'WR' | 'TE'
-export type MetricVersion = 'v1' | 'v2'
+export type MetricVersion = 'v1' | 'v2' | 'adaptive'
 
 export interface Player {
   metric_version: MetricVersion
@@ -22,11 +22,8 @@ export interface Player {
   bonus_pts: number
   floor: number | null
   volatility: number | null
-  wtd_opp: number
   target_share: number | null
   air_yards_share: number | null
-  wopr: number | null
-  td_over_exp: number
   age_at_season: number | null
   repl_ppg: number
   override_delta: number
@@ -43,6 +40,14 @@ export interface Player {
   v2_overall_vor?: number | null
   /** Order within the position by the position's own key. */
   v2_position_rank?: number
+  /** 'model' when the value came from the fitted rankers; 'market' when the player has no
+   *  tape and was placed by rank-matching the FantasyPros consensus; null if unranked. */
+  rank_source?: 'model' | 'market' | 'espn_ppr' | null
+  /** FantasyPros consensus (ECR) for the draft season: position, rank, spread, snapshot. */
+  market_position?: string | null
+  market_ecr?: number | null
+  market_ecr_sd?: number | null
+  market_snapshot?: string | null
   v2_rank_key?: string
   /** The key's per-game equivalent value. */
   v2_rank_value?: number | null
@@ -56,6 +61,10 @@ export interface Player {
   fitted_return_prob?: number | null
   fitted_games_if_played?: number | null
   fitted_two_stage?: number | null
+  /** Frozen 2026 Adaptive PPG-selector output on a season-points scale. */
+  adaptive_season_points?: number | null
+  adaptive_selected_source?: string | null
+  adaptive_forecast_status?: 'frozen_shadow' | null
   adj_proj_vor?: number
   proj_vor?: number
   proj_ppg?: number
@@ -65,7 +74,6 @@ export interface Player {
   prior_branch_ppg?: number
   component_proj_ppg?: number
   projected_floor?: number
-  projected_ceiling?: number
   projected_volatility?: number
   projection_confidence?: number
   availability_confidence?: number
@@ -76,17 +84,14 @@ export interface Player {
   injury_missed_equivalents?: number
   effective_games?: number
   age_factor?: number
-  qb_context?: number
   team_scoring_context?: number
   team_pass_volume?: number
   team_dropbacks?: number
   team_rush_volume?: number
-  teammate_competition?: number
   season_target_share?: number | null
   season_carry_share?: number | null
   projected_target_share?: number
   projected_carry_share?: number
-  projected_wopr?: number
   projected_air_yards_share?: number
   projected_targets_pg?: number
   projected_route_opportunities_pg?: number
@@ -106,7 +111,6 @@ export interface Player {
   projected_passing_yards_pg?: number
   projected_passing_tds_pg?: number
   projected_interceptions_pg?: number
-  projected_bonus_pg?: number
   air_yard_factor?: number
   opportunity_multiplier?: number
   projection_reason?: string | null
@@ -245,6 +249,16 @@ export interface MetricRankingResult {
   folds_won: number | null
   folds_tied: number | null
   folds_lost: number | null
+  /** Head-to-head against the configured market ranker on the folds both scored. */
+  market_baseline: string | null
+  market_folds: number
+  market_hit_rate: number | null
+  market_lift: number | null
+  market_lift_se: number | null
+  market_won: number | null
+  market_tied: number | null
+  market_lost: number | null
+  beats_market: boolean | null
   ndcg_lift: number | null
   folds_beating_baseline: number | null
   beats_baseline: boolean | null
@@ -267,6 +281,7 @@ export interface MetricReport {
     ranking: {
       baselines: string[]
       baselines_by_target: Record<string, string[]>
+      market_baseline: string | null
       candidates: string[]
       targets: string[]
       top_k: Record<Position, number>
@@ -372,6 +387,15 @@ export interface LeaguePlayer extends Player {
   injury_status: string | null
   percent_owned: number | null
   percent_started: number | null
+  /** ESPN's current PPR draft-room ordinal among QB/RB/WR/TE players. */
+  espn_draft_rank: number | null
+  /** ESPN's current within-position PPR draft-room ordinal. */
+  espn_position_rank: number | null
+  /** ESPN average draft position, retained separately from its rank ordering. */
+  espn_adp: number | null
+  /** `model` for Patron rows; `espn_ppr` for players without model history. */
+  rank_source: 'model' | 'market' | 'espn_ppr'
+  espn_fallback: boolean
   /** True when ESPN's current team disagrees with the team the metrics came from. */
   changed_team: boolean
   /** Value against the free-agent pool rather than the preseason board. Wire only. */
@@ -388,8 +412,18 @@ export interface LeagueTeam {
   is_mine: boolean
   division_id: number | null
   division_name: string | null
-  /** League-relative roster strength: 5.0 is average, 1.5 points is one SD. */
+  /** League-relative strength on ranking_total: 5.0 is average, 1.5 points is one SD. */
   team_score: number
+  /** Same canonical board metric used by player rankings and lineup comparisons. */
+  ranking_metric: string
+  /** Best legal full-strength lineup total on ranking_metric. */
+  ranking_total: number
+  /** Expected best-active-lineup VOR across availability scenarios. */
+  expected_lineup_vor: number
+  /** Spread of that scenario VOR: availability and replacement risk on the VOR scale. */
+  lineup_vor_risk: number
+  /** expected_lineup_vor - 0.674 x lineup_vor_risk: an approximate 25th-percentile lineup VOR. */
+  risk_adjusted_total: number
   team_rank: number
   scored_players: number
   /** Players without nflverse tape whose ESPN projection supplied the fallback. */
@@ -494,12 +528,23 @@ export interface LeagueStatus {
 // ---------------------------------------------------------------- matchups
 
 export interface LineupSlot {
+  /** The slot occupied: a starting slot like "QB" or "RB/WR/TE", or "BE" on the bench. */
   slot: string
   player_id: string | null
+  espn_id: number | null
   player_display_name: string | null
   position: string | null
+  /** Points scored for a played week; board value for a week that has not happened. */
   value: number
+  /** What ESPN projected before kickoff. Null for a week with no lineup set yet. */
+  projected: number | null
+  /** The pro team faced that week. Null outside a played week. */
+  opponent: string | null
+  on_bye: boolean
 }
+
+/** Whether a lineup is ESPN's record of a week, or the model's answer for one. */
+export type LineupSource = 'actual' | 'projected' 
 
 /** A team's best fieldable lineup and what it is worth.
  *
@@ -511,9 +556,17 @@ export interface LineupSlot {
 export interface TeamStrength {
   team_id: number
   team_name: string
-  /** Which board value the comparison uses, e.g. v2_overall_vor. */
+  /**
+   * `actual` — ESPN's record of the lineup that was set: real slots, real bench, real
+   * points. `projected` — no lineup exists for this week, so it is the best fieldable
+   * lineup by board value instead.
+   */
+  source: LineupSource
+  /** The board value used, e.g. v2_overall_vor — or `points` for a played week. */
   metric: string
   total: number
+  /** ESPN's pre-week projected total. Null when the source is `projected`. */
+  projected_total: number | null
   by_position: Record<string, number>
   /** Rostered skill players with no board value, so the total understates this team. */
   unranked_starters: number
@@ -533,6 +586,8 @@ export interface MatchupsResponse extends Freshness {
   current_week: number
   regular_season_weeks: number
   my_team_id: number | null
+  /** Shared by every matchup in the response — a week is played or it is not. */
+  source: LineupSource
   matchups: Matchup[]
 }
 
@@ -540,4 +595,66 @@ export interface CompareResponse extends Freshness {
   left: TeamStrength
   right: TeamStrength
   margin: number
+}
+
+
+// ---------------------------------------------------------------- draft recap
+
+export interface DraftBestAvailable {
+  player_display_name: string
+  position: string
+  board_rank: number
+  board_value: number | null
+}
+
+export interface DraftPickAnalysis {
+  overall: number
+  round: number
+  round_pick: number
+  team_id: number
+  team_name: string
+  is_mine: boolean
+  espn_id: number
+  player_display_name: string
+  position: string | null
+  board_rank: number | null
+  position_rank: number | null
+  board_value: number | null
+  espn_draft_rank: number | null
+  rank_source: 'model' | 'market' | 'espn_ppr' | null
+  market_ecr: number | null
+  market_position: string | null
+  /** pick number minus board rank: positive means the player went later than the board values him. */
+  value_vs_board: number | null
+  value_vs_market: number | null
+  verdict: 'steal' | 'fair' | 'reach' | 'unrated'
+  best_available: DraftBestAvailable[]
+  /** Board value of the best player still available minus the value of the pick. */
+  best_available_gap: number | null
+}
+
+export interface DraftTeamGrade {
+  team_id: number
+  team_name: string
+  is_mine: boolean
+  picks: number
+  rated_picks: number
+  captured_value: number
+  value_vs_board: number
+  value_vs_market: number
+  steals: number
+  reaches: number
+  value_left_on_board: number
+  grade_rank: number
+}
+
+export interface DraftResponse {
+  age_seconds: number
+  stale: boolean
+  week: number
+  season: number
+  picks: DraftPickAnalysis[]
+  teams: DraftTeamGrade[]
+  ranking_metric: string
+  pick_count: number
 }

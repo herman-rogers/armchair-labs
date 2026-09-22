@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useState } from 'react'
 import type { MetricVersion, Player } from '../api/types'
 import {
   OVERALL_VOR_TITLE,
@@ -7,20 +6,10 @@ import {
   rankBasis,
   rankBasisTitle,
 } from '../metricPresentation'
+import { DataTable, type Column as DataColumn } from './DataTable'
 import { Flags } from './Flags'
 
-type SortKey = keyof Player
-type Direction = 'asc' | 'desc'
-
-interface Column {
-  key: SortKey
-  label: string
-  title: string
-  align?: 'left'
-  /** Default sort direction when this column is first clicked. */
-  initial?: Direction
-  render?: (player: Player) => React.ReactNode
-}
+type Column = DataColumn<Player>
 
 const number = (value: number | null | undefined, digits = 1) =>
   value === null || value === undefined ? <span className="faint">—</span> : value.toFixed(digits)
@@ -129,25 +118,6 @@ const V1_COLUMNS: Column[] = [
     render: (p) => <span className="dim">{number(p.volatility)}</span>,
   },
   {
-    key: 'wtd_opp',
-    label: 'Opp',
-    title:
-      'Weighted opportunity: carries + 2.2 × targets. A compact historical volume measure, not a role projection.',
-    render: (p) => <span className="dim">{number(p.wtd_opp, 0)}</span>,
-  },
-  {
-    key: 'td_over_exp',
-    label: 'TDOE',
-    title:
-      'Touchdowns above or below a volume-only expectation. Useful as a regression signal, but high-value usage may repeat.',
-    render: (p) => (
-      <span style={{ color: p.td_over_exp > 2 ? 'var(--sell)' : p.td_over_exp < -2 ? 'var(--buy)' : undefined }}>
-        {p.td_over_exp > 0 ? '+' : ''}
-        {p.td_over_exp.toFixed(1)}
-      </span>
-    ),
-  },
-  {
     key: 'bonus_pts',
     label: 'Bonus',
     title:
@@ -205,6 +175,17 @@ const V2_COLUMNS: Column[] = [
     render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
   },
   {
+    key: 'market_ecr',
+    label: 'ECR',
+    title: 'FantasyPros consensus positional rank at the draft snapshot. Kept as information; it is the fallback basis only for players the model cannot rate.',
+    render: (p) => (
+      <span className={p.rank_source === 'market' ? 'strong' : 'dim'}>
+        {p.market_ecr == null ? '—' : `${p.market_position ?? ''}${Math.round(p.market_ecr)}`}
+        {p.rank_source === 'market' ? ' ★' : ''}
+      </span>
+    ),
+  },
+  {
     key: 'proj_ppg',
     label: 'Proj PPG',
     title: 'V2 projection per active game (history and stat-line branches); a fitted-ranker input, not the sort.',
@@ -249,13 +230,13 @@ const V2_COLUMNS: Column[] = [
   {
     key: 'projected_targets_pg',
     label: 'Tgt/G',
-    title: 'Projected targets per game from target share, WOPR, raw weighted opportunity, team pass volume, and competition.',
+    title: 'Projected targets per game from route opportunities, shrunk target share, and team pass volume.',
     render: (p) => <span className="dim">{number(p.projected_targets_pg)}</span>,
   },
   {
     key: 'projected_carries_pg',
     label: 'Car/G',
-    title: 'Projected carries per game from carry share, team rushing volume, and backfield competition.',
+    title: 'Projected carries per game from shrunk carry share and team rushing volume.',
     render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
   },
   {
@@ -292,81 +273,30 @@ const V2_COLUMNS: Column[] = [
   },
 ]
 
+const ADAPTIVE_COLUMNS: Column[] = V2_COLUMNS.map((column) =>
+  column.key === 'fitted_season_points'
+    ? {
+        key: 'adaptive_season_points',
+        label: 'Adaptive Pts',
+        title: 'Frozen 2026 Adaptive PPG-selector forecast on a season-points scale.',
+        render: (p) => <span className="strong">{number(p.adaptive_season_points, 0)}</span>,
+      }
+    : column,
+)
+
 export function BoardTable({ players, version }: { players: Player[]; version: MetricVersion }) {
-  const [sortKey, setSortKey] = useState<SortKey>('rank')
-  const [direction, setDirection] = useState<Direction>('asc')
-  const columns = version === 'v2' ? [...IDENTITY_COLUMNS.slice(0, 3), ...V2_COLUMNS] : [...IDENTITY_COLUMNS, ...V1_COLUMNS]
+  const projected = version === 'adaptive' ? ADAPTIVE_COLUMNS : V2_COLUMNS
+  const columns = version !== 'v1' ? [...IDENTITY_COLUMNS.slice(0, 3), ...projected] : [...IDENTITY_COLUMNS, ...V1_COLUMNS]
 
-  useEffect(() => {
-    setSortKey('rank')
-    setDirection('asc')
-  }, [version])
-
-  const sorted = useMemo(() => {
-    const rows = [...players]
-    rows.sort((a, b) => {
-      const left = a[sortKey]
-      const right = b[sortKey]
-
-      // Nulls always sort last, whichever direction is active — an unknown value is
-      // not a small one, and letting it float to the top would be misleading.
-      if (left == null && right == null) return 0
-      if (left === null || left === undefined) return 1
-      if (right === null || right === undefined) return -1
-
-      const comparison =
-        typeof left === 'number' && typeof right === 'number'
-          ? left - right
-          : String(left).localeCompare(String(right))
-      return direction === 'asc' ? comparison : -comparison
-    })
-    return rows
-  }, [players, sortKey, direction])
-
-  const onSort = (column: Column) => {
-    if (column.key === sortKey) {
-      setDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortKey(column.key)
-      setDirection(column.initial ?? 'desc')
-    }
-  }
-
+  // Remount per version: the column sets differ, so a carried-over sort key could
+  // reference a column the new set does not show.
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th
-                key={String(column.key)}
-                className={column.align === 'left' ? 'left' : undefined}
-                title={column.title}
-                onClick={() => onSort(column)}
-              >
-                {column.label}
-                {sortKey === column.key && (
-                  <span className="dir">{direction === 'asc' ? '↑' : '↓'}</span>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((player) => (
-            <tr key={player.player_id}>
-              {columns.map((column) => (
-                <td
-                  key={String(column.key)}
-                  className={column.align === 'left' ? 'left' : undefined}
-                >
-                  {column.render ? column.render(player) : String(player[column.key])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      key={version}
+      rows={players}
+      columns={columns}
+      defaultSort="rank"
+      rowKey={(player) => player.player_id}
+    />
   )
 }

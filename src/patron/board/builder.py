@@ -27,7 +27,6 @@ from patron.config.league import LeagueConfig, get_league
 from patron.metrics.age import add_age, add_age_flags
 from patron.metrics.opportunity import aggregate_opportunity
 from patron.metrics.rates import weekly_rates
-from patron.metrics.regression import TOTAL_TDS, add_regression_flags, add_td_over_expectation
 from patron.metrics.vor import VOR, add_vor, replacement_levels
 from patron.scoring.bonuses import BONUS_POINTS
 from patron.scoring.engine import (
@@ -59,10 +58,16 @@ def build_player_seasons(
 
     Returns:
         One row per player-season with league points, PPG, floor, volatility,
-        opportunity metrics, touchdown-over-expectation, and season bonus totals.
+        opportunity metrics, and season bonus totals.
     """
     config = config or get_league()
 
+    if config.position_overrides:
+        weeks = weeks.with_columns(
+            pl.col("player_id")
+            .replace_strict(config.position_overrides, default=pl.col("position"))
+            .alias("position")
+        )
     skill = weeks.filter(pl.col("position").is_in(config.board_positions))
 
     # Bonuses join per week, not per season. That is what lets weekly league points —
@@ -77,9 +82,7 @@ def build_player_seasons(
     rates = weekly_rates(
         scored, floor_quantile=config.metrics.floor_quantile, group_by=_SEASON_KEYS
     )
-    opportunity = aggregate_opportunity(
-        scored, target_weight=config.metrics.target_weight, group_by=_SEASON_KEYS
-    )
+    opportunity = aggregate_opportunity(scored, group_by=_SEASON_KEYS)
 
     identity = scored.group_by(list(_SEASON_KEYS)).agg(
         pl.col("player_display_name").last().alias("player_display_name"),
@@ -99,15 +102,9 @@ def build_player_seasons(
         pl.col(LEAGUE_POINTS).sum().alias("season_pts"),
     )
 
-    seasons = (
-        identity.join(rates, on=list(_SEASON_KEYS), how="left")
-        .join(opportunity, on=list(_SEASON_KEYS), how="left")
-        # Only rushing and receiving touchdowns regress against a per-touch baseline.
-        # Passing touchdowns are a different skill and are excluded on both sides.
-        .with_columns((pl.col("rushing_tds") + pl.col("receiving_tds")).alias(TOTAL_TDS))
+    return identity.join(rates, on=list(_SEASON_KEYS), how="left").join(
+        opportunity, on=list(_SEASON_KEYS), how="left"
     )
-
-    return add_td_over_expectation(seasons, window=config.metrics.td_rate_window)
 
 
 def build_board(
@@ -139,12 +136,6 @@ def build_board(
         .join(birth_dates, on="player_id", how="left")
         .pipe(add_age, season=config.draft_season)
         .pipe(add_age_flags, rb_cliff=metrics.rb_age_cliff)
-        .pipe(
-            add_regression_flags,
-            regress_down_at=metrics.td_regress_down,
-            regress_up_at=metrics.td_regress_up,
-            regress_up_min_opportunity=metrics.td_regress_up_min_opp,
-        )
     )
 
     # Replacement level is set by the season pool, from players with enough games to

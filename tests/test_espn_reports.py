@@ -263,6 +263,38 @@ class TestOpponentWeaknesses:
 
 
 class TestTeamStrengths:
+    def test_power_rank_uses_the_canonical_board_metric_not_legacy_ppg(self) -> None:
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "player_display_name": ["Old PPG leader", "New model leader"],
+                "position": ["WR", "WR"],
+                "fitted_ppg": [20.0, 10.0],
+                "v2_overall_vor": [1.0, 8.0],
+                "fitted_games": [17.0, 17.0],
+                "projected_volatility": [0.0, 0.0],
+                "proj_ppg": [20.0, 10.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2],
+                "player_display_name": ["Old PPG leader", "New model leader"],
+                "position": ["WR", "WR"],
+                OWNER_TEAM_ID: [1, 2],
+                "projected_points": [340.0, 170.0],
+                "lineup_slot": ["WR", "WR"],
+            }
+        )
+
+        strengths = team_strengths(board, espn, [1, 2])
+
+        assert strengths[2]["team_rank"] == 1
+        assert strengths[2]["ranking_metric"] == "v2_overall_vor"
+        assert strengths[2]["ranking_total"] == pytest.approx(8.0)
+        # Weekly projections remain an independently useful view of the roster.
+        assert strengths[1]["expected_weekly_points"] == pytest.approx(20.0)
+
     def test_optimizes_the_roster_instead_of_trusting_current_lineup_slots(self) -> None:
         board = pl.DataFrame(
             {
@@ -291,6 +323,37 @@ class TestTeamStrengths:
         assert strengths[2]["expected_weekly_points"] == pytest.approx(12.0)
         assert strengths[1]["team_rank"] == 1
         assert strengths[2]["team_rank"] == 2
+
+    def test_risk_adjusted_vor_penalises_fragile_stars(self) -> None:
+        """Two rosters with equal full-strength lineup VOR: the one whose star is
+        fragile has lower risk-adjusted VOR."""
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2, 3, 4],
+                "player_display_name": ["Fragile star", "Backup A", "Steady star", "Backup B"],
+                "position": ["WR"] * 4,
+                "fitted_ppg": [20.0, 5.0, 20.0, 5.0],
+                "projected_volatility": [0.0, 0.0, 0.0, 0.0],
+                "projected_availability": [0.5, 1.0, 1.0, 1.0],
+                "v2_overall_vor": [8.0, -2.0, 8.0, -2.0],
+            }
+        )
+        espn = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2, 3, 4],
+                "player_display_name": ["Fragile star", "Backup A", "Steady star", "Backup B"],
+                "position": ["WR"] * 4,
+                OWNER_TEAM_ID: [1, 1, 2, 2],
+                "projected_points": [0.0] * 4,
+                "lineup_slot": ["WR", "BE", "WR", "BE"],
+            }
+        )
+        strengths = team_strengths(board, espn, [1, 2])
+        fragile, steady = strengths[1], strengths[2]
+        assert fragile["ranking_total"] == steady["ranking_total"] == 8.0
+        assert fragile["risk_adjusted_total"] < steady["risk_adjusted_total"]
+        assert steady["lineup_vor_risk"] == 0.0
+        assert fragile["expected_lineup_vor"] == pytest.approx(3.0, abs=0.3)
 
     def test_availability_uses_the_bench_and_adds_weekly_risk(self) -> None:
         board = pl.DataFrame(
@@ -395,6 +458,22 @@ class TestUnrankable:
 
         assert unrankable["player_display_name"].to_list() == ["Rookie"]
 
+    def test_integrated_espn_fallback_rows_remain_in_the_unrankable_report(self) -> None:
+        frame = pl.DataFrame(
+            {
+                "player_id": ["espn:888", "g1"],
+                "espn_fallback": [True, False],
+                "player_display_name": ["Rookie", "Veteran"],
+                "position": ["RB", "RB"],
+                "espn_team": ["ARI", "SF"],
+                PERCENT_OWNED: [90.0, 99.0],
+                OWNER_TEAM_NAME: ["Mine", "Mine"],
+                INJURY_STATUS: ["ACTIVE", "ACTIVE"],
+            }
+        )
+
+        assert unrankable_players(frame)["player_display_name"].to_list() == ["Rookie"]
+
     def test_sorted_by_roster_rate_so_the_hyped_ones_lead(self) -> None:
         frame = pl.DataFrame(
             {
@@ -408,3 +487,55 @@ class TestUnrankable:
             }
         )
         assert unrankable_players(frame)["player_display_name"].to_list() == ["Hyped", "Quiet"]
+
+
+class TestDraftAnalysis:
+    def test_scores_picks_with_exact_best_available(self) -> None:
+        from patron.espn.reports import draft_analysis
+        from patron.espn.sync import DraftPick
+
+        board = pl.DataFrame(
+            {
+                ESPN_ID: [1, 2, 3, 4],
+                "player_id": ["a", "b", "c", "d"],
+                "player_display_name": ["Best", "Second", "Third", "Fourth"],
+                "position": ["RB", "WR", "RB", "WR"],
+                "rank": [1, 2, 3, 4],
+                "v2_position_rank": [1, 1, 2, 2],
+                "v2_overall_vor": [10.0, 8.0, 6.0, 4.0],
+                "espn_draft_rank": [2, 1, 30, 4],
+                "rank_source": ["model"] * 4,
+            }
+        )
+        draft = [
+            DraftPick(1, 1, 1, 10, "Alpha", 2, "Second"),
+            DraftPick(2, 1, 2, 20, "Beta", 4, "Fourth"),
+            DraftPick(3, 2, 1, 20, "Beta", 1, "Best"),
+            DraftPick(4, 2, 2, 10, "Alpha", 3, "Third"),
+        ]
+        result = draft_analysis(board, draft, my_team_id=10)
+        picks = {p["overall"]: p for p in result["picks"]}
+        # Pick 1 took the #2 player while #1 was on the board.
+        assert picks[1]["value_vs_board"] == -1
+        assert picks[1]["best_available"][0]["player_display_name"] == "Best"
+        assert picks[1]["best_available_gap"] == pytest.approx(2.0)
+        # Pick 2 reached for #4 with #1 and #3 available.
+        assert picks[2]["best_available"][0]["player_display_name"] == "Best"
+        assert picks[2]["value_vs_board"] == -2 and picks[2]["value_vs_market"] == -2
+        # Pick 3: the best player fell to pick 3 -> value +2; nothing better left.
+        assert picks[3]["value_vs_board"] == 2
+        assert picks[3]["best_available"][0]["player_display_name"] == "Third"
+        assert picks[3]["best_available_gap"] is None or picks[3]["best_available_gap"] <= 0
+        assert picks[4]["best_available"] == []
+        grades = {t["team_id"]: t for t in result["teams"]}
+        assert grades[20]["captured_value"] == pytest.approx(14.0)
+        assert grades[10]["captured_value"] == pytest.approx(14.0)
+        assert grades[10]["is_mine"] is True
+        assert grades[20]["value_left_on_board"] == pytest.approx(6.0)  # 10 - 4 at pick 2
+        assert result["ranking_metric"] == "v2_overall_vor"
+
+    def test_empty_draft_is_not_an_error(self) -> None:
+        from patron.espn.reports import draft_analysis
+
+        board = pl.DataFrame({ESPN_ID: [1], "position": ["RB"], "v2_overall_vor": [1.0]})
+        assert draft_analysis(board, [])["picks"] == []

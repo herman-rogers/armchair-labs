@@ -96,6 +96,133 @@ def test_walk_forward_scores_every_fold_only_from_earlier_outcomes() -> None:
     assert summary[0]["coefficient_sd_across_refits"]["signal"] < 0.05
 
 
+def test_walk_forward_stack_uses_only_earlier_out_of_fold_predictions() -> None:
+    """A later ridge may safely learn from an earlier model's historical forecasts."""
+    base = ModelSpec(
+        name="base",
+        features=("signal",),
+        lambda_grid=(1e-6,),
+    )
+    stack = ModelSpec(
+        name="stack",
+        features=("base", "other"),
+        require_features=("base",),
+        lambda_grid=(1e-6,),
+    )
+    config = FitConfig(
+        models=(base, stack),
+        min_train_folds=3,
+        min_position_rows=10,
+        positions=("RB", "WR"),
+    )
+
+    fitted, models = fit_walk_forward(synthetic(), config)
+    scored = {
+        row["forecast_season"]: (row["base"], row["stack"])
+        for row in fitted.group_by("forecast_season")
+        .agg(
+            pl.col("base").is_not_null().any(),
+            pl.col("stack").is_not_null().any(),
+        )
+        .to_dicts()
+    }
+
+    assert scored[2007] == (True, False)
+    assert scored[2009] == (True, False)
+    assert scored[2010] == (True, True)
+    assert scored[2011] == (True, True)
+    first_stack = next(m for m in models if m["model"] == "stack")
+    assert first_stack["forecast_season"] == 2010
+    assert first_stack["train_seasons"] == [2007, 2009]
+
+
+def test_position_selector_uses_configured_source_with_fallback() -> None:
+    rb = ModelSpec(name="rb_model", features=("signal",), lambda_grid=(1e-6,))
+    wr = ModelSpec(name="wr_model", features=("other",), lambda_grid=(1e-6,))
+    selector = ModelSpec(
+        name="hybrid",
+        kind="position_select",
+        by_position=(("RB", "rb_model"), ("WR", "wr_model")),
+        fallback="rb_model",
+        apply_live=False,
+    )
+    config = FitConfig(
+        models=(rb, wr, selector),
+        min_train_folds=3,
+        min_position_rows=10,
+        positions=("RB", "WR"),
+    )
+
+    fitted, _ = fit_walk_forward(synthetic(), config)
+    scored = fitted.filter(pl.col("forecast_season") == 2011)
+
+    assert scored.filter(pl.col("position") == "RB")["hybrid"].to_list() == pytest.approx(
+        scored.filter(pl.col("position") == "RB")["rb_model"].to_list()
+    )
+    assert scored.filter(pl.col("position") == "WR")["hybrid"].to_list() == pytest.approx(
+        scored.filter(pl.col("position") == "WR")["wr_model"].to_list()
+    )
+
+
+def test_coalesce_combines_mutually_exclusive_population_models() -> None:
+    frame = synthetic().with_columns(
+        pl.when(pl.col("position") == "RB").then(pl.col("signal")).alias("rookie"),
+        pl.when(pl.col("position") == "WR").then(pl.col("other")).alias("returner"),
+    )
+    config = FitConfig(
+        models=(
+            ModelSpec(
+                name="combined",
+                kind="coalesce",
+                factors=("rookie", "returner"),
+                apply_live=False,
+            ),
+        ),
+        positions=("RB", "WR"),
+    )
+
+    fitted, _ = fit_walk_forward(frame, config)
+
+    assert fitted.filter(pl.col("position") == "RB")["combined"].to_list() == pytest.approx(
+        fitted.filter(pl.col("position") == "RB")["rookie"].to_list()
+    )
+    assert fitted.filter(pl.col("position") == "WR")["combined"].to_list() == pytest.approx(
+        fitted.filter(pl.col("position") == "WR")["returner"].to_list()
+    )
+
+
+def test_adaptive_selector_uses_only_prior_fold_ranking_results() -> None:
+    frame = synthetic().with_columns(
+        pl.col("actual_ppg").alias("good_ranker"),
+        (-pl.col("actual_ppg")).alias("bad_ranker"),
+    )
+    selector = ModelSpec(
+        name="adaptive",
+        kind="adaptive_select",
+        target="actual_ppg",
+        factors=("bad_ranker", "good_ranker"),
+        fallback="bad_ranker",
+        selection_top_k=(("RB", 2), ("WR", 2)),
+        min_train_folds=3,
+        apply_live=False,
+    )
+    config = FitConfig(
+        models=(selector,), min_train_folds=3, min_position_rows=10, positions=("RB", "WR")
+    )
+
+    fitted, records = fit_walk_forward(frame, config)
+    pending = fitted.filter(pl.col("forecast_season") == 2011)
+
+    assert pending["adaptive"].to_list() == pytest.approx(pending["good_ranker"].to_list())
+    latest = [
+        entry
+        for entry in summarize_fitted_models(records)
+        if entry["model"] == "adaptive" and entry["position"] == "RB"
+    ][0]
+    assert latest["selected_source"] == "good_ranker"
+    assert latest["selection_folds"] == 7
+
+
 def test_missing_features_are_skipped_not_fatal() -> None:
     frame = synthetic()
     fitted, models = fit_walk_forward(frame, FitConfig(features=("absent",)))
@@ -168,3 +295,68 @@ def test_artifact_contract_rejects_mismatched_models() -> None:
         check_fit_artifact(artifact, config, 2011, "08-31", "2011-03-14T07:32:09Z")
     with pytest.raises(FittedArtifactError, match="no fitted-model artifact"):
         check_fit_artifact({}, config, 2011, "08-31", None)
+
+
+def test_required_features_restrict_training_and_scoring() -> None:
+    """A feature that exists only from some season trains and scores only where present."""
+    from patron.metrics.fit import ModelSpec
+
+    frame = synthetic().with_columns(
+        pl.when(pl.col("forecast_season") >= 2008)
+        .then(pl.col("signal") * 3.0)
+        .otherwise(None)
+        .alias("market")
+    )
+    spec = ModelSpec(
+        name="fitted_market",
+        features=("signal", "market"),
+        require_features=("market",),
+        min_train_folds=2,
+        lambda_grid=(1e-6,),
+    )
+    config = FitConfig(
+        models=(spec,), min_train_folds=3, positions=("RB", "WR"), min_position_rows=10
+    )
+    fitted, models = fit_walk_forward(frame, config)
+    by_season = {
+        row["forecast_season"]: row["scored"]
+        for row in fitted.group_by("forecast_season")
+        .agg(pl.col("fitted_market").is_not_null().any().alias("scored"))
+        .to_dicts()
+    }
+    # Market rows exist 2008+; two prior market folds are needed, so 2010 is the first
+    # scored season, and pre-market rows are never scored.
+    assert not by_season[2007] and not by_season[2009]
+    assert by_season[2010] and by_season[2011]
+    assert all(m["train_seasons"][0] >= 2008 for m in models)
+
+
+def test_prefix_feature_pool_is_selected_inside_each_outer_training_window() -> None:
+    frame = synthetic().with_columns(
+        (pl.col("actual_ppg") * 2.0).alias("rich_good"),
+        (pl.col("noise") % 3).alias("rich_noise"),
+    )
+    spec = ModelSpec(
+        name="selected_rich",
+        features=("other",),
+        feature_prefixes=("rich_",),
+        max_features=2,
+        lambda_grid=(1.0,),
+    )
+    config = FitConfig(
+        models=(spec,), min_train_folds=3, min_position_rows=10, positions=("RB", "WR")
+    )
+
+    fitted, models = fit_walk_forward(frame, config)
+
+    assert fitted.filter(pl.col("forecast_season") == 2011)["selected_rich"].is_not_null().all()
+    latest = max(
+        (
+            model
+            for model in models
+            if model["model"] == "selected_rich" and model["position"] == "RB"
+        ),
+        key=lambda model: model["forecast_season"],
+    )
+    assert "rich_good" in latest["coefficients"]
+    assert len(latest["coefficients"]) <= 2

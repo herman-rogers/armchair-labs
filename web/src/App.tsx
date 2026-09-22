@@ -15,7 +15,7 @@ const VIEWS: { id: View; label: string; hint: string }[] = [
 ]
 
 /**
- * The two metric generations, named by what they answer rather than by version.
+ * The metric systems, named by what they answer rather than only by version.
  *
  * V1 is the actual historical board. V2 is the forward board: its position-specific
  * rankers were selected from the rolling backtest and its overall order uses the
@@ -32,6 +32,11 @@ function versionOptions(boardSeason?: number, draftSeason?: number) {
       id: 'v2' as MetricVersion,
       label: draftSeason ? `V2 · ${draftSeason} Projection` : 'V2 · Projection',
       hint: 'Forward ranks selected by position from the rolling backtest.',
+    },
+    {
+      id: 'adaptive' as MetricVersion,
+      label: draftSeason ? `Adaptive · ${draftSeason} Shadow` : 'Adaptive · Shadow',
+      hint: 'Frozen Adaptive PPG-selector forecast; experimental and prospectively graded.',
     },
   ]
 }

@@ -19,6 +19,7 @@ import random
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
@@ -65,6 +66,7 @@ class TeamPlayerProjection:
     mean: float
     volatility: float
     availability: float
+    ranking_value: float | None
     fallback: bool
 
 
@@ -74,10 +76,18 @@ def _projection_ppg_column(frame: pl.DataFrame) -> str:
 
 
 def _board_value_column(frame: pl.DataFrame) -> str:
-    for candidate in ("v2_overall_vor", "v2_rank_vor", ADJUSTED_PROJECTED_VOR):
-        if candidate in frame.columns:
+    for candidate in (
+        "v2_overall_vor",
+        "v2_rank_vor",
+        ADJUSTED_PROJECTED_VOR,
+        ADJUSTED_VOR,
+        "vor",
+        "proj_ppg",
+        "ppg",
+    ):
+        if candidate in frame.columns and frame[candidate].is_not_null().any():
             return candidate
-    return ADJUSTED_VOR
+    raise ValueError("board carries no usable ranking column")
 
 
 def wire_replacement_levels(
@@ -321,8 +331,8 @@ def team_strengths(
     season_games: int = 17,
     fallback_availability: float = 0.94,
     columns: RosterProjectionColumns | None = None,
-) -> dict[int, dict[str, int | float]]:
-    """Simulate each roster's best active lineup and rank expected weekly production.
+) -> dict[int, dict[str, int | float | str]]:
+    """Rank rosters on the canonical board metric and simulate weekly production.
 
     Each scenario independently samples player availability, optimizes the legal lineup
     from every active player—including the bench—and retains the selected players'
@@ -331,9 +341,10 @@ def team_strengths(
 
     The per-player inputs come from ``columns`` (config ``roster_*_columns``), so the
     roster-level numbers follow whichever projection the backtest chose rather than a
-    hard-wired field.  ``team_score`` is a league-relative 0–10 index of expected weekly
-    points centered at 5.0. Weekly risk is deliberately separate: volatility describes
-    uncertainty and must not quietly replace the mean outcome in the team rank.
+    hard-wired field. ``team_rank`` and ``team_score`` use the same canonical value as
+    the player board and head-to-head comparison (V2 overall VOR when available), so a
+    newly selected ranker cannot leave the league power board on an older metric.
+    Expected points, floor, and risk remain separately visible simulation outputs.
     """
 
     ids = [int(team_id) for team_id in team_ids]
@@ -343,6 +354,11 @@ def team_strengths(
             team_id: {
                 "team_rank": rank,
                 "team_score": 5.0,
+                "ranking_total": 0.0,
+                "expected_lineup_vor": 0.0,
+                "lineup_vor_risk": 0.0,
+                "risk_adjusted_total": 0.0,
+                "ranking_metric": "unavailable",
                 "scored_players": 0,
                 "fallback_players": 0,
                 "expected_weekly_points": 0.0,
@@ -360,9 +376,10 @@ def team_strengths(
     availability_column = resolved["availability"]
     volatility_column = resolved["volatility"]
     volatility_mean_column = resolved["volatility_mean"]
+    ranking_column = _board_value_column(tagged_board)
     board_players: dict[int, TeamPlayerProjection] = {}
     if ESPN_ID in tagged_board.columns and mean_column in tagged_board.columns:
-        wanted = [ESPN_ID, "player_display_name", "position", mean_column]
+        wanted = [ESPN_ID, "player_display_name", "position", mean_column, ranking_column]
         wanted += [
             c
             for c in (games_column, availability_column, volatility_column, volatility_mean_column)
@@ -403,6 +420,12 @@ def team_strengths(
                 mean=mean,
                 volatility=volatility,
                 availability=max(0.0, min(1.0, availability)),
+                ranking_value=(
+                    float(row[ranking_column])
+                    if isinstance(row.get(ranking_column), int | float)
+                    and math.isfinite(row[ranking_column])
+                    else None
+                ),
                 fallback=False,
             )
 
@@ -436,6 +459,9 @@ def team_strengths(
                 mean=mean,
                 volatility=mean * volatility_ratios.get(position, 0.45),
                 availability=fallback_availability,
+                # ESPN's projection is a useful fallback for weekly points, but it is
+                # not on the model's VOR scale and must not silently enter Power rank.
+                ranking_value=None,
                 fallback=True,
             )
             fallback_players[team_id] += 1
@@ -445,16 +471,42 @@ def team_strengths(
     for team_id, roster in rosters.items():
         players = sorted(roster, key=lambda player: player.mean, reverse=True)
         baseline, _ = _best_lineup(players, [True] * len(players), requirements)
+        ranked_players = sorted(
+            (player for player in roster if player.ranking_value is not None),
+            key=lambda player: float(player.ranking_value or 0.0),
+            reverse=True,
+        )
+        ranked_lineup, _ = _best_lineup(ranked_players, [True] * len(ranked_players), requirements)
+        ranking_total = sum(
+            float(ranked_players[index].ranking_value or 0.0) for index in ranked_lineup
+        )
         rng = random.Random(20_260_829 + team_id)
         conditional_mean_sum = 0.0
         conditional_mean_square_sum = 0.0
         conditional_variance_sum = 0.0
         bench_rescue_sum = 0.0
         complete_count = 0
-
+        vor_sum = 0.0
+        vor_square_sum = 0.0
         for _ in range(TEAM_SIMULATIONS):
             active = [rng.random() < player.availability for player in players]
             selected, complete = _best_lineup(players, active, requirements)
+            # The same scenario on the VOR scale: best active lineup by ranking value.
+            ranked_active = (
+                [active[players.index(player)] for player in ranked_players]
+                if ranked_players
+                else []
+            )
+            vor_selected, _ = (
+                _best_lineup(ranked_players, ranked_active, requirements)
+                if ranked_players
+                else (set(), False)
+            )
+            scenario_vor = sum(
+                float(ranked_players[index].ranking_value or 0.0) for index in vor_selected
+            )
+            vor_sum += scenario_vor
+            vor_square_sum += scenario_vor**2
             conditional_mean = sum(players[index].mean for index in selected)
             conditional_variance = sum(players[index].volatility ** 2 for index in selected)
             conditional_mean_sum += conditional_mean
@@ -472,7 +524,19 @@ def team_strengths(
         )
         weekly_variance = conditional_variance_sum / TEAM_SIMULATIONS + availability_variance
         risk = math.sqrt(max(weekly_variance, 0.0))
+        # Risk-adjusted VOR: expected best-active-lineup VOR across availability
+        # scenarios, less 0.674 x its spread (an approximate 25th percentile). It
+        # penalises stars-and-scrubs construction on the same scale as the power rank
+        # without mixing in ordinary week-to-week scoring noise, which every roster has.
+        expected_lineup_vor = vor_sum / TEAM_SIMULATIONS
+        lineup_vor_risk = math.sqrt(
+            max(vor_square_sum / TEAM_SIMULATIONS - expected_lineup_vor**2, 0.0)
+        )
         simulation_results[team_id] = {
+            "ranking_total": ranking_total,
+            "expected_lineup_vor": expected_lineup_vor,
+            "lineup_vor_risk": lineup_vor_risk,
+            "risk_adjusted_total": expected_lineup_vor - 0.674 * lineup_vor_risk,
             "expected_weekly_points": expected,
             "weekly_risk": risk,
             "weekly_floor": max(expected - 0.674 * risk, 0.0),
@@ -482,26 +546,37 @@ def team_strengths(
             "fallback_players": fallback_players[team_id],
         }
 
-    values = [float(simulation_results[team_id]["expected_weekly_points"]) for team_id in ids]
+    values = [float(simulation_results[team_id]["ranking_total"]) for team_id in ids]
     mean = sum(values) / len(values)
     deviation = math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
     ordered = sorted(
         ids,
         key=lambda team_id: (
+            -float(simulation_results[team_id]["ranking_total"]),
             -float(simulation_results[team_id]["expected_weekly_points"]),
             team_id,
         ),
     )
 
-    result: dict[int, dict[str, int | float]] = {}
+    result: dict[int, dict[str, int | float | str]] = {}
     for rank, team_id in enumerate(ordered, start=1):
         expected = float(simulation_results[team_id]["expected_weekly_points"])
-        z_score = (expected - mean) / deviation if deviation > 0 else 0.0
+        ranking_total = float(simulation_results[team_id]["ranking_total"])
+        z_score = (ranking_total - mean) / deviation if deviation > 0 else 0.0
         rating = max(0.0, min(10.0, 5.0 + 1.5 * z_score))
         result[team_id] = {
             **simulation_results[team_id],
             "team_rank": rank,
             "team_score": round(rating, 1),
+            "ranking_total": round(ranking_total, 1),
+            "expected_lineup_vor": round(
+                float(simulation_results[team_id]["expected_lineup_vor"]), 1
+            ),
+            "lineup_vor_risk": round(float(simulation_results[team_id]["lineup_vor_risk"]), 1),
+            "risk_adjusted_total": round(
+                float(simulation_results[team_id]["risk_adjusted_total"]), 1
+            ),
+            "ranking_metric": ranking_column,
             "expected_weekly_points": round(expected, 1),
             "weekly_risk": round(float(simulation_results[team_id]["weekly_risk"]), 1),
             "weekly_floor": round(float(simulation_results[team_id]["weekly_floor"]), 1),
@@ -523,10 +598,13 @@ def unrankable_players(
     and a wire report that silently omits a hyped rookie is worse than one that says it
     cannot price him.
     """
+    unrankable = (
+        pl.col("espn_fallback")
+        if "espn_fallback" in espn_players.columns
+        else pl.col("player_id").is_null()
+    )
     return (
-        espn_players.filter(
-            pl.col("player_id").is_null() & pl.col("position").is_in(list(positions))
-        )
+        espn_players.filter(unrankable & pl.col("position").is_in(list(positions)))
         .sort(PERCENT_OWNED, descending=True, nulls_last=True)
         .select(
             "player_display_name",
@@ -537,3 +615,142 @@ def unrankable_players(
             INJURY_STATUS,
         )
     )
+
+
+def draft_analysis(
+    tagged_board: pl.DataFrame,
+    draft: list[Any],
+    my_team_id: int | None = None,
+    reach_threshold: int = 15,
+) -> dict[str, Any]:
+    """Score every draft pick against the board, with exact best-available at each pick.
+
+    ``value_vs_board`` is pick number minus the board's overall rank (positive: the
+    player went later than the board values him). ``value_vs_market`` is the same
+    against ESPN's draft-room rank. ``best_available`` lists the top board players who
+    had not yet been taken when the pick was made — exact, because the recap gives the
+    full order. Team grades sum the VOR the roster captured and its board value.
+    """
+    if not draft:
+        return {"picks": [], "teams": [], "ranking_metric": _board_value_column(tagged_board)}
+    value_column = _board_value_column(tagged_board)
+    columns = [
+        c
+        for c in (
+            ESPN_ID,
+            "player_id",
+            "player_display_name",
+            "position",
+            "rank",
+            "v2_position_rank",
+            value_column,
+            "espn_draft_rank",
+            "rank_source",
+            "market_ecr",
+            "market_position",
+        )
+        if c in tagged_board.columns
+    ]
+    board = tagged_board.select(columns).filter(pl.col(ESPN_ID).is_not_null())
+    by_espn = {int(row[ESPN_ID]): row for row in board.iter_rows(named=True)}
+    ranked = sorted(
+        (row for row in board.iter_rows(named=True) if row.get("rank") is not None),
+        key=lambda row: int(row["rank"]),
+    )
+    taken: set[int] = set()
+    picks: list[dict[str, Any]] = []
+    per_team: dict[int, dict[str, Any]] = {}
+    for pick in draft:
+        row = by_espn.get(int(pick.espn_id))
+        rank = row.get("rank") if row else None
+        value = row.get(value_column) if row else None
+        espn_rank = row.get("espn_draft_rank") if row else None
+        available = [
+            r
+            for r in ranked
+            if int(r[ESPN_ID]) not in taken and int(r[ESPN_ID]) != int(pick.espn_id)
+        ][:3]
+        vs_board = (pick.overall - int(rank)) if rank is not None else None
+        vs_market = (pick.overall - int(espn_rank)) if espn_rank is not None else None
+        verdict = "unrated"
+        if vs_board is not None:
+            verdict = (
+                "steal"
+                if vs_board >= reach_threshold
+                else "reach"
+                if vs_board <= -reach_threshold
+                else "fair"
+            )
+        record = {
+            "overall": pick.overall,
+            "round": pick.round,
+            "round_pick": pick.round_pick,
+            "team_id": pick.team_id,
+            "team_name": pick.team_name,
+            "is_mine": my_team_id is not None and pick.team_id == my_team_id,
+            "espn_id": pick.espn_id,
+            "player_display_name": pick.player_display_name,
+            "position": row.get("position") if row else None,
+            "board_rank": rank,
+            "position_rank": row.get("v2_position_rank") if row else None,
+            "board_value": None if value is None else round(float(value), 2),
+            "espn_draft_rank": espn_rank,
+            "rank_source": row.get("rank_source") if row else None,
+            "market_ecr": row.get("market_ecr") if row else None,
+            "market_position": row.get("market_position") if row else None,
+            "value_vs_board": vs_board,
+            "value_vs_market": vs_market,
+            "verdict": verdict,
+            "best_available": [
+                {
+                    "player_display_name": r["player_display_name"],
+                    "position": r["position"],
+                    "board_rank": r["rank"],
+                    "board_value": None
+                    if r.get(value_column) is None
+                    else round(float(r[value_column]), 2),
+                }
+                for r in available
+            ],
+            "best_available_gap": (
+                None
+                if not available or value is None or available[0].get(value_column) is None
+                else round(float(available[0][value_column]) - float(value), 2)
+            ),
+        }
+        picks.append(record)
+        taken.add(int(pick.espn_id))
+        team = per_team.setdefault(
+            pick.team_id,
+            {
+                "team_id": pick.team_id,
+                "team_name": pick.team_name,
+                "is_mine": record["is_mine"],
+                "picks": 0,
+                "rated_picks": 0,
+                "captured_value": 0.0,
+                "value_vs_board": 0,
+                "value_vs_market": 0,
+                "steals": 0,
+                "reaches": 0,
+                "value_left_on_board": 0.0,
+            },
+        )
+        team["picks"] += 1
+        if value is not None:
+            team["rated_picks"] += 1
+            team["captured_value"] += max(float(value), 0.0)
+        if vs_board is not None:
+            team["value_vs_board"] += vs_board
+        if vs_market is not None:
+            team["value_vs_market"] += vs_market
+        team["steals"] += verdict == "steal"
+        team["reaches"] += verdict == "reach"
+        if record["best_available_gap"] is not None and record["best_available_gap"] > 0:
+            team["value_left_on_board"] += record["best_available_gap"]
+    teams = sorted(per_team.values(), key=lambda t: -t["captured_value"])
+    for grade, team in enumerate(teams, start=1):
+        team["grade_rank"] = grade
+        team["captured_value"] = round(team["captured_value"], 1)
+        team["value_left_on_board"] = round(team["value_left_on_board"], 1)
+    return {"picks": picks, "teams": teams, "ranking_metric": value_column}

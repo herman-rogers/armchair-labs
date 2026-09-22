@@ -33,6 +33,10 @@ SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
 #: page is another request against a community-run service.
 DEFAULT_FREE_AGENT_DEPTH = 300
 
+#: Slots that are not part of a starting lineup. A player in one of these scored for
+#: nobody that week, which is the whole distinction the matchup view turns on.
+_NON_STARTING_SLOTS = frozenset({"BE", "IR", "ER", ""})
+
 
 @dataclass
 class PlayerState:
@@ -49,6 +53,11 @@ class PlayerState:
     owner_team_id: int | None
     owner_team_name: str | None
     lineup_slot: str | None
+    # ESPN's PPR draft-room ordering. This is market fallback evidence, not a model
+    # projection; optional defaults keep pre-feature snapshots readable.
+    espn_draft_rank: int | None = None
+    espn_position_rank: int | None = None
+    espn_adp: float | None = None
 
 
 @dataclass
@@ -94,6 +103,71 @@ class TransactionState:
 
 
 @dataclass
+class DraftPick:
+    """One selection from the league's draft recap."""
+
+    overall: int
+    round: int
+    round_pick: int
+    team_id: int
+    team_name: str
+    espn_id: int
+    player_display_name: str
+    bid_amount: int | None = None
+    keeper: bool = False
+
+
+@dataclass
+class LineupEntry:
+    """One rostered player in one week, in the slot they actually occupied.
+
+    This is history, not a plan: the slot is what the manager set before kickoff and
+    `points` is what ESPN finally credited. A player on the bench here scored for
+    nobody that week, however highly the board rates him.
+    """
+
+    espn_id: int
+    player_display_name: str
+    position: str | None
+    #: ESPN's slot for that week: a starting slot like "QB" or "RB/WR/TE", or a
+    #: non-starting one — "BE", "IR", "ER".
+    slot: str
+    points: float
+    #: What ESPN projected before the week. Kept because the interesting bench
+    #: question is whether a start was defensible at the time, not only in hindsight.
+    projected_points: float | None
+    pro_opponent: str | None
+    on_bye: bool
+
+    @property
+    def started(self) -> bool:
+        return self.slot not in _NON_STARTING_SLOTS
+
+
+@dataclass
+class WeekLineups:
+    """One head-to-head, as the two managers actually fielded it."""
+
+    week: int
+    home_team_id: int
+    away_team_id: int
+    home_score: float
+    away_score: float
+    #: ESPN's own pre-week projection for each side, when it publishes one.
+    home_projected: float | None = None
+    away_projected: float | None = None
+    home_lineup: list[LineupEntry] = field(default_factory=list)
+    away_lineup: list[LineupEntry] = field(default_factory=list)
+
+    def lineup_for(self, team_id: int) -> list[LineupEntry]:
+        if team_id == self.home_team_id:
+            return self.home_lineup
+        if team_id == self.away_team_id:
+            return self.away_lineup
+        return []
+
+
+@dataclass
 class LeagueSnapshot:
     """Everything one poll captured."""
 
@@ -112,6 +186,11 @@ class LeagueSnapshot:
     teams: list[TeamState] = field(default_factory=list)
     players: list[PlayerState] = field(default_factory=list)
     transactions: list[TransactionState] = field(default_factory=list)
+    draft: list[DraftPick] = field(default_factory=list)
+    #: Every played and in-progress week's real lineups, oldest first. `players` above
+    #: is the roster as it stands *now*; this is the only record of who started when,
+    #: and the two disagree the moment anyone benches a player or works the wire.
+    week_lineups: list[WeekLineups] = field(default_factory=list)
 
     def to_frame(self) -> pl.DataFrame:
         """Player states as a frame, ready to join against the board."""
@@ -127,6 +206,9 @@ class LeagueSnapshot:
             "owner_team_id": pl.Int64,
             "owner_team_name": pl.String,
             "lineup_slot": pl.String,
+            "espn_draft_rank": pl.Int64,
+            "espn_position_rank": pl.Int64,
+            "espn_adp": pl.Float64,
         }
         # An explicit schema, not inference: a column that happens to be entirely null
         # in one snapshot would otherwise come back as Null dtype and fail to join.
@@ -135,6 +217,35 @@ class LeagueSnapshot:
     def write(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(self), indent=2, default=str))
+        return path
+
+    def write_adp_snapshot(self, directory: Path) -> Path | None:
+        """Persist one dated observed-ADP panel for future historical evaluation.
+
+        ESPN exposes current ADP but no archive.  Keeping one file per UTC date means
+        future reports can use genuine observed draft price without pretending the
+        existing FantasyPros ECR archive is ADP. Repeated polls on a date replace that
+        date's panel instead of creating an unbounded stream of files.
+        """
+        frame = self.to_frame().filter(
+            pl.col("espn_adp").is_not_null() & pl.col("position").is_in(SKILL_POSITIONS)
+        )
+        if frame.height == 0:
+            return None
+        captured = datetime.fromisoformat(self.captured_at.replace("Z", "+00:00"))
+        path = directory / f"espn_adp_{self.season}_{captured.date().isoformat()}.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.select(
+            pl.lit(self.season).cast(pl.Int32).alias("forecast_season"),
+            pl.lit(self.captured_at).alias("captured_at"),
+            "espn_id",
+            "player_display_name",
+            "position",
+            "espn_team",
+            "espn_draft_rank",
+            "espn_position_rank",
+            "espn_adp",
+        ).write_parquet(path)
         return path
 
     @classmethod
@@ -157,6 +268,23 @@ class LeagueSnapshot:
                 "players": [PlayerState(**player) for player in raw.get("players", [])],
                 "transactions": [
                     TransactionState(**entry) for entry in raw.get("transactions", [])
+                ],
+                "draft": [DraftPick(**entry) for entry in raw.get("draft", [])],
+                # Absent from snapshots written before per-week lineups existed, which
+                # must stay readable rather than crash a server on restart.
+                "week_lineups": [
+                    WeekLineups(
+                        **{
+                            **week,
+                            "home_lineup": [
+                                LineupEntry(**entry) for entry in week.get("home_lineup", [])
+                            ],
+                            "away_lineup": [
+                                LineupEntry(**entry) for entry in week.get("away_lineup", [])
+                            ],
+                        }
+                    )
+                    for week in raw.get("week_lineups", [])
                 ],
             }
         )
@@ -199,7 +327,14 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _player_state(player: Any, team: Any = None) -> PlayerState:
+def _player_state(
+    player: Any,
+    team: Any = None,
+    *,
+    draft_rank: int | None = None,
+    position_rank: int | None = None,
+    adp: float | None = None,
+) -> PlayerState:
     return PlayerState(
         espn_id=int(_attribute(player, "playerId", default=0) or 0),
         player_display_name=str(_attribute(player, "name", default="") or ""),
@@ -215,7 +350,192 @@ def _player_state(player: Any, team: Any = None) -> PlayerState:
         owner_team_id=int(team.team_id) if team is not None else None,
         owner_team_name=_text(getattr(team, "team_name", None)) if team is not None else None,
         lineup_slot=_text(_attribute(player, "lineupSlot")),
+        espn_draft_rank=draft_rank,
+        espn_position_rank=position_rank,
+        espn_adp=adp,
     )
+
+
+def _fetch_draft_market(league: Any, size: int = 1000) -> dict[int, tuple[int, int, float | None]]:
+    """Current ESPN PPR draft order as player id → overall/position rank and ADP.
+
+    ``espn-api`` requests this ordering for free agents but discards both the sorted
+    ordinal and ``ownership.averageDraftPosition``. One bounded request retains that
+    evidence for every status. Skill-position ordinals exclude K/DST because Patron's
+    board does too.
+    """
+    filters = {
+        "players": {
+            "filterStatus": {"value": ["FREEAGENT", "WAIVERS", "ONTEAM"]},
+            "limit": size,
+            "sortDraftRanks": {
+                "sortPriority": 1,
+                "sortAsc": True,
+                "value": "PPR",
+            },
+        }
+    }
+    try:
+        data = league.espn_request.league_get(
+            params={"view": "kona_player_info", "scoringPeriodId": league.current_week},
+            headers={"x-fantasy-filter": json.dumps(filters)},
+        )
+    except Exception as error:  # noqa: BLE001 - optional evidence from unofficial API
+        logger.warning("ESPN draft ranking unavailable: %s", error)
+        return {}
+
+    skill_position_ids = {1, 2, 3, 4}
+    overall_rank = 0
+    position_ranks: dict[int, int] = {position_id: 0 for position_id in skill_position_ids}
+    market: dict[int, tuple[int, int, float | None]] = {}
+    for entry in data.get("players") or []:
+        raw = (entry.get("playerPoolEntry") or {}).get("player") or entry.get("player") or {}
+        position_id = raw.get("defaultPositionId")
+        player_id = raw.get("id")
+        if position_id not in skill_position_ids or player_id is None:
+            continue
+        overall_rank += 1
+        position_ranks[position_id] += 1
+        ownership = raw.get("ownership") or {}
+        market[int(player_id)] = (
+            overall_rank,
+            position_ranks[position_id],
+            _number(ownership.get("averageDraftPosition")),
+        )
+    return market
+
+
+def _read_draft(league: Any, team_count: int) -> list[DraftPick]:
+    """The draft recap in pick order; empty when the league has not drafted."""
+    picks: list[DraftPick] = []
+    try:
+        raw = list(getattr(league, "draft", None) or [])
+    except Exception as error:  # noqa: BLE001 - optional evidence from unofficial API
+        logger.warning("ESPN draft recap unavailable: %s", error)
+        return picks
+    for entry in raw:
+        team = _attribute(entry, "team")
+        round_num = int(_attribute(entry, "round_num", default=0) or 0)
+        round_pick = int(_attribute(entry, "round_pick", default=0) or 0)
+        overall = (round_num - 1) * max(team_count, 1) + round_pick if round_num else len(picks) + 1
+        picks.append(
+            DraftPick(
+                overall=overall,
+                round=round_num,
+                round_pick=round_pick,
+                team_id=int(getattr(team, "team_id", 0) or 0),
+                team_name=str(getattr(team, "team_name", "") or ""),
+                espn_id=int(_attribute(entry, "playerId", default=0) or 0),
+                player_display_name=str(_attribute(entry, "playerName", default="") or ""),
+                bid_amount=(
+                    int(bid) if (bid := _attribute(entry, "bid_amount")) is not None else None
+                ),
+                keeper=bool(_attribute(entry, "keeper_status", default=False)),
+            )
+        )
+    picks.sort(key=lambda pick: pick.overall)
+    return picks
+
+
+def _team_id(side: Any) -> int | None:
+    """The team id on one side of a box score.
+
+    espn-api swaps the raw id for a `Team` once it can match one, leaves the bare int
+    when it cannot, and uses None for a bye. All three arrive here.
+    """
+    if side is None:
+        return None
+    value = getattr(side, "team_id", side)
+    try:
+        # ESPN numbers teams from 1; a zero is its sentinel for "no opponent".
+        return int(value) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _projected(value: Any) -> float | None:
+    """ESPN's projected total, with its -1 "not published" sentinel as None."""
+    number = _number(value)
+    return None if number is None or number < 0 else number
+
+
+def _lineup_entry(player: Any) -> LineupEntry:
+    return LineupEntry(
+        espn_id=int(_attribute(player, "playerId", default=0) or 0),
+        player_display_name=str(_attribute(player, "name", default="") or ""),
+        position=_text(_attribute(player, "position")),
+        slot=str(_attribute(player, "slot_position", default="") or ""),
+        points=float(_number(_attribute(player, "points")) or 0.0),
+        projected_points=_number(_attribute(player, "projected_points")),
+        pro_opponent=teams.to_nflverse(_text(_attribute(player, "pro_opponent"))),
+        on_bye=bool(_attribute(player, "on_bye_week", default=False)),
+    )
+
+
+def _read_week_lineups(
+    league: Any,
+    current_week: int,
+    previous: list[WeekLineups] | None = None,
+) -> list[WeekLineups]:
+    """Who actually started, week by week, up to and including the current one.
+
+    The roster on the snapshot is the roster *now*. It cannot answer "who did I start
+    in week 2" — a bench move or a waiver claim since then makes it wrong, and the
+    best-lineup solver makes it wrong in a way that looks plausible, quietly promoting
+    a benched player into a starting slot. This is the record that settles it.
+
+    Weeks already captured are reused rather than refetched. A played week is settled
+    history, and each refetch is three more requests against an unofficial API for an
+    answer that cannot have changed. Only the current week — still scoring, still being
+    edited — is always pulled fresh, so the ongoing cost of this is one week per poll
+    rather than one per week of the season.
+    """
+    settled = {
+        week.week: week
+        for week in (previous or [])
+        if week.week < current_week and week.home_lineup and week.away_lineup
+    }
+
+    weeks: list[WeekLineups] = []
+    # Shared across weeks so a player on bye resolves to the pro team he was on at the
+    # time rather than whoever has traded for him since.
+    player_team_cache: dict[int, int] = {}
+
+    for week in range(1, max(current_week, 0) + 1):
+        cached = settled.get(week)
+        if cached is not None:
+            weeks.append(cached)
+            continue
+        try:
+            box_scores = league.box_scores(week, player_team_cache=player_team_cache)
+        except Exception as error:  # noqa: BLE001 - unofficial API, unbounded failures
+            # Best-effort, week by week: one unreadable week should cost that week's
+            # detail, not the whole snapshot.
+            logger.warning("ESPN lineups for week %s unavailable: %s", week, error)
+            continue
+
+        for box in box_scores:
+            home_id = _team_id(getattr(box, "home_team", None))
+            away_id = _team_id(getattr(box, "away_team", None))
+            if home_id is None or away_id is None:
+                # A bye in an odd-sized league: there is no head-to-head to show.
+                continue
+            weeks.append(
+                WeekLineups(
+                    week=week,
+                    home_team_id=home_id,
+                    away_team_id=away_id,
+                    home_score=float(_number(getattr(box, "home_score", None)) or 0.0),
+                    away_score=float(_number(getattr(box, "away_score", None)) or 0.0),
+                    home_projected=_projected(getattr(box, "home_projected", None)),
+                    away_projected=_projected(getattr(box, "away_projected", None)),
+                    home_lineup=[_lineup_entry(p) for p in getattr(box, "home_lineup", [])],
+                    away_lineup=[_lineup_entry(p) for p in getattr(box, "away_lineup", [])],
+                )
+            )
+
+    weeks.sort(key=lambda entry: (entry.week, entry.home_team_id))
+    return weeks
 
 
 def fetch_snapshot(
@@ -223,6 +543,7 @@ def fetch_snapshot(
     season: int,
     free_agent_depth: int = DEFAULT_FREE_AGENT_DEPTH,
     transaction_size: int = 100,
+    previous: LeagueSnapshot | None = None,
 ) -> LeagueSnapshot:
     """Pull one complete picture of the league.
 
@@ -231,6 +552,8 @@ def fetch_snapshot(
         season: Season to read.
         free_agent_depth: How many free agents to pull.
         transaction_size: How many recent transactions to read.
+        previous: The last snapshot, if there is one. Its settled week lineups are
+            carried forward instead of refetched — see `_read_week_lineups`.
 
     Raises:
         ValueError: if no league id is configured.
@@ -248,6 +571,18 @@ def fetch_snapshot(
         espn_s2=credentials.espn_s2,
         swid=credentials.swid,
     )
+    draft_market = _fetch_draft_market(league)
+
+    def state(player: Any, team: Any = None) -> PlayerState:
+        player_id = int(_attribute(player, "playerId", default=0) or 0)
+        rank, position_rank, adp = draft_market.get(player_id, (None, None, None))
+        return _player_state(
+            player,
+            team,
+            draft_rank=rank,
+            position_rank=position_rank,
+            adp=adp,
+        )
 
     teams = [
         TeamState(
@@ -270,38 +605,44 @@ def fetch_snapshot(
 
     players: list[PlayerState] = []
     for team in league.teams:
-        players.extend(_player_state(player, team) for player in team.roster)
+        players.extend(state(player, team) for player in team.roster)
 
     free_agents = league.free_agents(size=free_agent_depth)
-    players.extend(_player_state(player) for player in free_agents)
+    players.extend(state(player) for player in free_agents)
 
     transactions = _read_transactions(league, transaction_size)
+    draft = _read_draft(league, len(teams))
+    current_week = int(league.current_week)
+    week_lineups = _read_week_lineups(
+        league,
+        current_week,
+        previous.week_lineups if previous is not None and previous.season == season else None,
+    )
 
     snapshot = LeagueSnapshot(
         captured_at=datetime.now(tz=UTC).isoformat(),
         league_id=int(credentials.league_id),
         league_name=str(league.settings.name),
         season=season,
-        week=int(league.current_week),
+        week=current_week,
         my_team_id=credentials.team_id,
         regular_season_weeks=int(_attribute(league.settings, "reg_season_count", default=0) or 0),
         roster_slots=_starting_slots(league),
         teams=teams,
         players=players,
         transactions=transactions,
+        draft=draft,
+        week_lineups=week_lineups,
     )
     logger.info(
-        "snapshot: %s teams, %s rostered + %s free agents, %s transactions",
+        "snapshot: %s teams, %s rostered + %s free agents, %s transactions, %s weeks of lineups",
         len(teams),
         len(players) - len(free_agents),
         len(free_agents),
         len(transactions),
+        len({week.week for week in week_lineups}),
     )
     return snapshot
-
-
-#: Slots that are not part of a starting lineup.
-_NON_STARTING_SLOTS = frozenset({"BE", "IR", "ER", ""})
 
 
 def _starting_slots(league: Any) -> dict[str, int]:

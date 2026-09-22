@@ -10,8 +10,9 @@ metric can be added to or removed from the report without changing this engine.
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, date, datetime
 from typing import Any
 
 import polars as pl
@@ -23,12 +24,7 @@ from patron.config.settings import load_metric_report_config
 from patron.metrics.enrichment import depth_chart_as_of
 from patron.metrics.fit import FitConfig, summarize_fitted_models
 from patron.metrics.projection import METRIC_VERSION, ProjectionAssumptions, build_projection_board
-from patron.metrics.regression import (
-    EXPECTED_TDS,
-    POSITION_TD_RATE,
-    TD_OVER_EXPECTATION,
-    add_td_over_expectation,
-)
+from patron.metrics.research import analyze_residual_patterns
 from patron.metrics.vor import add_vor, replacement_levels
 
 
@@ -75,10 +71,21 @@ class RankingConfig:
     # Target-matched baselines: a season-points outcome is compared against the
     # model-free season-points ranking too, not only PPG rankings.
     baselines_by_target: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    candidates: tuple[str, ...] = ("v2_score", "proj_ppg")
+    candidates: tuple[str, ...] = ("proj_ppg", "component_proj_ppg")
     targets: tuple[str, ...] = ("actual_season_points", "actual_ppg")
     top_k: dict[str, int] = field(default_factory=lambda: {"QB": 12, "RB": 24, "WR": 36, "TE": 12})
     pool: dict[str, int] = field(default_factory=lambda: {"QB": 24, "RB": 60, "WR": 80, "TE": 24})
+    # Every candidate is also compared head-to-head with this ranker on the folds it
+    # covers (the market's own seasons), regardless of which baseline set the lift.
+    market_baseline: str | None = "market_ecr_score"
+    # The dated cross-position market price used for disagreement accounting.  This
+    # is an overall FantasyPros ECR snapshot, not observed ADP.
+    market_price_ranker: str | None = "market_overall_ecr_score"
+    disagreement_round_size: int = 10
+    disagreement_rounds: int = 2
+    # Primary Moneyball slices. A gap of zero means model top-K / market outside-K;
+    # larger values require the market to price the player that many slots lower.
+    value_capture_rank_gaps: tuple[int, ...] = (0, 20, 60, 120)
     # Cross-position draft value: every ranker is turned into per-game VOR against its
     # own positional replacement (the live board's construction), then scored on one
     # top-K across all positions against availability-adjusted actual VOR.
@@ -117,6 +124,22 @@ class RankingConfig:
             top_k={str(k): int(v) for k, v in (raw.get("top_k") or cls().top_k).items()},
             pool={str(k): int(v) for k, v in (raw.get("pool") or cls().pool).items()},
             overall={**cls().overall, **(raw.get("overall") or {})},
+            market_baseline=(
+                str(raw["market_baseline"]) if raw.get("market_baseline") else cls().market_baseline
+            ),
+            market_price_ranker=(
+                str(raw["market_price_ranker"])
+                if raw.get("market_price_ranker")
+                else cls().market_price_ranker
+            ),
+            disagreement_round_size=int(
+                raw.get("disagreement_round_size", cls().disagreement_round_size)
+            ),
+            disagreement_rounds=int(raw.get("disagreement_rounds", cls().disagreement_rounds)),
+            value_capture_rank_gaps=tuple(
+                int(value)
+                for value in (raw.get("value_capture_rank_gaps") or cls().value_capture_rank_gaps)
+            ),
         )
 
     def baselines_for(self, target: str) -> tuple[str, ...]:
@@ -207,8 +230,11 @@ def build_backtest_predictions(
     report_config: MetricReportConfig,
     depth_charts: pl.DataFrame | None = None,
     market_rankings: pl.DataFrame | None = None,
+    experimental_features: pl.DataFrame | None = None,
+    rookie_features: pl.DataFrame | None = None,
+    cutoff_by_season: Mapping[int, date] | None = None,
 ) -> pl.DataFrame:
-    """Create one v2 forecast row per returning player and forecast season."""
+    """Create cutoff-safe forecast rows for returners and the distinct rookie pool."""
     folds: list[pl.DataFrame] = []
     birth_dates = birth_dates.unique(subset=["player_id"], keep="last")
 
@@ -220,19 +246,6 @@ def build_backtest_predictions(
         )
         if history.filter(pl.col("season") == source_season).height == 0:
             continue
-        # Live/report parity: the live board pools positional TD rates over its own
-        # three-season window, so each fold must pool over its window too rather than
-        # inherit rates computed across every loaded season.
-        history = add_td_over_expectation(
-            history.drop(
-                [
-                    c
-                    for c in (EXPECTED_TDS, TD_OVER_EXPECTATION, POSITION_TD_RATE)
-                    if c in history.columns
-                ]
-            ),
-            window=league.metrics.td_rate_window,
-        )
 
         fold_config = league.model_copy(
             update={
@@ -256,7 +269,11 @@ def build_backtest_predictions(
             current_players=_depth_chart_before(
                 depth_charts,
                 forecast_season,
-                report_config.depth_chart_cutoff,
+                (
+                    cutoff_by_season[forecast_season].strftime("%m-%d")
+                    if cutoff_by_season and forecast_season in cutoff_by_season
+                    else report_config.depth_chart_cutoff
+                ),
             ),
         )
 
@@ -298,8 +315,22 @@ def build_backtest_predictions(
                 }
             )
 
+        candidates = projection.with_columns(
+            pl.lit(1.0).alias("returning_indicator"),
+            pl.lit("returner").alias("player_population"),
+        )
+        if rookie_features is not None and rookie_features.height:
+            rookies = rookie_features.filter(pl.col("forecast_season") == forecast_season).drop(
+                "forecast_season"
+            )
+            if rookies.height:
+                # A player with source-season NFL production belongs to the returner
+                # model even if an upstream identity row has an anomalous rookie year.
+                rookies = rookies.join(candidates.select("player_id"), on="player_id", how="anti")
+                candidates = pl.concat([candidates, rookies], how="diagonal_relaxed")
+
         fold = (
-            projection.join(actual, on="player_id", how="left")
+            candidates.join(actual, on="player_id", how="left")
             .with_columns(
                 pl.lit(forecast_season).cast(pl.Int32).alias("forecast_season"),
                 pl.lit(source_season).cast(pl.Int32).alias("source_season"),
@@ -317,11 +348,95 @@ def build_backtest_predictions(
                 "forecast_season"
             )
             fold = fold.join(market, on="player_id", how="left")
+        if experimental_features is not None and experimental_features.height:
+            experiment = experimental_features.filter(
+                pl.col("forecast_season") == forecast_season
+            ).drop("forecast_season")
+            if experiment.height:
+                fold = fold.join(experiment, on="player_id", how="left")
         folds.append(fold)
 
     if not folds:
         raise ValueError("no forecast folds could be built from the supplied player seasons")
-    return pl.concat(folds, how="diagonal_relaxed")
+    return _add_career_phase_features(pl.concat(folds, how="diagonal_relaxed"))
+
+
+def _add_career_phase_features(frame: pl.DataFrame) -> pl.DataFrame:
+    """Sophomore-season flag and its rushing-reliance interaction.
+
+    The 2026 QB aging study found the year-two leap is the one career phase every
+    core feature misses: next-season PPG ran ~+2.7 above fitted_ppg for players
+    entering their second season, +3.3 when their production leans on rushing.
+    ``entering_sophomore`` marks the phase; ``sophomore_rush_share`` scales it by
+    the source season's rushing share of scored points so the ridge can price the
+    mobile variant separately. Unknown experience counts as not-a-sophomore.
+    """
+    if "player_experience" not in frame.columns:
+        return frame.with_columns(
+            pl.lit(0.0).alias("entering_sophomore"),
+            pl.lit(0.0).alias("sophomore_rush_share"),
+        )
+    optional = (
+        "career_opportunities",
+        "career_pass_attempts",
+        "contract_years_remaining",
+        "vacated_target_opportunity",
+        "vacated_carry_opportunity",
+        "combine_speed_score",
+        "combine_burst_score",
+    )
+    missing = [name for name in optional if name not in frame.columns]
+    if missing:
+        frame = frame.with_columns(
+            *(pl.lit(None, dtype=pl.Float64).alias(name) for name in missing)
+        )
+    sophomore = (pl.col("player_experience") == 1).cast(pl.Float64).fill_null(0.0)
+    rush_points = 0.1 * pl.col("rushing_yards").fill_null(0.0) + 6.0 * pl.col(
+        "rushing_tds"
+    ).fill_null(0.0)
+    rush_share = (
+        pl.when(pl.col("season_pts") > 0)
+        .then((rush_points / pl.col("season_pts")).clip(0.0, 1.0))
+        .otherwise(0.0)
+    )
+    frame = frame.with_columns(
+        sophomore.alias("entering_sophomore"),
+        (sophomore * rush_share).alias("sophomore_rush_share"),
+    )
+    experience = pl.col("player_experience").fill_null(99.0)
+    early_career = ((4.0 - experience) / 3.0).clip(0.0, 1.0)
+    source_opportunities_pg = (
+        pl.col("carries").fill_null(0.0) + pl.col("targets").fill_null(0.0)
+    ) / pl.col("games").fill_null(0.0).clip(lower_bound=1.0)
+    frame = frame.with_columns(
+        early_career.alias("early_career_score"),
+        source_opportunities_pg.alias("source_opportunities_pg"),
+        source_opportunities_pg.pow(2).alias("source_opportunities_pg_sq"),
+        pl.col("career_opportunities")
+        .fill_null(0.0)
+        .clip(lower_bound=0.0)
+        .log1p()
+        .alias("career_opportunities_log"),
+        pl.col("career_pass_attempts")
+        .fill_null(0.0)
+        .clip(lower_bound=0.0)
+        .log1p()
+        .alias("career_pass_attempts_log"),
+        (pl.col("contract_years_remaining") * pl.col("depth_role_factor")).alias(
+            "contract_depth_security"
+        ),
+        (pl.col("vacated_target_opportunity") * early_career).alias("vacated_target_early_career"),
+        (pl.col("vacated_carry_opportunity") * early_career).alias("vacated_carry_early_career"),
+        pl.when(early_career > 0)
+        .then(pl.col("combine_speed_score") * early_career)
+        .otherwise(0.0)
+        .alias("young_speed_score"),
+        pl.when(early_career > 0)
+        .then(pl.col("combine_burst_score") * early_career)
+        .otherwise(0.0)
+        .alias("young_burst_score"),
+    )
+    return frame
 
 
 def _number(value: Any) -> float | None:
@@ -631,6 +746,7 @@ def _rank_fold(
 
 
 _ALREADY_VOR = frozenset({"adj_proj_vor", "proj_vor", "v2_rank_vor", "v2_overall_vor"})
+_ALREADY_OVERALL = frozenset({"market_overall_ecr_score"})
 _SEASON_SCALE = ("season_points", "season_pts")
 
 
@@ -669,7 +785,11 @@ def _overall_rows(
             value = _number(row.get(ranker))
             if value is None:
                 continue
-            equivalent = value if ranker in _ALREADY_VOR else value / scale - replacement
+            equivalent = (
+                value
+                if ranker in _ALREADY_VOR or ranker in _ALREADY_OVERALL
+                else value / scale - replacement
+            )
             out.append({**row, "_overall": equivalent})
     return out
 
@@ -679,11 +799,89 @@ def _mean(values: list[float | None]) -> float | None:
     return sum(present) / len(present) if present else None
 
 
-def _finalize_entries(per_ranker: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _versus(entry: dict[str, Any], other: dict[str, Any]) -> dict[str, Any]:
+    """Head-to-head on the folds both rankers scored: lift, SE, and strict W–T–L."""
+    theirs = {f["forecast_season"]: f for f in other["fold_results"]}
+    diffs: list[float] = []
+    won = tied = lost = 0
+    for fold in entry["fold_results"]:
+        base = theirs.get(fold["forecast_season"])
+        if base is None:
+            continue
+        diff = fold["hit_rate"] - base["hit_rate"]
+        diffs.append(diff)
+        if abs(diff) > 1e-9:
+            won += diff > 0
+            lost += diff < 0
+        else:
+            gap = fold["top_k_actual_mean"] - base["top_k_actual_mean"]
+            if abs(gap) > 1e-9:
+                won += gap > 0
+                lost += gap < 0
+            else:
+                tied += 1
+    if not diffs:
+        return {
+            "folds": 0,
+            "hit_rate": None,
+            "lift": None,
+            "lift_se": None,
+            "won": None,
+            "tied": None,
+            "lost": None,
+            "beats": None,
+        }
+    lift = sum(diffs) / len(diffs)
+    se = None
+    if len(diffs) > 1:
+        variance = sum((d - lift) ** 2 for d in diffs) / (len(diffs) - 1)
+        se = math.sqrt(variance / len(diffs))
+    seasons = {f["forecast_season"] for f in entry["fold_results"]} & set(theirs)
+    base_hit = sum(theirs[s]["hit_rate"] for s in seasons) / len(seasons)
+    return {
+        "folds": len(diffs),
+        "hit_rate": _rounded(base_hit),
+        "lift": _rounded(lift),
+        "lift_se": _rounded(se),
+        "won": won,
+        "tied": tied,
+        "lost": lost,
+        "beats": lift > 0 and won > lost,
+    }
+
+
+def _finalize_entries(
+    per_ranker: dict[str, dict[str, Any]], market_baseline: str | None = None
+) -> list[dict[str, Any]]:
     """Attach baseline comparison, strict W–T–L, and paired uncertainty; round for output."""
     finalized: list[dict[str, Any]] = []
     baselines = [entry for entry in per_ranker.values() if entry["role"] == "baseline"]
+    market = per_ranker.get(market_baseline) if market_baseline else None
     for entry in per_ranker.values():
+        if entry["role"] == "candidate" and market is not None and entry is not market:
+            versus = _versus(entry, market)
+            entry["market_baseline"] = market["ranker"]
+            entry["market_folds"] = versus["folds"]
+            entry["market_hit_rate"] = versus["hit_rate"]
+            entry["market_lift"] = versus["lift"]
+            entry["market_lift_se"] = versus["lift_se"]
+            entry["market_won"] = versus["won"]
+            entry["market_tied"] = versus["tied"]
+            entry["market_lost"] = versus["lost"]
+            entry["beats_market"] = versus["beats"]
+        else:
+            for key in (
+                "market_baseline",
+                "market_hit_rate",
+                "market_lift",
+                "market_lift_se",
+                "market_won",
+                "market_tied",
+                "market_lost",
+                "beats_market",
+            ):
+                entry[key] = None
+            entry["market_folds"] = 0
         if entry["role"] == "candidate" and baselines:
             # Compare on the candidate's own folds: a walk-forward ranker
             # that needs training seasons must not be measured against a
@@ -867,7 +1065,7 @@ def analyze_rankings(
                         "fold_results": folds,
                     }
 
-                results.extend(_finalize_entries(per_ranker))
+                results.extend(_finalize_entries(per_ranker, ranking.market_baseline))
 
         overall = ranking.overall
         target = str(overall.get("target") or "actual_availability_value")
@@ -908,7 +1106,327 @@ def analyze_rankings(
                         ),
                         "fold_results": folds,
                     }
-            results.extend(_finalize_entries(per_ranker))
+            results.extend(_finalize_entries(per_ranker, ranking.market_baseline))
+    return results
+
+
+def _market_disagreement_fold(
+    rows: list[dict[str, Any]],
+    candidate: str,
+    market: str,
+    target: str,
+    k: int,
+    pool: int,
+    overall: dict[str, Any],
+    rank_gap: int,
+    value_capture_rank_gaps: tuple[int, ...],
+) -> dict[str, Any] | None:
+    """One same-player-pool Moneyball test against a dated market price."""
+    common = [
+        row
+        for row in rows
+        if _number(row.get(candidate)) is not None
+        and _number(row.get(market)) is not None
+        and _number(row.get(target)) is not None
+    ]
+    transformed = _overall_rows(common, candidate, overall)
+    scored = [
+        row
+        for row in transformed
+        if _number(row.get("_overall")) is not None
+        and _number(row.get(market)) is not None
+        and _number(row.get(target)) is not None
+    ]
+    if len(scored) < k:
+        return None
+
+    def identity(row: dict[str, Any]) -> str:
+        return str(row.get("player_id"))
+
+    by_model = sorted(scored, key=lambda row: float(row["_overall"]), reverse=True)
+    by_market = sorted(scored, key=lambda row: float(row[market]), reverse=True)
+    by_actual = sorted(scored, key=lambda row: float(row[target]), reverse=True)
+    model_rank = {identity(row): index for index, row in enumerate(by_model, 1)}
+    market_rank = {identity(row): index for index, row in enumerate(by_market, 1)}
+    actual_rank = {identity(row): index for index, row in enumerate(by_actual, 1)}
+    actual_by_id = {identity(row): float(row[target]) for row in scored}
+
+    model_top = {identity(row) for row in by_model[:k]}
+    market_top = {identity(row) for row in by_market[:k]}
+    actual_top = {identity(row) for row in by_actual[:k]}
+    model_only = model_top - market_top
+    market_only = market_top - model_top
+    market_missed_actual = actual_top - market_top
+    model_captured_misses = market_missed_actual & model_top
+
+    actionable = {
+        player_id
+        for player_id in model_rank
+        if min(model_rank[player_id], market_rank[player_id]) <= pool
+    }
+    bullish = [
+        player_id
+        for player_id in actionable
+        if market_rank[player_id] - model_rank[player_id] >= rank_gap
+    ]
+    bearish = [
+        player_id
+        for player_id in actionable
+        if model_rank[player_id] - market_rank[player_id] >= rank_gap
+    ]
+
+    def correct_rate(player_ids: list[str], bullish_side: bool) -> float | None:
+        if not player_ids:
+            return None
+        return sum(
+            (
+                actual_rank[player_id] < market_rank[player_id]
+                if bullish_side
+                else actual_rank[player_id] > market_rank[player_id]
+            )
+            for player_id in player_ids
+        ) / len(player_ids)
+
+    def realized_edge(player_ids: list[str]) -> float | None:
+        if not player_ids:
+            return None
+        return sum(
+            abs(actual_rank[player_id] - market_rank[player_id])
+            - abs(actual_rank[player_id] - model_rank[player_id])
+            for player_id in player_ids
+        ) / len(player_ids)
+
+    model_score = _rank_fold(scored, "_overall", target, k, pool)
+    market_score = _rank_fold(scored, market, target, k, pool)
+    if model_score is None or market_score is None:
+        return None
+    actual_threshold = float(by_actual[k - 1][target])
+    false_positives = model_only - actual_top
+    value_capture_bands: list[dict[str, Any]] = []
+    for gap in value_capture_rank_gaps:
+        calls = {
+            player_id
+            for player_id in model_only
+            if market_rank[player_id] - model_rank[player_id] >= gap
+        }
+        hits = calls & actual_top
+        value_capture_bands.append(
+            {
+                "rank_gap": gap,
+                "calls": len(calls),
+                "hits": len(hits),
+                "precision": len(hits) / len(calls) if calls else None,
+                "actual_value_sum": sum(actual_by_id[player_id] for player_id in calls),
+                "false_positive_cost": sum(
+                    max(actual_threshold - actual_by_id[player_id], 0.0)
+                    for player_id in calls - actual_top
+                ),
+            }
+        )
+    return {
+        "common_players": len(scored),
+        "top_k_overlap": len(model_top & market_top),
+        "model_only": len(model_only),
+        "market_only": len(market_only),
+        "model_only_hits": len(model_only & actual_top),
+        "market_only_hits": len(market_only & actual_top),
+        "market_missed_actual_top": len(market_missed_actual),
+        "model_captured_market_misses": len(model_captured_misses),
+        "contrarian_precision": (
+            len(model_only & actual_top) / len(model_only) if model_only else None
+        ),
+        "missed_value_capture_rate": (
+            len(model_captured_misses) / len(market_missed_actual) if market_missed_actual else None
+        ),
+        "contrarian_false_positives": len(false_positives),
+        "contrarian_false_positive_cost": sum(
+            max(actual_threshold - actual_by_id[player_id], 0.0) for player_id in false_positives
+        ),
+        "model_only_actual_value_sum": sum(actual_by_id[player_id] for player_id in model_only),
+        "market_only_actual_value_sum": sum(actual_by_id[player_id] for player_id in market_only),
+        "net_swap_value": sum(actual_by_id[player_id] for player_id in model_only)
+        - sum(actual_by_id[player_id] for player_id in market_only),
+        "value_capture_bands": value_capture_bands,
+        "model_only_actual_mean": _mean([actual_by_id[player_id] for player_id in model_only]),
+        "market_only_actual_mean": _mean([actual_by_id[player_id] for player_id in market_only]),
+        "hit_rate_lift": model_score["hit_rate"] - market_score["hit_rate"],
+        "ndcg_lift": (
+            model_score["ndcg"] - market_score["ndcg"]
+            if model_score["ndcg"] is not None and market_score["ndcg"] is not None
+            else None
+        ),
+        "top_k_actual_mean_lift": (
+            model_score["top_k_actual_mean"] - market_score["top_k_actual_mean"]
+        ),
+        "bullish_count": len(bullish),
+        "bullish_correct_rate": correct_rate(bullish, True),
+        "bullish_realized_rank_edge": realized_edge(bullish),
+        "bearish_count": len(bearish),
+        "bearish_correct_rate": correct_rate(bearish, False),
+        "bearish_realized_rank_edge": realized_edge(bearish),
+    }
+
+
+def analyze_market_disagreements(
+    predictions: pl.DataFrame,
+    report_config: MetricReportConfig,
+) -> list[dict[str, Any]]:
+    """Score model/market disagreements, never their separate player universes."""
+    ranking = report_config.ranking
+    market = ranking.market_price_ranker
+    target = str(ranking.overall.get("target") or "actual_availability_value")
+    if not market or market not in predictions.columns or target not in predictions.columns:
+        return []
+    k = int(ranking.overall.get("k", 60))
+    pool = int(ranking.overall.get("pool", 120))
+    rank_gap = ranking.disagreement_round_size * ranking.disagreement_rounds
+    records = [row for row in predictions.to_dicts() if row.get("outcome_complete")]
+    results: list[dict[str, Any]] = []
+    for window in report_config.effective_windows:
+        window_rows = [
+            row for row in records if window.start <= int(row["forecast_season"]) <= window.end
+        ]
+        seasons = sorted({int(row["forecast_season"]) for row in window_rows})
+        for candidate in ranking.candidates:
+            if candidate not in predictions.columns or candidate == market:
+                continue
+            folds: list[dict[str, Any]] = []
+            for season in seasons:
+                fold = _market_disagreement_fold(
+                    [row for row in window_rows if int(row["forecast_season"]) == season],
+                    candidate,
+                    market,
+                    target,
+                    k,
+                    pool,
+                    ranking.overall,
+                    rank_gap,
+                    ranking.value_capture_rank_gaps,
+                )
+                if fold is not None:
+                    folds.append({"forecast_season": season, **fold})
+            if not folds:
+                continue
+            bullish_n = sum(int(fold["bullish_count"]) for fold in folds)
+            bearish_n = sum(int(fold["bearish_count"]) for fold in folds)
+            model_only_n = sum(int(fold["model_only"]) for fold in folds)
+            market_missed_n = sum(int(fold["market_missed_actual_top"]) for fold in folds)
+            captured_n = sum(int(fold["model_captured_market_misses"]) for fold in folds)
+            capture_bands: list[dict[str, Any]] = []
+            for gap in ranking.value_capture_rank_gaps:
+                band_rows = [
+                    band
+                    for fold in folds
+                    for band in fold["value_capture_bands"]
+                    if int(band["rank_gap"]) == gap
+                ]
+                calls = sum(int(band["calls"]) for band in band_rows)
+                hits = sum(int(band["hits"]) for band in band_rows)
+                capture_bands.append(
+                    {
+                        "rank_gap": gap,
+                        "calls": calls,
+                        "hits": hits,
+                        "precision": _rounded(hits / calls if calls else None),
+                        "actual_value_sum": _rounded(
+                            sum(float(band["actual_value_sum"]) for band in band_rows)
+                        ),
+                        "false_positive_cost": _rounded(
+                            sum(float(band["false_positive_cost"]) for band in band_rows)
+                        ),
+                    }
+                )
+            results.append(
+                {
+                    "candidate": candidate,
+                    "market": market,
+                    "market_source": "fantasypros_ecr",
+                    "window": window.key,
+                    "window_label": window.label,
+                    "target": target,
+                    "k": k,
+                    "pool": pool,
+                    "rank_gap": rank_gap,
+                    "folds": len(folds),
+                    "common_players_mean": _rounded(
+                        _mean([float(fold["common_players"]) for fold in folds])
+                    ),
+                    "top_k_overlap_mean": _rounded(
+                        _mean([float(fold["top_k_overlap"]) for fold in folds])
+                    ),
+                    "model_only_hits": sum(int(fold["model_only_hits"]) for fold in folds),
+                    "market_only_hits": sum(int(fold["market_only_hits"]) for fold in folds),
+                    "market_missed_actual_top": market_missed_n,
+                    "model_captured_market_misses": captured_n,
+                    "contrarian_precision": _rounded(
+                        sum(int(fold["model_only_hits"]) for fold in folds) / model_only_n
+                        if model_only_n
+                        else None
+                    ),
+                    "missed_value_capture_rate": _rounded(
+                        captured_n / market_missed_n if market_missed_n else None
+                    ),
+                    "contrarian_false_positives": sum(
+                        int(fold["contrarian_false_positives"]) for fold in folds
+                    ),
+                    "contrarian_false_positive_cost": _rounded(
+                        sum(float(fold["contrarian_false_positive_cost"]) for fold in folds)
+                    ),
+                    "net_swap_value": _rounded(
+                        sum(float(fold["net_swap_value"]) for fold in folds)
+                    ),
+                    "net_swap_value_per_fold": _rounded(
+                        _mean([float(fold["net_swap_value"]) for fold in folds])
+                    ),
+                    "value_capture_bands": capture_bands,
+                    "hit_rate_lift": _rounded(_mean([fold["hit_rate_lift"] for fold in folds])),
+                    "ndcg_lift": _rounded(_mean([fold["ndcg_lift"] for fold in folds])),
+                    "top_k_actual_mean_lift": _rounded(
+                        _mean([fold["top_k_actual_mean_lift"] for fold in folds])
+                    ),
+                    "bullish_count": bullish_n,
+                    "bullish_correct_rate": _rounded(
+                        sum(
+                            int(fold["bullish_count"]) * float(fold["bullish_correct_rate"] or 0)
+                            for fold in folds
+                        )
+                        / bullish_n
+                        if bullish_n
+                        else None
+                    ),
+                    "bullish_realized_rank_edge": _rounded(
+                        sum(
+                            int(fold["bullish_count"])
+                            * float(fold["bullish_realized_rank_edge"] or 0)
+                            for fold in folds
+                        )
+                        / bullish_n
+                        if bullish_n
+                        else None
+                    ),
+                    "bearish_count": bearish_n,
+                    "bearish_correct_rate": _rounded(
+                        sum(
+                            int(fold["bearish_count"]) * float(fold["bearish_correct_rate"] or 0)
+                            for fold in folds
+                        )
+                        / bearish_n
+                        if bearish_n
+                        else None
+                    ),
+                    "bearish_realized_rank_edge": _rounded(
+                        sum(
+                            int(fold["bearish_count"])
+                            * float(fold["bearish_realized_rank_edge"] or 0)
+                            for fold in folds
+                        )
+                        / bearish_n
+                        if bearish_n
+                        else None
+                    ),
+                    "fold_results": folds,
+                }
+            )
     return results
 
 
@@ -936,6 +1454,41 @@ def build_metric_report(
 ) -> dict[str, Any]:
     metric_results, model_results = analyze_predictions(predictions, report_config)
     ranking_results = analyze_rankings(predictions, report_config)
+    market_disagreement_results = analyze_market_disagreements(predictions, report_config)
+    population_ranking_results: list[dict[str, Any]] = []
+    if "player_population" in predictions.columns:
+        rookies = predictions.filter(pl.col("player_population") == "rookie")
+        if rookies.height:
+            rookie_ranking = replace(
+                report_config.ranking,
+                baselines=("rookie_draft_capital_score", "market_ecr_score"),
+                baselines_by_target={},
+                candidates=("fitted_nextgen_rookie_ppg", "fitted_nextgen_rookie_season_points"),
+                top_k={"QB": 4, "RB": 12, "WR": 12, "TE": 4},
+                pool={"QB": 10, "RB": 30, "WR": 30, "TE": 10},
+                overall={
+                    **report_config.ranking.overall,
+                    "k": 24,
+                    "pool": 60,
+                    "min_games": 0,
+                },
+            )
+            rookie_config = replace(report_config, ranking=rookie_ranking)
+            population_ranking_results = [
+                {"population": "rookie", **row} for row in analyze_rankings(rookies, rookie_config)
+            ]
+    ranking_sensitivity_results: list[dict[str, Any]] = []
+    if "preseason_rostered" in predictions.columns:
+        rostered = predictions.filter(pl.col("preseason_rostered") > 0)
+        for row in analyze_rankings(rostered, report_config):
+            ranking_sensitivity_results.append({"population": "cutoff_rostered", **row})
+    if "week1_proxy_rostered" in predictions.columns:
+        rostered = predictions.filter(pl.col("week1_proxy_rostered") > 0)
+        for row in analyze_rankings(rostered, report_config):
+            ranking_sensitivity_results.append({"population": "week1_proxy_rostered", **row})
+    residual_pattern_results = analyze_residual_patterns(
+        predictions, (metric.key for metric in report_config.metrics)
+    )
     completed = sorted(
         predictions.filter(pl.col("outcome_complete"))["forecast_season"].unique().to_list()
     )
@@ -944,6 +1497,13 @@ def build_metric_report(
     )
     catalog: list[dict[str, Any]] = []
     completed_rows = predictions.filter(pl.col("outcome_complete"))
+    population_counts: dict[str, int] = {}
+    if "player_population" in predictions.columns:
+        population_counts = {
+            str(row["player_population"]): int(row["len"])
+            for row in predictions.group_by("player_population").len().to_dicts()
+            if row["player_population"] is not None
+        }
     for metric in report_config.metrics:
         available = metric.key in predictions.columns
         coverage = None
@@ -968,8 +1528,49 @@ def build_metric_report(
     for result in metric_results:
         assessments[result["assessment"]] = assessments.get(result["assessment"], 0) + 1
 
+    cutoff_availability: dict[str, Any] | None = None
+    if {
+        "cutoff_transaction_matched",
+        "preseason_rostered",
+        "week1_proxy_rostered",
+    }.issubset(predictions.columns):
+        proxy_rows = predictions.filter(pl.col("week1_proxy_rostered").is_not_null())
+        agreement = None
+        if proxy_rows.height:
+            agreement = _number(
+                proxy_rows.select(
+                    ((pl.col("preseason_rostered") > 0) == (pl.col("week1_proxy_rostered") > 0))
+                    .cast(pl.Float64)
+                    .mean()
+                ).item()
+            )
+        cutoff_availability = {
+            "source": (
+                "official NFL club transaction archives for 31 teams in market-era folds; "
+                "dated ESPN fallback for Dallas and pre-market seasons"
+            ),
+            "information_cutoffs": {
+                str(row["forecast_season"]): str(row["forecast_cutoff_date"])
+                for row in predictions.select("forecast_season", "forecast_cutoff_date")
+                .drop_nulls()
+                .unique(subset=["forecast_season"], keep="first")
+                .sort("forecast_season")
+                .to_dicts()
+            }
+            if "forecast_cutoff_date" in predictions.columns
+            else {},
+            "transaction_match_rate": _rounded(
+                _number(predictions["cutoff_transaction_matched"].mean())
+            ),
+            "cutoff_rostered_rate": _rounded(_number(predictions["preseason_rostered"].mean())),
+            "week1_proxy_coverage": _rounded(
+                _number(predictions["week1_proxy_rostered"].is_not_null().mean())
+            ),
+            "roster_membership_agreement_with_week1_proxy": _rounded(agreement),
+        }
+
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "title": report_config.title,
         "generated_at": datetime.now(UTC).isoformat(),
         "configuration": {
@@ -994,15 +1595,34 @@ def build_metric_report(
             "pending_forecasts": pending,
             "forecast_rows": predictions.height,
             "completed_rows": completed_rows.height,
-            "returning_player_scope": True,
+            "returning_player_scope": False,
+            "population_counts": population_counts,
             "assessment_counts": assessments,
+            "cutoff_availability": cutoff_availability,
             "limitations": [
-                "Only players with prior-season NFL production are forecast; rookies are "
-                "outside this model.",
-                "Depth charts are cut off before each season and current manual overrides "
-                "are disabled.",
+                "Rookies use a distinct NFL-draft-capital model; age, college context, "
+                "and combine fields remain measured hypotheses after failing to improve "
+                "the first scorecard. Public college production is not yet available in "
+                "the nflverse input boundary and is not imputed or fabricated.",
+                "The dated historical market price is FantasyPros overall ECR, not "
+                "observed ADP; every disagreement result labels that proxy explicitly.",
+                "Market folds use the archived ECR snapshot date as their information "
+                "cutoff for transactions and depth charts; current manual overrides are "
+                "disabled.",
                 "Depth charts from 2004–2024 use the published Week 1 ranking as an "
-                "August 31 proxy because those files have no publication timestamp.",
+                "August 31 proxy because those files have no publication timestamp. The "
+                "proxy is therefore unavailable to market folds whose ECR snapshot is "
+                "earlier than August 31.",
+                "Cutoff roster state is reconstructed conservatively from the prior-season "
+                "team and matched dated transactions; unmatched retirements or unsigned "
+                "players can therefore remain active.",
+                "Official club transaction archives cover 31 teams in 2020–2026; Dallas "
+                "and older seasons retain the ESPN historical fallback. The fallback has "
+                "known date errors and is not treated as equivalent provenance.",
+                "The public historical feed has dated IR/PUP/NFI/suspension transactions "
+                "but not a complete dated preseason practice/recovery archive. A separate "
+                "market-conditioned games challenger uses same-snapshot ECR as that missing "
+                "news carrier and is not described as independent model alpha.",
                 "Injury, route-participation, and depth-chart metrics enter only after a "
                 "complete history exists for their source.",
                 "Partial rank correlation controls for the historical PPG prior, but does "
@@ -1013,11 +1633,31 @@ def build_metric_report(
                 "NFL roles and offensive environments change across eras.",
             ],
         },
+        "primary_objective": {
+            "statement": (
+                "Identify players whose actual season value lands inside the draftable "
+                "tier despite ECR or ADP pricing them outside it, using only information "
+                "available at the historical draft timestamp."
+            ),
+            "promotion_metrics": [
+                "contrarian_precision",
+                "missed_value_capture_rate",
+                "net_swap_value",
+                "contrarian_false_positive_cost",
+            ],
+            "guardrails": ["top_k_hit_rate", "ndcg", "top_k_actual_mean"],
+            "historical_price": "FantasyPros overall ECR",
+            "future_price": "observed ESPN ADP snapshots when sufficient history exists",
+        },
         "targets": [asdict(target) for target in report_config.targets],
         "metrics": catalog,
         "results": metric_results,
         "model_results": model_results,
         "ranking_results": ranking_results,
+        "population_ranking_results": population_ranking_results,
+        "market_disagreement_results": market_disagreement_results,
+        "ranking_sensitivity_results": ranking_sensitivity_results,
+        "residual_pattern_results": residual_pattern_results,
         "fitted_models": fitted_models or [],
         "fitted_model_summary": summarize_fitted_models(fitted_models or []),
         "fitted_artifact": fitted_artifact or {},
@@ -1039,6 +1679,31 @@ def _fitted_weight_lines(report: dict[str, Any]) -> list[str]:
     ]
     for name in sorted({entry["model"] for entry in summary}):
         entries = [entry for entry in summary if entry["model"] == name]
+        if entries[0].get("kind") == "adaptive_select":
+            lines.extend(
+                [
+                    f"### `{name}`",
+                    "",
+                    "Pos | Latest source | Target | Criterion | Prior folds | Score | "
+                    "Selection history",
+                    "---|---|---|---|---:|---:|---",
+                ]
+            )
+            for entry in entries:
+                score = entry.get("selection_score")
+                counts = ", ".join(
+                    f"{source}: {count}"
+                    for source, count in sorted((entry.get("selected_source_counts") or {}).items())
+                )
+                lines.append(
+                    f"{entry['position']} | {entry.get('selected_source') or ''} | "
+                    f"{entry.get('selection_target') or ''} | "
+                    f"{entry.get('selection_metric') or ''} | "
+                    f"{entry.get('selection_folds') or 0} | "
+                    f"{'' if score is None else f'{score:.3f}'} | {counts}"
+                )
+            lines.append("")
+            continue
         features = list(entries[0]["coefficients"])
         lines.extend(
             [
@@ -1099,8 +1764,8 @@ def _ranking_verdict_lines(report: dict[str, Any]) -> list[str]:
                     f"### {window['label']} — {target}",
                     "",
                     "Pos | Ranker | Role | Folds | Hit rate | NDCG | Pool Spearman | "
-                    "Lift vs baseline (±SE) | W–T–L | Verdict",
-                    "---|---|---|---:|---:|---:|---:|---:|---:|---",
+                    "Lift vs baseline (±SE) | W–T–L | Verdict | vs market (folds, lift, W–L)",
+                    "---|---|---|---:|---:|---:|---:|---:|---:|---|---",
                 ]
             )
             for row in sorted(
@@ -1124,12 +1789,121 @@ def _ranking_verdict_lines(report: dict[str, Any]) -> list[str]:
                     if row["beats_baseline"] is None
                     else ("beats" if row["beats_baseline"] else "loses")
                 )
+                market = ""
+                if row.get("market_lift") is not None:
+                    market = (
+                        f"{row['market_folds']}f {row['market_lift']:+.3f} "
+                        f"{row['market_won']}–{row['market_lost']} "
+                        f"{'beats' if row['beats_market'] else 'loses'}"
+                    )
                 lines.append(
                     f"{row['position']} | {row['ranker']} | {row['role']} | {row['folds']} | "
                     f"{row['hit_rate']:.3f} | {(row['ndcg'] or 0):.3f} | "
-                    f"{(row['pool_spearman'] or 0):.3f} | {lift} | {won} | {verdict}"
+                    f"{(row['pool_spearman'] or 0):.3f} | {lift} | {won} | {verdict} | {market}"
                 )
             lines.append("")
+    return lines
+
+
+def _market_disagreement_lines(report: dict[str, Any]) -> list[str]:
+    """Primary draft-value objective on a same-player, same-timestamp market pool."""
+    rows = report.get("market_disagreement_results") or []
+    if not rows:
+        return []
+    windows = report["configuration"].get("analysis_windows") or []
+    selected = next((window["key"] for window in windows if window["key"] == "market"), None)
+    if selected:
+        rows = [row for row in rows if row["window"] == selected]
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            not str(row["candidate"]).startswith("fitted_nextgen"),
+            -(row.get("net_swap_value") or 0.0),
+        ),
+    )[:15]
+    if not rows:
+        return []
+    lines = [
+        "## Primary objective — capture value the market missed",
+        "",
+        "The market price is dated FantasyPros overall ECR (not observed ADP). Every "
+        "comparison uses only players and information available in the same historical "
+        "snapshot. Contrarian precision is the share of model-top-60 / ECR-outside-60 "
+        "calls that actually finished top 60. Capture is the share of actual top-60 "
+        "players ECR missed that the model recovered. Net swap value is realized "
+        "availability-adjusted VOR from model-only picks minus the ECR-only picks they "
+        "replaced; ordinary hit lift remains a safety check.",
+        "",
+        "Ranker | Folds | Calls | Contrarian precision | Misses captured | Capture rate | "
+        "Net swap value | False-positive cost | Hit lift | Deep-gap precision",
+        "---|---:|---:|---:|---:|---:|---:|---:|---:|---",
+    ]
+    for row in rows:
+        precision = row.get("contrarian_precision")
+        capture = row.get("missed_value_capture_rate")
+        calls = int(row.get("model_only_hits") or 0) + int(
+            row.get("contrarian_false_positives") or 0
+        )
+        bands = [
+            f"{band['rank_gap']}+: {band['hits']}/{band['calls']}"
+            + (f" ({band['precision']:.1%})" if band.get("precision") is not None else "")
+            for band in row.get("value_capture_bands") or []
+            if int(band.get("rank_gap") or 0) > 0 and int(band.get("calls") or 0) > 0
+        ]
+        lines.append(
+            f"{row['candidate']} | {row['folds']} | {calls} | "
+            f"{'' if precision is None else f'{precision:.1%}'} | "
+            f"{row.get('model_captured_market_misses', 0)}/"
+            f"{row.get('market_missed_actual_top', 0)} | "
+            f"{'' if capture is None else f'{capture:.1%}'} | "
+            f"{(row.get('net_swap_value') or 0):+.2f} | "
+            f"{(row.get('contrarian_false_positive_cost') or 0):.2f} | "
+            f"{row['hit_rate_lift']:+.3f} | {', '.join(bands) or 'none'}"
+        )
+    lines.append("")
+    return lines
+
+
+def _population_ranking_lines(report: dict[str, Any]) -> list[str]:
+    """Compact scorecard for the distinct rookie model population."""
+    rows = [
+        row
+        for row in report.get("population_ranking_results") or []
+        if row["population"] == "rookie"
+        and row["window"] == "modern"
+        and row["target"] == "actual_season_points"
+        and row["ranker"]
+        in {
+            "rookie_draft_capital_score",
+            "market_ecr_score",
+            "fitted_nextgen_rookie_season_points",
+        }
+    ]
+    if not rows:
+        return []
+    lines = [
+        "## Rookie population scorecard",
+        "",
+        "Rookies are graded on their own draftable slices (QB4/RB12/WR12/TE4). "
+        "Draft capital includes UDFAs at a documented post-draft floor, so the simple "
+        "baseline and challenger retain the same rookie universe.",
+        "",
+        "Pos | Ranker | Folds | Hit rate | NDCG | Lift vs best baseline | W–T–L",
+        "---|---|---:|---:|---:|---:|---:",
+    ]
+    for row in sorted(rows, key=lambda item: (item["position"], item["role"] != "baseline")):
+        lift = row.get("hit_rate_lift")
+        wtl = (
+            ""
+            if row.get("folds_won") is None
+            else f"{row['folds_won']}–{row['folds_tied']}–{row['folds_lost']}"
+        )
+        lines.append(
+            f"{row['position']} | {row['ranker']} | {row['folds']} | "
+            f"{row['hit_rate']:.3f} | {row['ndcg']:.3f} | "
+            f"{'' if lift is None else f'{lift:+.3f}'} | {wtl}"
+        )
+    lines.append("")
     return lines
 
 
@@ -1154,6 +1928,8 @@ def render_metric_report_markdown(report: dict[str, Any]) -> str:
         "",
     ]
     lines.extend(_ranking_verdict_lines(report))
+    lines.extend(_market_disagreement_lines(report))
+    lines.extend(_population_ranking_lines(report))
     lines.extend(_fitted_weight_lines(report))
     lines += [
         f"## Strongest incremental signals — {selected_window['label']}",

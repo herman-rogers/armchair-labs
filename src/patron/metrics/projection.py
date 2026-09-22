@@ -6,11 +6,14 @@ answers a different question: what is a reasonable next-season PPG estimate?
 
 The projection is intentionally transparent rather than presented as a trained black
 box.  It combines a recency-weighted multi-year individual prior, small-sample
-shrinkage, partial touchdown and big-play regression, a position-specific age curve,
-and a team-context ratio.  Team context compares the latest projected environment to
-the environments already embedded in the player's history.  Comparing contexts is
-important: adding a raw "good quarterback" bonus would count the same quarterback
-twice for a player who never changed teams.
+shrinkage toward the all-player positional pool, a position-specific age curve, a
+depth-chart role factor, and a bottom-up component stat line driven by projected team
+volume.  Team volume enters as a ratio of the projected environment to the
+environments already embedded in the player's history, so a player who never changed
+teams is not credited twice for the same offense.  Every adjustment that failed the
+walk-forward backtest — TD regression, big-play regression, the team-context scalar,
+the WOPR role blend, and the teammate-competition multiplier — has been removed
+(docs/v2_metrics_review.md §4, §5, §6a).
 
 The latest nflverse depth chart supplies current team and role evidence. Facts that
 remain uncertain—a future trade, quarterback change, or camp promotion—live in
@@ -99,12 +102,9 @@ class PlayerProjectionOverride:
 @dataclass(frozen=True)
 class TeamProjectionOverride:
     team: str
-    qb_context_multiplier: float = 1.0
     pass_volume_multiplier: float = 1.0
     rush_volume_multiplier: float = 1.0
     scoring_multiplier: float = 1.0
-    target_availability_multiplier: float = 1.0
-    backfield_availability_multiplier: float = 1.0
     reason: str | None = None
 
 
@@ -130,29 +130,12 @@ class ProjectionAssumptions:
 @dataclass
 class TeamProfile:
     games: float = 0.0
-    qb_context: float = 0.0
     pass_volume: float = 0.0
     dropbacks: float = 0.0
     rush_volume: float = 0.0
     scoring: float = 0.0
     pass_td_rate: float = 0.0
     rush_td_rate: float = 0.0
-    targets: dict[str, float] = field(default_factory=dict)
-    rb_opportunity: dict[str, float] = field(default_factory=dict)
-
-    def target_availability(self, player_id: str) -> float:
-        """Share left after the largest teammate target earner is accounted for."""
-        total = sum(self.targets.values())
-        other = max((value for key, value in self.targets.items() if key != player_id), default=0.0)
-        return 1.0 - other / total if total > 0 else 1.0
-
-    def backfield_availability(self, player_id: str) -> float:
-        total = sum(self.rb_opportunity.values())
-        other = max(
-            (value for key, value in self.rb_opportunity.items() if key != player_id),
-            default=0.0,
-        )
-        return 1.0 - other / total if total > 0 else 1.0
 
 
 def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
@@ -166,17 +149,14 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
             key,
             {
                 "games": 0.0,
-                "passing_yards": 0.0,
                 "passing_tds": 0.0,
-                "passing_interceptions": 0.0,
                 "attempts": 0.0,
                 "team_pass_attempts": 0.0,
                 "team_dropbacks": 0.0,
                 "official_team_carries": 0.0,
                 "rushing_tds": 0.0,
-                "targets": {},
+                "targets": 0.0,
                 "carries": 0.0,
-                "rb_opportunity": {},
             },
         )
         bucket["games"] = max(
@@ -184,12 +164,11 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
             _number(row.get("team_games")) or _number(row.get("games")),
         )
         for column in (
-            "passing_yards",
             "passing_tds",
-            "passing_interceptions",
             "attempts",
             "rushing_tds",
             "carries",
+            "targets",
         ):
             bucket[column] += _number(row.get(column))
         bucket["team_pass_attempts"] = max(
@@ -200,39 +179,22 @@ def _team_profiles(seasons: pl.DataFrame) -> dict[tuple[int, str], TeamProfile]:
             bucket["official_team_carries"], _number(row.get("official_team_carries"))
         )
 
-        player_id = str(row["player_id"])
-        bucket["targets"][player_id] = bucket["targets"].get(player_id, 0.0) + _number(
-            row.get("targets")
-        )
-        if row.get("position") == "RB":
-            bucket["rb_opportunity"][player_id] = bucket["rb_opportunity"].get(
-                player_id, 0.0
-            ) + _number(row.get("wtd_opp"))
-
     profiles: dict[tuple[int, str], TeamProfile] = {}
     for key, values in grouped.items():
         games = values["games"] or 1.0
         pass_attempts = values["team_pass_attempts"] or values["attempts"]
         if pass_attempts <= 0:
-            pass_attempts = sum(values["targets"].values())
+            pass_attempts = values["targets"]
         dropbacks = values["team_dropbacks"] or pass_attempts
         team_carries = values["official_team_carries"] or values["carries"]
         profiles[key] = TeamProfile(
             games=games,
-            qb_context=(
-                0.04 * values["passing_yards"]
-                + 4.0 * values["passing_tds"]
-                - 2.0 * values["passing_interceptions"]
-            )
-            / games,
             pass_volume=pass_attempts / games,
             dropbacks=dropbacks / games,
             rush_volume=team_carries / games,
             scoring=(values["passing_tds"] + values["rushing_tds"]) / games,
             pass_td_rate=values["passing_tds"] / max(pass_attempts, 1.0),
             rush_td_rate=values["rushing_tds"] / max(team_carries, 1.0),
-            targets=values["targets"],
-            rb_opportunity=values["rb_opportunity"],
         )
     return profiles
 
@@ -300,26 +262,27 @@ def _prior_rows(seasons: pl.DataFrame, config: LeagueConfig) -> dict[str, pl.Dat
     return _all_player_rows(seasons, config)
 
 
-def _position_means(
-    pools: dict[str, pl.DataFrame],
-) -> tuple[dict[str, float], dict[str, float]]:
-    """Games-weighted PPG and bonus/game priors by position from the prior pool."""
+def _position_means(pools: dict[str, pl.DataFrame]) -> dict[str, float]:
+    """Games-weighted PPG prior by position from the prior pool."""
     ppg: dict[str, float] = {}
-    bonus: dict[str, float] = {}
     for position, rows in pools.items():
         if rows.height == 0:
             ppg[position] = 0.0
-            bonus[position] = 0.0
             continue
         weighted_games = rows[_games_column(rows)].cast(pl.Float64)
         game_total = float(weighted_games.sum())
         ppg[position] = float((rows["ppg"] * weighted_games).sum()) / game_total
-        bonus[position] = float(rows["bonus_pts"].sum()) / game_total
-    return ppg, bonus
+    return ppg
 
 
 def _actual_core_points(row: dict[str, Any]) -> float:
-    """Scored components v2 can project explicitly; residual keeps rare events."""
+    """Scored components v2 projects explicitly; the residual keeps everything else.
+
+    Big-play bonus points sit in the residual deliberately: the dedicated bonus
+    projection (opportunity x regressed rate x air-yard factor) tested anti-predictive
+    (review §4/§5), so bonus scoring now reaches the component branch only through the
+    heavily shrunk residual, like other rare scoring events.
+    """
     return (
         0.04 * _number(row.get("passing_yards"))
         + 4.0 * _number(row.get("passing_tds"))
@@ -329,7 +292,6 @@ def _actual_core_points(row: dict[str, Any]) -> float:
         + _number(row.get("receptions"))
         + 0.1 * _number(row.get("receiving_yards"))
         + 6.0 * _number(row.get("receiving_tds"))
-        + _number(row.get("bonus_pts"))
     )
 
 
@@ -350,22 +312,17 @@ def _component_priors(
             "rushing_yards": 0.0,
             "receiving_tds": 0.0,
             "rushing_tds": 0.0,
-            "bonus_pts": 0.0,
             "passing_yards": 0.0,
             "attempts": 0.0,
             "passing_tds": 0.0,
             "passing_interceptions": 0.0,
             "target_share": 0.0,
             "carry_share": 0.0,
-            "wopr": 0.0,
             "air_yards_share": 0.0,
-            "route_opportunities": 0.0,
             "route_participation": 0.0,
             "targets_per_route_opportunity": 0.0,
-            "red_zone_targets": 0.0,
             "end_zone_targets": 0.0,
             "end_zone_receiving_tds": 0.0,
-            "red_zone_carries": 0.0,
             "goal_line_carries": 0.0,
             "goal_line_rushing_tds": 0.0,
             "floor_ratio": 0.0,
@@ -387,16 +344,12 @@ def _component_priors(
                 "rushing_yards",
                 "receiving_tds",
                 "rushing_tds",
-                "bonus_pts",
                 "passing_yards",
                 "attempts",
                 "passing_tds",
                 "passing_interceptions",
-                "route_opportunities",
-                "red_zone_targets",
                 "end_zone_targets",
                 "end_zone_receiving_tds",
-                "red_zone_carries",
                 "goal_line_carries",
                 "goal_line_rushing_tds",
             ):
@@ -411,7 +364,6 @@ def _component_priors(
             totals["carry_share"] += (
                 _number(row.get("carries")) / team_carries if team_carries else 0.0
             ) * game_weight
-            totals["wopr"] += _number(row.get("wopr")) * game_weight
             totals["air_yards_share"] += _number(row.get("air_yards_share")) * game_weight
             if row.get("route_participation") is not None:
                 totals["route_participation"] += (
@@ -433,11 +385,9 @@ def _component_priors(
         games = max(totals["games"], 1.0)
         targets = max(totals["targets"], 1.0)
         carries = max(totals["carries"], 1.0)
-        opportunity = max(totals["targets"] + totals["carries"], 1.0)
         priors[position] = {
             "target_share": totals["target_share"] / games,
             "carry_share": totals["carry_share"] / games,
-            "wopr": totals["wopr"] / games,
             "air_yards_share": totals["air_yards_share"] / games,
             "route_participation": totals["route_participation"] / games,
             "targets_per_route_opportunity": totals["targets_per_route_opportunity"] / games,
@@ -446,7 +396,6 @@ def _component_priors(
             "rushing_yards_per_carry": totals["rushing_yards"] / carries,
             "receiving_td_rate": totals["receiving_tds"] / targets,
             "rushing_td_rate": totals["rushing_tds"] / carries,
-            "red_zone_target_rate": totals["red_zone_targets"] / targets,
             "end_zone_target_rate": totals["end_zone_targets"] / targets,
             "end_zone_conversion_rate": totals["end_zone_receiving_tds"]
             / max(totals["end_zone_targets"], 1.0),
@@ -454,7 +403,6 @@ def _component_priors(
                 totals["receiving_tds"] - totals["end_zone_receiving_tds"], 0.0
             )
             / max(totals["targets"] - totals["end_zone_targets"], 1.0),
-            "red_zone_carry_rate": totals["red_zone_carries"] / carries,
             "goal_line_carry_rate": totals["goal_line_carries"] / carries,
             "goal_line_conversion_rate": totals["goal_line_rushing_tds"]
             / max(totals["goal_line_carries"], 1.0),
@@ -462,10 +410,7 @@ def _component_priors(
                 totals["rushing_tds"] - totals["goal_line_rushing_tds"], 0.0
             )
             / max(totals["carries"] - totals["goal_line_carries"], 1.0),
-            "bonus_per_opportunity": totals["bonus_pts"] / opportunity,
-            "bonus_pg": totals["bonus_pts"] / games,
             "passing_yards_pg": totals["passing_yards"] / games,
-            "passing_attempts_pg": totals["attempts"] / games,
             "passing_yards_per_attempt": totals["passing_yards"] / max(totals["attempts"], 1.0),
             "passing_td_per_attempt": totals["passing_tds"] / max(totals["attempts"], 1.0),
             "interception_per_attempt": totals["passing_interceptions"]
@@ -473,7 +418,6 @@ def _component_priors(
             "passing_tds_pg": totals["passing_tds"] / games,
             "passing_interceptions_pg": totals["passing_interceptions"] / games,
             "rushing_yards_pg": totals["rushing_yards"] / games,
-            "rushing_tds_pg": totals["rushing_tds"] / games,
             "floor_ratio": _bounded(totals["floor_ratio"] / games, 0.0, 1.0),
             "volatility_ratio": max(totals["volatility_ratio"] / games, 0.0),
             "residual_pg": totals["residual_points"] / games,
@@ -486,19 +430,12 @@ def _apply_team_override(
     override: TeamProjectionOverride | None,
 ) -> dict[str, float]:
     return {
-        "qb_context": profile.qb_context * (override.qb_context_multiplier if override else 1.0),
         "pass_volume": profile.pass_volume * (override.pass_volume_multiplier if override else 1.0),
         "dropbacks": profile.dropbacks * (override.pass_volume_multiplier if override else 1.0),
         "rush_volume": profile.rush_volume * (override.rush_volume_multiplier if override else 1.0),
         "scoring": profile.scoring * (override.scoring_multiplier if override else 1.0),
         "pass_td_rate": profile.pass_td_rate * (override.scoring_multiplier if override else 1.0),
         "rush_td_rate": profile.rush_td_rate * (override.scoring_multiplier if override else 1.0),
-        "target_availability_multiplier": (
-            override.target_availability_multiplier if override else 1.0
-        ),
-        "backfield_availability_multiplier": (
-            override.backfield_availability_multiplier if override else 1.0
-        ),
     }
 
 
@@ -508,43 +445,6 @@ def _depth_role_factor(rank: int | None, cap: float) -> float:
         return 1.0
     raw = {1: 1.0, 2: 0.93, 3: 0.82, 4: 0.72}.get(rank, 0.65)
     return _bounded(raw, 1.0 - cap, 1.0 + cap)
-
-
-def _depth_availability(
-    current_players: pl.DataFrame | None,
-) -> tuple[dict[str, float], dict[str, float]]:
-    """Translate the current offensive depth chart into teammate competition."""
-    if current_players is None or "depth_chart_position_group" not in current_players.columns:
-        return {}, {}
-
-    receiving: dict[str, dict[str, float]] = {}
-    backfields: dict[str, dict[str, float]] = {}
-    for row in current_players.iter_rows(named=True):
-        player_id = str(row.get("player_id") or "")
-        team = str(row.get("current_team") or "")
-        position = str(row.get("depth_chart_position_group") or "")
-        rank = max(int(row.get("depth_chart_rank") or 1), 1)
-        if not player_id or not team:
-            continue
-        if position in {"WR", "TE", "RB"}:
-            position_weight = {"WR": 1.0, "TE": 0.72, "RB": 0.42}[position]
-            receiving.setdefault(team, {})[player_id] = position_weight / rank**0.65
-        if position == "RB":
-            backfields.setdefault(team, {})[player_id] = 1.0 / rank**0.65
-
-    def player_availability(groups: dict[str, dict[str, float]]) -> dict[str, float]:
-        result: dict[str, float] = {}
-        for players in groups.values():
-            total = sum(players.values())
-            for player_id in players:
-                other = max(
-                    (value for key, value in players.items() if key != player_id),
-                    default=0.0,
-                )
-                result[player_id] = 1.0 - other / total if total > 0 else 1.0
-        return result
-
-    return player_availability(receiving), player_availability(backfields)
 
 
 def build_projection_board(
@@ -559,14 +459,13 @@ def build_projection_board(
     metrics = config.metrics
     profiles = _team_profiles(player_seasons)
     pools = _prior_rows(player_seasons, config)
-    position_ppg, _position_bonus = _position_means(pools)
+    position_ppg = _position_means(pools)
     component_priors = _component_priors(pools, profiles, config)
     current_by_player = (
         {str(row["player_id"]): row for row in current_players.iter_rows(named=True)}
         if current_players is not None
         else {}
     )
-    depth_target_availability, depth_backfield_availability = _depth_availability(current_players)
 
     board_keys = {
         (normalize(str(row["player_display_name"])), str(row["position"]).upper())
@@ -622,24 +521,14 @@ def build_projection_board(
         )
 
         latest = max(history, key=lambda row: int(row["season"]))
-        historical_bonus_pg = (
-            sum(
-                (_number(row.get("bonus_pts")) / max(_games_played(row), 1.0)) * weight
-                for row, weight in weighted
-            )
-            / total_weight
-        )
 
         source_context = {
-            "qb_context": 0.0,
             "pass_volume": 0.0,
             "dropbacks": 0.0,
             "rush_volume": 0.0,
             "scoring": 0.0,
             "pass_td_rate": 0.0,
             "rush_td_rate": 0.0,
-            "target_availability": 0.0,
-            "backfield_availability": 0.0,
         }
         context_weight = 0.0
         for row, weight in weighted:
@@ -647,27 +536,20 @@ def build_projection_board(
             if profile is None:
                 continue
             context_weight += weight
-            source_context["qb_context"] += profile.qb_context * weight
             source_context["pass_volume"] += profile.pass_volume * weight
             source_context["dropbacks"] += profile.dropbacks * weight
             source_context["rush_volume"] += profile.rush_volume * weight
             source_context["scoring"] += profile.scoring * weight
             source_context["pass_td_rate"] += profile.pass_td_rate * weight
             source_context["rush_td_rate"] += profile.rush_td_rate * weight
-            source_context["target_availability"] += profile.target_availability(player_id) * weight
-            source_context["backfield_availability"] += (
-                profile.backfield_availability(player_id) * weight
-            )
         if context_weight:
             source_context = {key: value / context_weight for key, value in source_context.items()}
 
         target_profile = profiles.get((config.board_season, projected_team))
         target_team_override = assumptions.teams.get(projected_team)
-        target_profile_known = target_profile is not None
         if target_profile is None:
             # Unknown future teams/rookies should not manufacture a context effect.
             target_profile = TeamProfile(
-                qb_context=source_context["qb_context"],
                 pass_volume=source_context["pass_volume"],
                 dropbacks=source_context["dropbacks"],
                 rush_volume=source_context["rush_volume"],
@@ -676,26 +558,6 @@ def build_projection_board(
                 rush_td_rate=source_context["rush_td_rate"],
             )
         target = _apply_team_override(target_profile, target_team_override)
-        target_availability = (
-            target_profile.target_availability(player_id)
-            if target_profile_known
-            else source_context["target_availability"]
-        )
-        backfield_availability = (
-            target_profile.backfield_availability(player_id)
-            if target_profile_known
-            else source_context["backfield_availability"]
-        )
-        if player_id in depth_target_availability:
-            target_availability = (
-                0.65 * depth_target_availability[player_id] + 0.35 * target_availability
-            )
-        if player_id in depth_backfield_availability:
-            backfield_availability = (
-                0.65 * depth_backfield_availability[player_id] + 0.35 * backfield_availability
-            )
-        target_availability *= target["target_availability_multiplier"]
-        backfield_availability *= target["backfield_availability_multiplier"]
         latest_source_profile = profiles.get(
             (config.board_season, str(base.get("team") or "").upper())
         )
@@ -752,8 +614,6 @@ def build_projection_board(
         weighted_receiving_tds = weighted_total("receiving_tds")
         weighted_rushing_tds = weighted_total("rushing_tds")
         weighted_pass_attempts = weighted_total("attempts")
-        weighted_bonus = weighted_total("bonus_pts")
-        weighted_opportunity = weighted_total("wtd_opp")
         weighted_route_opportunities = weighted_total("route_opportunities")
         weighted_end_zone_targets = weighted_total("end_zone_targets")
         weighted_end_zone_tds = weighted_total("end_zone_receiving_tds")
@@ -791,25 +651,11 @@ def build_projection_board(
             1.0 - carry_reliability
         ) * prior.get("carry_share", historical_carry_share)
 
-        historical_wopr = weighted_metric("wopr")
-        projected_wopr = target_reliability * historical_wopr + (
-            1.0 - target_reliability
-        ) * prior.get("wopr", historical_wopr)
-        prior_wopr = prior.get("wopr", 0.0)
-        wopr_equivalent_share = (
-            projected_wopr * prior.get("target_share", projected_target_share) / prior_wopr
-            if prior_wopr > 0
-            else projected_target_share
-        )
-        # WOPR contributes air-yard role information, but only as one quarter of the
-        # role estimate so target share is not counted twice at full strength.
-        projected_target_share = 0.75 * projected_target_share + 0.25 * wopr_equivalent_share
-        projected_target_share *= (
-            _ratio(target_availability, source_context["target_availability"]) ** 0.35
-        )
-        projected_carry_share *= (
-            _ratio(backfield_availability, source_context["backfield_availability"]) ** 0.40
-        )
+        # The former WOPR role blend and teammate-competition multipliers are gone:
+        # WOPR double-counted target share with air-yard information the air-yard
+        # factor already carries, and "strongest teammate share" tested inert in every
+        # era since 2004 (review §5, §6a). Competition enters only through the
+        # depth-chart role factor and the shrunk shares themselves.
         projected_target_share = _bounded(projected_target_share, 0.0, 0.45)
         projected_carry_share = _bounded(projected_carry_share, 0.0, 0.85)
 
@@ -819,12 +665,6 @@ def build_projection_board(
         team_carry_projection = projected_carry_share * target["rush_volume"]
         historical_targets_pg = weighted_targets / max(effective_games, 1.0)
         historical_carries_pg = weighted_carries / max(effective_games, 1.0)
-        # Raw weighted opportunity supplies a third, independent role anchor for
-        # receivers; converting it back to targets keeps the units interpretable.
-        opportunity_implied_targets = max(
-            (weighted_opportunity - weighted_carries) / 2.2 / max(effective_games, 1.0),
-            0.0,
-        )
         route_reliability = weighted_route_opportunities / (weighted_route_opportunities + 160.0)
         historical_route_participation = weighted_metric("route_participation")
         projected_route_participation = route_reliability * historical_route_participation + (
@@ -848,10 +688,11 @@ def build_projection_board(
             )
             projected_carries *= role_multiplier
         else:
+            # The former third anchor, "opportunity-implied targets", was weighted
+            # opportunity minus carries over 2.2 — algebraically targets again
+            # (review §5) — so its 0.15 weight folds into the target-rate term.
             baseline_target_projection = (
-                0.65 * team_target_projection
-                + 0.20 * historical_targets_pg * pass_volume_ratio
-                + 0.15 * opportunity_implied_targets * pass_volume_ratio
+                0.65 * team_target_projection + 0.35 * historical_targets_pg * pass_volume_ratio
             )
             route_weight = metrics.projection_route_weight if has_route_data else 0.0
             projected_targets = (
@@ -994,16 +835,6 @@ def build_projection_board(
             + (1.0 - rushing_high_value_weight) * projected_carries * projected_rushing_td_rate
         )
 
-        opportunity = weighted_targets + weighted_carries
-        bonus_reliability = opportunity / (opportunity + 120.0)
-        historical_bonus_rate = weighted_bonus / max(opportunity, 1.0)
-        projected_bonus_rate = bonus_reliability * historical_bonus_rate + (
-            1.0 - bonus_reliability
-        ) * prior.get("bonus_per_opportunity", historical_bonus_rate)
-        projected_bonus_pg = (
-            (projected_targets + projected_carries) * projected_bonus_rate * air_yard_factor
-        )
-
         historical_passing_yards_pg = weighted_total("passing_yards") / max(effective_games, 1.0)
         historical_passing_tds_pg = weighted_total("passing_tds") / max(effective_games, 1.0)
         historical_interceptions_pg = weighted_total("passing_interceptions") / max(
@@ -1050,10 +881,6 @@ def build_projection_board(
             projected_passing_yards = 0.0
             projected_passing_tds = 0.0
             projected_interceptions = 0.0
-        else:
-            projected_bonus_pg = reliability * historical_bonus_pg + (
-                1.0 - reliability
-            ) * prior.get("bonus_pg", historical_bonus_pg)
 
         historical_residual_points = sum(
             (
@@ -1079,7 +906,6 @@ def build_projection_board(
             + projected_receptions
             + 0.1 * projected_receiving_yards
             + 6.0 * projected_receiving_tds
-            + projected_bonus_pg
             + projected_residual_pg
         ) * age_factor
         if position == "QB":
@@ -1151,7 +977,6 @@ def build_projection_board(
         ) * prior.get("volatility_ratio", historical_volatility_ratio)
         projected_floor = proj_ppg * _bounded(projected_floor_ratio, 0.0, 1.0)
         projected_volatility = proj_ppg * _bounded(projected_volatility_ratio, 0.0, 1.5)
-        projected_ceiling = proj_ppg + 0.674 * projected_volatility
 
         moved = projected_team != str(base.get("team") or "").upper()
         confidence = reliability * (0.88 if moved else 1.0)
@@ -1186,7 +1011,6 @@ def build_projection_board(
                 "component_proj_ppg": component_projection,
                 PROJECTED_PPG: proj_ppg,
                 "projected_floor": projected_floor,
-                "projected_ceiling": projected_ceiling,
                 "projected_volatility": projected_volatility,
                 "projection_confidence": _bounded(confidence, 0.0, 1.0),
                 "availability_confidence": availability_reliability,
@@ -1196,18 +1020,14 @@ def build_projection_board(
                 "injury_missed_equivalents": injury_missed_equivalents,
                 "effective_games": effective_games,
                 "age_factor": age_factor,
-                "qb_context": target["qb_context"],
                 "team_scoring_context": target["scoring"],
                 "team_pass_volume": target["pass_volume"],
                 "team_dropbacks": target["dropbacks"],
                 "team_rush_volume": target["rush_volume"],
-                "teammate_competition": 1.0
-                - (backfield_availability if position == "RB" else target_availability),
                 "season_target_share": season_target_share,
                 "season_carry_share": season_carry_share,
                 "projected_target_share": projected_target_share,
                 "projected_carry_share": projected_carry_share,
-                "projected_wopr": projected_wopr,
                 "projected_air_yards_share": projected_air_share,
                 "projected_targets_pg": projected_targets,
                 "projected_route_opportunities_pg": projected_route_opportunities,
@@ -1227,7 +1047,6 @@ def build_projection_board(
                 "projected_passing_yards_pg": projected_passing_yards,
                 "projected_passing_tds_pg": projected_passing_tds,
                 "projected_interceptions_pg": projected_interceptions,
-                "projected_bonus_pg": projected_bonus_pg,
                 "air_yard_factor": air_yard_factor,
                 "opportunity_multiplier": manual_role_multiplier,
                 "projection_reason": " | ".join(reasons) or None,

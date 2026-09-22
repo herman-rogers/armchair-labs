@@ -9,6 +9,7 @@ import {
   rankBasisTitle,
 } from '../metricPresentation'
 import {
+  ESPN_RANK,
   FLAGS_COLUMN,
   IDENTITY,
   PlayerTable,
@@ -18,6 +19,7 @@ import {
 
 const COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
+  ESPN_RANK,
   {
     key: 'adj_vor',
     label: 'VOR',
@@ -53,6 +55,7 @@ const COLUMNS: PlayerColumn[] = [
 
 const V2_COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
+  ESPN_RANK,
   {
     key: 'v2_overall_vor',
     label: 'Overall VOR',
@@ -107,6 +110,7 @@ const V2_COLUMNS: PlayerColumn[] = [
     title: 'ESPN market usage; displayed but not used by V2.',
     render: (p) => <span className="dim">{number(p.percent_started, 0)}</span>,
   },
+  FLAGS_COLUMN,
 ]
 
 /** One team's roster, joined to the board, decisions first. */
@@ -149,13 +153,14 @@ export function RosterPanel({
       )}
       <PlayerTable
         players={roster.data.players}
-        columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
-        defaultSort={version === 'v2' ? 'v2_overall_vor' : 'adj_vor'}
-        emptyMessage="No ranked players on this roster."
+        columns={version !== 'v1' ? V2_COLUMNS : COLUMNS}
+        defaultSort="rank"
+        emptyMessage="No skill players on this roster."
       />
       <p className="legend tight faint">
-        Only players the board can rank appear here. Rookies and anyone without prior-season
-        tape are on the roster but unrankable — see the wire tab for that list.
+        Rookies and players without prior NFL production remain visible as ESPN-only.
+        ESPN’s current PPR draft rank places them in the list; their model metrics stay
+        blank and lineup comparisons still report them as unrankable.
       </p>
     </section>
   )

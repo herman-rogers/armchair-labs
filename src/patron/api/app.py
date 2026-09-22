@@ -51,7 +51,8 @@ app.add_middleware(
 app.include_router(league_router)
 
 
-MetricVersion = Literal["v1", "v2"]
+MetricVersion = Literal["v1", "v2", "adaptive"]
+METRIC_VERSIONS: tuple[MetricVersion, ...] = ("v1", "v2", "adaptive")
 
 
 def board_path(version: MetricVersion = "v1") -> Path:
@@ -98,7 +99,7 @@ def load_metric_report() -> dict[str, Any]:
 @app.get("/api/status")
 def status() -> dict[str, Any]:
     """Whether a board exists, when it was built, and under what league settings."""
-    paths = {version: board_path(version) for version in ("v1", "v2")}
+    paths = {version: board_path(version) for version in METRIC_VERSIONS}
     config = get_league()
     available = {version: path.exists() for version, path in paths.items()}
     built = any(available.values())
@@ -125,7 +126,7 @@ def status() -> dict[str, Any]:
                 "available": available[version],
                 "player_count": len(load_board(version)) if available[version] else 0,
             }
-            for version in ("v1", "v2")
+            for version in METRIC_VERSIONS
         },
         "metric_report": {
             "available": report_path.exists(),
@@ -211,7 +212,7 @@ def positions(
             {
                 "count": 0,
                 "replacement_ppg": (
-                    row.get("proj_repl_ppg") if version == "v2" else row.get("repl_ppg")
+                    row.get("proj_repl_ppg") if version != "v1" else row.get("repl_ppg")
                 ),
             },
         )

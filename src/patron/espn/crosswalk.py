@@ -49,6 +49,16 @@ ESPN_TEAM = "espn_team"
 INJURY_STATUS = "injury_status"
 PERCENT_OWNED = "percent_owned"
 CHANGED_TEAM = "changed_team"
+ESPN_DRAFT_RANK = "espn_draft_rank"
+ESPN_POSITION_RANK = "espn_position_rank"
+ESPN_ADP = "espn_adp"
+RANK_SOURCE = "rank_source"
+ESPN_FALLBACK = "espn_fallback"
+
+ESPN_FALLBACK_REASON = (
+    "No prior NFL production is available to the Patron model; placed by ESPN's "
+    "current PPR draft-room rank."
+)
 
 
 #: Positions the board ranks. Kickers and defenses are deliberately excluded — this
@@ -212,6 +222,111 @@ def attach_ownership(
             return_dtype=pl.Boolean,
         )
         .alias(CHANGED_TEAM),
+    )
+
+
+def append_espn_fallbacks(
+    tagged_board: pl.DataFrame,
+    espn_players: pl.DataFrame,
+    my_team_id: int | None = None,
+) -> pl.DataFrame:
+    """Add ESPN skill players the production model cannot score.
+
+    These rows intentionally do not invent football metrics. They carry null model
+    values, a synthetic ESPN-scoped id, and an explicit source/note. ESPN's current
+    PPR draft-room ordinal determines where each fallback row enters the otherwise
+    unchanged Patron order.
+    """
+    # The board already tags market-placed players (`rank_source = market`); keep that
+    # and label everything else model-backed. ESPN's draft-room fallback below is only
+    # for players neither the model nor the consensus market could place.
+    existing = (
+        pl.col(RANK_SOURCE).cast(pl.String)
+        if RANK_SOURCE in tagged_board.columns
+        else pl.lit(None, dtype=pl.String)
+    )
+    model = tagged_board.with_columns(
+        pl.coalesce(existing, pl.lit("model")).alias(RANK_SOURCE),
+        pl.lit(False).alias(ESPN_FALLBACK),
+    )
+    missing = espn_players.filter(
+        pl.col("player_id").is_null() & pl.col("position").is_in(RANKED_POSITIONS)
+    ).unique(subset=[ESPN_ID], keep="first")
+    if missing.is_empty():
+        return model
+
+    metric_version = (
+        model["metric_version"][0] if "metric_version" in model.columns and model.height else None
+    )
+    fallback_rows: list[dict[str, object]] = []
+    for row in missing.iter_rows(named=True):
+        owner_team_id = row.get(OWNER_TEAM_ID)
+        espn_id = row.get(ESPN_ID)
+        position_rank = row.get(ESPN_POSITION_RANK)
+        fallback_rows.append(
+            {
+                **row,
+                "player_id": f"espn:{espn_id}",
+                "team": row.get(ESPN_TEAM),
+                "metric_version": metric_version,
+                "flags": "ESPN-only",
+                "override_reason": ESPN_FALLBACK_REASON,
+                "projection_reason": ESPN_FALLBACK_REASON,
+                "v2_rank_key": "espn_ppr_rank",
+                "v2_position_rank": position_rank,
+                AVAILABILITY: ROSTERED if owner_team_id is not None else FREE_AGENT,
+                IS_FREE_AGENT: owner_team_id is None,
+                IS_MINE: owner_team_id == my_team_id if my_team_id is not None else False,
+                CHANGED_TEAM: False,
+                RANK_SOURCE: "espn_ppr",
+                ESPN_FALLBACK: True,
+            }
+        )
+
+    fallback = pl.DataFrame(fallback_rows, infer_schema_length=None)
+    combined = pl.concat([model, fallback], how="diagonal_relaxed")
+
+    # Insert at ESPN's ordinal without reordering model-backed players relative to one
+    # another. Multiple ESPN rows sharing an ordinal remain stably ESPN-ordered.
+    model_ids = (
+        model.sort("rank")["player_id"].to_list()
+        if "rank" in model.columns
+        else model["player_id"].to_list()
+    )
+    ranked_fallbacks: list[tuple[str, int]] = []
+    unranked_fallbacks: list[str] = []
+    sort_columns = [ESPN_DRAFT_RANK]
+    descending = [False]
+    if PERCENT_OWNED in fallback.columns:
+        sort_columns.append(PERCENT_OWNED)
+        descending.append(True)
+    fallback_sort = fallback.sort(sort_columns, descending=descending, nulls_last=True)
+    for player_id, draft_rank in fallback_sort.select("player_id", ESPN_DRAFT_RANK).iter_rows():
+        if draft_rank is None:
+            unranked_fallbacks.append(player_id)
+        else:
+            ranked_fallbacks.append((player_id, max(1, int(draft_rank))))
+
+    ordered_ids: list[str] = []
+    model_index = 0
+    for player_id, desired_rank in ranked_fallbacks:
+        while model_index < len(model_ids) and len(ordered_ids) + 1 < desired_rank:
+            ordered_ids.append(model_ids[model_index])
+            model_index += 1
+        ordered_ids.append(player_id)
+    ordered_ids.extend(model_ids[model_index:])
+    ordered_ids.extend(unranked_fallbacks)
+
+    order = {player_id: index for index, player_id in enumerate(ordered_ids)}
+    return (
+        combined.with_columns(
+            pl.col("player_id")
+            .replace_strict(order, default=len(order), return_dtype=pl.Int64)
+            .alias("_display_order")
+        )
+        .sort("_display_order")
+        .with_columns(pl.int_range(1, pl.len() + 1, dtype=pl.Int64).alias("rank"))
+        .drop("_display_order")
     )
 
 

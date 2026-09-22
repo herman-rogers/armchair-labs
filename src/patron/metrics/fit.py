@@ -18,9 +18,10 @@ the whole training window.
 Models are declared as specs (``config/metric_report.yaml`` → ``fit.models``).  A
 ``ridge`` spec names a target and features; a ``product`` spec multiplies earlier
 outputs, which is how season-point projections are composed from a per-game model and
-an availability model without feeding availability into the per-game fit twice.  The
-fit is deliberately small and linear so the learned weights are readable and their
-year-to-year stability is itself evidence.
+an availability model without feeding availability into the per-game fit twice.
+    ``adaptive_select`` can choose among earlier outputs using only the completed folds
+    before each forecast.  The fit is deliberately small and readable so year-to-year
+    stability is itself evidence.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+from scipy.stats import rankdata
 
 FITTED_PPG = "fitted_ppg"
 FITTED_SEASON_POINTS = "fitted_season_points"
@@ -66,7 +68,9 @@ class ModelSpec:
     ``ridge``: regress ``target`` on ``features``.  ``absent_as_zero`` trains on every
     row of a completed fold, scoring players who never appeared as zero (the honest
     season-points population); ``played_only`` trains only on players who did appear.
-    ``product``: multiply the named earlier outputs.  ``clip`` bounds the prediction.
+    ``product``: multiply the named earlier outputs. ``coalesce``: take the first
+    present output, used to combine mutually exclusive rookie and returner models.
+    ``clip`` bounds the prediction.
     """
 
     name: str
@@ -78,7 +82,20 @@ class ModelSpec:
     clip: tuple[float | None, float | None] = (None, None)
     lambda_grid: tuple[float, ...] = _DEFAULT_GRID
     factors: tuple[str, ...] = ()
+    by_position: tuple[tuple[str, str], ...] = ()
+    fallback: str | None = None
+    selection_metric: str = "hit_rate"
+    selection_top_k: tuple[tuple[str, int], ...] = ()
     apply_live: bool = True
+    # Train and predict only on rows where these features are present (e.g. a market
+    # feature that exists from 2021), instead of imputing the training mean.
+    require_features: tuple[str, ...] = ()
+    # Optional broad research pool. Features are ranked against the target using only
+    # the outer fold's historical rows, then capped before ridge fitting.
+    feature_prefixes: tuple[str, ...] = ()
+    max_features: int | None = None
+    # Override the global minimum number of completed folds before scoring.
+    min_train_folds: int | None = None
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> ModelSpec:
@@ -96,7 +113,25 @@ class ModelSpec:
             ),
             lambda_grid=tuple(float(v) for v in (raw.get("lambda_grid") or _DEFAULT_GRID)),
             factors=tuple(raw.get("factors") or ()),
+            by_position=tuple(
+                (str(position), str(source))
+                for position, source in (raw.get("by_position") or {}).items()
+            ),
+            fallback=str(raw["fallback"]) if raw.get("fallback") else None,
+            selection_metric=str(raw.get("selection_metric") or "hit_rate"),
+            selection_top_k=tuple(
+                (str(position), int(k))
+                for position, k in (raw.get("selection_top_k") or {}).items()
+            ),
             apply_live=bool(raw.get("apply_live", True)),
+            require_features=tuple(raw.get("require_features") or ()),
+            feature_prefixes=tuple(raw.get("feature_prefixes") or ()),
+            max_features=(
+                int(raw["max_features"]) if raw.get("max_features") is not None else None
+            ),
+            min_train_folds=(
+                int(raw["min_train_folds"]) if raw.get("min_train_folds") is not None else None
+            ),
         )
 
 
@@ -190,19 +225,20 @@ class FitConfig:
         if not raw:
             return cls()
         defaults = cls()
-        shared = {
-            "min_train_folds": int(raw.get("min_train_folds", defaults.min_train_folds)),
-            "min_position_rows": int(raw.get("min_position_rows", defaults.min_position_rows)),
-            "per_position": bool(raw.get("per_position", defaults.per_position)),
-            "positions": tuple(raw.get("positions") or defaults.positions),
-        }
+        min_train_folds = int(raw.get("min_train_folds", defaults.min_train_folds))
+        min_position_rows = int(raw.get("min_position_rows", defaults.min_position_rows))
+        per_position = bool(raw.get("per_position", defaults.per_position))
+        positions = tuple(str(value) for value in (raw.get("positions") or defaults.positions))
         if raw.get("models"):
             return cls(
                 models=tuple(ModelSpec.from_raw(entry) for entry in raw["models"]),
                 inner_validation_folds=int(
                     raw.get("inner_validation_folds", defaults.inner_validation_folds)
                 ),
-                **shared,
+                min_train_folds=min_train_folds,
+                min_position_rows=min_position_rows,
+                per_position=per_position,
+                positions=positions,
             )
         return cls(
             features=tuple(raw["features"]) if raw.get("features") else None,
@@ -210,7 +246,10 @@ class FitConfig:
             ridge_lambda=float(raw["ridge_lambda"])
             if raw.get("ridge_lambda") is not None
             else None,
-            **shared,
+            min_train_folds=min_train_folds,
+            min_position_rows=min_position_rows,
+            per_position=per_position,
+            positions=positions,
         )
 
     @property
@@ -282,8 +321,14 @@ class RidgeModel:
         )
 
 
+def _has_required(row: dict[str, Any], spec: ModelSpec) -> bool:
+    return all(_number(row.get(feature)) is not None for feature in spec.require_features)
+
+
 def _training_target(row: dict[str, Any], spec: ModelSpec) -> float | None:
     """The outcome a row contributes to training, or None to exclude it."""
+    if not _has_required(row, spec):
+        return None
     if spec.played_only and not (_number(row.get("actual_games")) or 0.0) > 0:
         return None
     value = _number(row.get(spec.target))
@@ -347,6 +392,39 @@ def fit_ridge(
     )
 
 
+def _select_model_features(
+    rows: list[dict[str, Any]],
+    candidates: tuple[str, ...],
+    spec: ModelSpec,
+) -> tuple[str, ...]:
+    """Select a bounded feature set using only the current outer training window."""
+    if spec.max_features is None or len(candidates) <= spec.max_features:
+        return candidates
+    samples = [(row, y) for row in rows if (y := _training_target(row, spec)) is not None]
+    if not samples:
+        return candidates[: spec.max_features]
+    targets = np.array([y for _, y in samples], dtype=float)
+    ranked_target = rankdata(targets)
+    scores: list[tuple[str, float]] = []
+    for feature in candidates:
+        values = np.array(
+            [
+                np.nan if (value := _number(row.get(feature))) is None else value
+                for row, _ in samples
+            ],
+            dtype=float,
+        )
+        present = np.isfinite(values)
+        if present.mean() < 0.25 or np.unique(values[present]).size < 3:
+            continue
+        correlation = np.corrcoef(rankdata(values[present]), ranked_target[present])[0, 1]
+        if math.isfinite(float(correlation)):
+            scores.append((feature, abs(float(correlation))))
+    scores.sort(key=lambda item: (-item[1], item[0]))
+    selected = tuple(feature for feature, _ in scores[: spec.max_features])
+    return selected or candidates[: spec.max_features]
+
+
 def _select_lambda(
     train_by_season: dict[int, list[dict[str, Any]]],
     spec: ModelSpec,
@@ -392,6 +470,85 @@ def _with_played_flag(predictions: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def _selector_fold_score(
+    rows: list[dict[str, Any]], source: str, target: str, k: int
+) -> tuple[float, float] | None:
+    """Top-k hit rate and NDCG for one past position-season.
+
+    This intentionally mirrors the report's two primary ranking measures while
+    remaining local to the fitter (and therefore avoiding a fit/backtest import
+    cycle).  The selector never sees the season it is choosing for.
+    """
+    scored = [
+        (predicted, actual, index)
+        for index, row in enumerate(rows)
+        if (predicted := _number(row.get(source))) is not None
+        and (actual := _number(row.get(target))) is not None
+    ]
+    if k <= 0 or len(scored) < k:
+        return None
+    by_source = sorted(scored, key=lambda item: item[0], reverse=True)
+    by_actual = sorted(scored, key=lambda item: item[1], reverse=True)
+    actual_top = {item[2] for item in by_actual[:k]}
+    hit_rate = sum(item[2] in actual_top for item in by_source[:k]) / k
+    discounts = [1.0 / math.log2(index + 2) for index in range(k)]
+    gains = [max(item[1], 0.0) for item in by_source[:k]]
+    ideal_gains = [max(item[1], 0.0) for item in by_actual[:k]]
+    ideal = sum(gain * discount for gain, discount in zip(ideal_gains, discounts, strict=True))
+    ndcg = (
+        sum(gain * discount for gain, discount in zip(gains, discounts, strict=True)) / ideal
+        if ideal > 0
+        else 0.0
+    )
+    return hit_rate, ndcg
+
+
+def _choose_adaptive_source(
+    completed_by_season: dict[int, list[dict[str, Any]]],
+    season: int,
+    position: str,
+    spec: ModelSpec,
+    min_folds: int,
+) -> tuple[str | None, float | None, int]:
+    """Choose a source from expanding-window ranking results, never future folds."""
+    top_k = dict(spec.selection_top_k).get(position)
+    if top_k is None:
+        return spec.fallback, None, 0
+    best_source: str | None = None
+    best_key = (-math.inf, -math.inf, -math.inf)
+    best_score: float | None = None
+    best_folds = 0
+    for order, source in enumerate(spec.factors):
+        fold_scores = []
+        for prior in sorted(completed_by_season):
+            if prior >= season:
+                continue
+            rows = [
+                row for row in completed_by_season[prior] if str(row.get("position")) == position
+            ]
+            score = _selector_fold_score(rows, source, spec.target, top_k)
+            if score is not None:
+                fold_scores.append(score)
+        if len(fold_scores) < min_folds:
+            continue
+        mean_hit = sum(score[0] for score in fold_scores) / len(fold_scores)
+        mean_ndcg = sum(score[1] for score in fold_scores) / len(fold_scores)
+        primary, secondary = (
+            (mean_ndcg, mean_hit)
+            if spec.selection_metric == "ndcg"
+            else (mean_hit, mean_ndcg)
+        )
+        # Config order is a deterministic conservative tie-break: put the incumbent
+        # first and a challenger must actually outperform it on past folds.
+        key = (primary, secondary, -float(order))
+        if key > best_key:
+            best_key = key
+            best_source = source
+            best_score = primary
+            best_folds = len(fold_scores)
+    return best_source or spec.fallback, best_score, best_folds
+
+
 def fit_walk_forward(
     predictions: pl.DataFrame,
     config: FitConfig,
@@ -410,24 +567,132 @@ def fit_walk_forward(
             completed_by_season.setdefault(int(row["forecast_season"]), []).append(row)
 
     outputs: dict[str, list[float | None]] = {}
+    # Later ridge specs may stack earlier walk-forward outputs.  Those inputs are
+    # honest out-of-fold predictions for every completed training season: the base
+    # model that scored season S was itself fitted only on seasons before S.  Keeping
+    # the evolving set explicit prevents a stack from accidentally referring forward
+    # to an output that has not been generated yet.
+    available_columns = set(predictions.columns)
     models: list[dict[str, Any]] = []
     for spec in config.models:
-        if spec.kind == "product":
+        if spec.kind == "adaptive_select":
+            if spec.target not in predictions.columns:
+                continue
+            adaptive_sources = tuple(
+                source for source in spec.factors if source in available_columns
+            )
+            if not adaptive_sources:
+                continue
+            selector_spec = ModelSpec(**{**asdict(spec), "factors": adaptive_sources})
+            min_folds = spec.min_train_folds or config.min_train_folds
+            choices: dict[tuple[int, str], str | None] = {}
+            for season in seasons:
+                for position in config.positions:
+                    source, score, folds = _choose_adaptive_source(
+                        completed_by_season,
+                        season,
+                        position,
+                        selector_spec,
+                        min_folds,
+                    )
+                    choices[(season, position)] = source
+                    models.append(
+                        {
+                            "model": spec.name,
+                            "kind": "adaptive_select",
+                            "forecast_season": season,
+                            "position": position,
+                            "selected_source": source,
+                            "selection_target": spec.target,
+                            "selection_metric": spec.selection_metric,
+                            "selection_score": score,
+                            "selection_folds": folds,
+                        }
+                    )
+            adaptive_values: list[float | None] = []
+            for row in records:
+                key = (int(row["forecast_season"]), str(row.get("position")))
+                source = choices.get(key) or spec.fallback
+                value = _number(row.get(source)) if source else None
+                if value is None and spec.fallback:
+                    value = _number(row.get(spec.fallback))
+                adaptive_values.append(value)
+                row[spec.name] = value
+            outputs[spec.name] = adaptive_values
+            available_columns.add(spec.name)
             continue
-        features = tuple(f for f in spec.features if f in predictions.columns)
-        if not features or spec.target not in predictions.columns:
+        if spec.kind == "position_select":
+            fixed_sources = dict(spec.by_position)
+            selector_values: list[float | None] = []
+            for row in records:
+                source = fixed_sources.get(str(row.get("position")), spec.fallback)
+                value = _number(row.get(source)) if source else None
+                if value is None and spec.fallback:
+                    value = _number(row.get(spec.fallback))
+                selector_values.append(value)
+                row[spec.name] = value
+            outputs[spec.name] = selector_values
+            available_columns.add(spec.name)
+            continue
+        if spec.kind == "coalesce":
+            coalesced: list[float | None] = []
+            for row in records:
+                value = next(
+                    (
+                        present
+                        for source in spec.factors
+                        if (present := _number(row.get(source))) is not None
+                    ),
+                    None,
+                )
+                coalesced.append(value)
+                row[spec.name] = value
+            outputs[spec.name] = coalesced
+            available_columns.add(spec.name)
+            continue
+        if spec.kind == "product":
+            if not all(factor in available_columns for factor in spec.factors):
+                continue
+            product_values: list[float | None] = []
+            for row in records:
+                factors = [_number(row.get(factor)) for factor in spec.factors]
+                value = (
+                    math.prod(float(factor) for factor in factors if factor is not None)
+                    if all(factor is not None for factor in factors)
+                    else None
+                )
+                product_values.append(value)
+                row[spec.name] = value
+            outputs[spec.name] = product_values
+            available_columns.add(spec.name)
+            continue
+        features = tuple(f for f in spec.features if f in available_columns)
+        prefixed = tuple(
+            name
+            for name in sorted(available_columns)
+            if any(name.startswith(prefix) for prefix in spec.feature_prefixes)
+            and name not in features
+        )
+        candidates = (*features, *prefixed)
+        if not candidates or spec.target not in predictions.columns:
             continue
         fitted: list[float | None] = [None] * len(records)
+        min_folds = spec.min_train_folds or config.min_train_folds
         for season in seasons:
-            train_seasons = [s for s in completed_by_season if s < season]
-            if len(train_seasons) < config.min_train_folds:
+            train_seasons = [
+                s
+                for s in completed_by_season
+                if s < season and any(_has_required(row, spec) for row in completed_by_season[s])
+            ]
+            if len(train_seasons) < min_folds:
                 continue
             train_by_season = {s: completed_by_season[s] for s in train_seasons}
             train = [row for s in train_seasons for row in completed_by_season[s]]
+            pooled_features = _select_model_features(train, candidates, spec)
             pooled_lambda = _select_lambda(
-                train_by_season, spec, features, config.inner_validation_folds
+                train_by_season, spec, pooled_features, config.inner_validation_folds
             )
-            pooled = fit_ridge(train, features, spec.target, pooled_lambda, spec)
+            pooled = fit_ridge(train, pooled_features, spec.target, pooled_lambda, spec)
             by_position: dict[str, RidgeModel | None] = {}
             for position in config.positions:
                 model = None
@@ -438,10 +703,20 @@ def fit_walk_forward(
                     }
                     subset = [row for rows in subset_by_season.values() for row in rows]
                     if len(subset) >= config.min_position_rows:
+                        position_features = _select_model_features(subset, candidates, spec)
                         chosen_lambda = _select_lambda(
-                            subset_by_season, spec, features, config.inner_validation_folds
+                            subset_by_season,
+                            spec,
+                            position_features,
+                            config.inner_validation_folds,
                         )
-                        model = fit_ridge(subset, features, spec.target, chosen_lambda, spec)
+                        model = fit_ridge(
+                            subset,
+                            position_features,
+                            spec.target,
+                            chosen_lambda,
+                            spec,
+                        )
                 by_position[position] = model or pooled
                 chosen = by_position[position]
                 if chosen is not None:
@@ -459,9 +734,10 @@ def fit_walk_forward(
                 if int(row["forecast_season"]) != season:
                     continue
                 model = by_position.get(str(row.get("position")), pooled)
-                if model is not None:
+                if model is not None and _has_required(row, spec):
                     fitted[index] = model.predict(row)
         outputs[spec.name] = fitted
+        available_columns.add(spec.name)
         for index, row in enumerate(records):
             row[spec.name] = fitted[index]
 
@@ -494,6 +770,27 @@ def summarize_fitted_models(models: list[dict[str, Any]]) -> list[dict[str, Any]
             key=lambda m: m["forecast_season"],
         )
         latest = history[-1]
+        if latest.get("kind") == "adaptive_select":
+            counts: dict[str, int] = {}
+            for record in history:
+                source = str(record.get("selected_source") or "fallback")
+                counts[source] = counts.get(source, 0) + 1
+            summary.append(
+                {
+                    "model": name,
+                    "position": position,
+                    "latest_forecast_season": latest["forecast_season"],
+                    "kind": "adaptive_select",
+                    "selected_source": latest.get("selected_source"),
+                    "selection_target": latest.get("selection_target"),
+                    "selection_metric": latest.get("selection_metric"),
+                    "selection_score": latest.get("selection_score"),
+                    "selection_folds": latest.get("selection_folds"),
+                    "selected_source_counts": counts,
+                    "refits": len(history),
+                }
+            )
+            continue
         stability: dict[str, float] = {}
         for feature in latest["coefficients"]:
             values = [m["coefficients"].get(feature) for m in history]
@@ -503,7 +800,11 @@ def summarize_fitted_models(models: list[dict[str, Any]]) -> list[dict[str, Any]
                 stability[feature] = round(
                     math.sqrt(sum((v - mean) ** 2 for v in values) / len(values)), 4
                 )
-        lambdas = sorted({m.get("ridge_lambda") for m in history if m.get("ridge_lambda")})
+        lambdas = sorted(
+            float(value)
+            for m in history
+            if (value := _number(m.get("ridge_lambda"))) is not None
+        )
         summary.append(
             {
                 "model": name,
@@ -549,18 +850,63 @@ def apply_fitted_models(
     rows = board.to_dicts()
     frame = board
     for spec in config.models:
+        if spec.kind == "adaptive_select":
+            if spec.apply_live:
+                raise ValueError("adaptive_select models must remain report-only")
+            frame = frame.with_columns(pl.lit(None, dtype=pl.Float64).alias(spec.name))
+            continue
+        if spec.kind == "position_select":
+            if not spec.apply_live:
+                position_values: list[float | None] = [None] * len(rows)
+            else:
+                sources = dict(spec.by_position)
+                position_values = []
+                for row in rows:
+                    source = sources.get(str(row.get("position")), spec.fallback)
+                    value = _number(row.get(source)) if source else None
+                    if value is None and spec.fallback:
+                        value = _number(row.get(spec.fallback))
+                    position_values.append(value)
+            frame = frame.with_columns(pl.Series(spec.name, position_values, dtype=pl.Float64))
+            for row, value in zip(rows, position_values, strict=True):
+                row[spec.name] = value
+            continue
+        if spec.kind == "coalesce":
+            values: list[float | None]
+            if not spec.apply_live:
+                values = [None] * len(rows)
+            else:
+                values = [
+                    next(
+                        (
+                            present
+                            for source in spec.factors
+                            if (present := _number(row.get(source))) is not None
+                        ),
+                        None,
+                    )
+                    for row in rows
+                ]
+            frame = frame.with_columns(pl.Series(spec.name, values, dtype=pl.Float64))
+            for row, value in zip(rows, values, strict=True):
+                row[spec.name] = value
+            continue
         if spec.kind == "product":
             continue
         if not spec.apply_live:
             frame = frame.with_columns(pl.lit(None, dtype=pl.Float64).alias(spec.name))
             continue
         by_position = models.get(spec.name, {})
-        values = [
-            (model.predict(row) if (model := by_position.get(str(row.get("position")))) else None)
+        model_values: list[float | None] = [
+            (
+                model.predict(row)
+                if (model := by_position.get(str(row.get("position")))) and _has_required(row, spec)
+                else None
+            )
             for row in rows
         ]
-        frame = frame.with_columns(pl.Series(spec.name, values, dtype=pl.Float64))
-        for row, value in zip(rows, values, strict=True):
+        frame = frame.with_columns(pl.Series(spec.name, model_values, dtype=pl.Float64))
+        for row, value in zip(rows, model_values, strict=True):
             row[spec.name] = value
     return _apply_products(frame, config)
 
@@ -591,11 +937,14 @@ def build_fit_artifact(
     cutoff or snapshot must be rejected, not silently applied.
     """
     pending = predictions.filter(~pl.col("outcome_complete"))
-    pending_season = int(pending["forecast_season"].max()) if pending.height else None
+    pending_value = _number(pending["forecast_season"].max()) if pending.height else None
+    pending_season = int(pending_value) if pending_value is not None else None
     depth_latest = None
     if pending.height and "depth_chart_date" in pending.columns:
         depth_latest = pending["depth_chart_date"].cast(pl.String).max()
     completed = predictions.filter(pl.col("outcome_complete"))["forecast_season"]
+    completed_min = _number(completed.min()) if completed.len() else None
+    completed_max = _number(completed.max()) if completed.len() else None
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "model_version": MODEL_VERSION,
@@ -612,9 +961,11 @@ def build_fit_artifact(
         "created_at": datetime.now(UTC).isoformat(),
         "pending_forecast_season": pending_season,
         "pending_rows": pending.height,
-        "completed_forecast_seasons": [int(completed.min()), int(completed.max())]
-        if completed.len()
-        else [],
+        "completed_forecast_seasons": (
+            [int(completed_min), int(completed_max)]
+            if completed_min is not None and completed_max is not None
+            else []
+        ),
         "depth_chart_cutoff": depth_chart_cutoff,
         "depth_chart_latest": depth_latest,
     }

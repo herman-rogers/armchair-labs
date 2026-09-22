@@ -149,13 +149,13 @@ export function WirePanel({ version }: { version: MetricVersion }) {
           .map(([pos, ppg]) => `${pos} ${ppg.toFixed(1)}`)
           .join(' · ')}{' '}
         — the configured replacement slot within the players currently unowned, not the
-        best free agent and not the preseason pool. {version === 'v2' &&
+        best free agent and not the preseason pool. {version !== 'v1' &&
           'Both the pool baseline and Wire VOR use availability-adjusted season-equivalent PPG.'}
       </p>
 
       <PlayerTable
         players={players}
-        columns={version === 'v2' ? V2_COLUMNS : COLUMNS}
+        columns={version !== 'v1' ? V2_COLUMNS : COLUMNS}
         defaultSort="wire_vor"
         emptyMessage="No ranked free agents at this position."
       />

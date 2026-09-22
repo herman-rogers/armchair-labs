@@ -122,3 +122,69 @@ def test_fitted_models_apply_to_a_live_board_from_their_record() -> None:
     # No games model was supplied, so the product output is null rather than a guess.
     assert wr["fitted_season_points"] is None
     assert rb["fitted_ppg"] is None and rb["fitted_season_points"] is None
+
+
+def test_market_only_players_are_rank_matched_and_tagged(league_config) -> None:
+    """A rookie the market ranks lands where the board already places similar market ranks."""
+    from patron.board.rank import OVERALL_VOR, RANK_SOURCE
+
+    rows = []
+    # Five rated WRs with market ranks 1..5 and VOR 10..2.
+    for index in range(5):
+        rows.append(
+            {
+                "player_id": f"wr{index}",
+                "position": "WR",
+                "games": 17,
+                "override_delta": 0.0,
+                "adj_proj_vor": 10.0 - 2 * index,
+                "fitted_ppg": 20.0 - 2 * index,
+                "fitted_season_points": (20.0 - 2 * index) * 17,
+                "market_ecr": float(index + 1),
+            }
+        )
+    # A rookie the market puts between WR2 and WR3, with no model values at all.
+    rows.append(
+        {
+            "player_id": "rookie",
+            "position": "WR",
+            "games": 0,
+            "override_delta": 0.0,
+            "adj_proj_vor": None,
+            "fitted_ppg": None,
+            "fitted_season_points": None,
+            "market_ecr": 2.5,
+        }
+    )
+    # And one nobody ranks.
+    rows.append({**rows[-1], "player_id": "ghost", "market_ecr": None})
+    cfg = league_config.model_copy(
+        update={
+            "vor_baseline_rank": {"WR": 3},
+            "min_games_baseline": 8,
+            "metrics": league_config.metrics.model_copy(
+                update={
+                    "projection_rank_key": {"WR": "fitted_season_points"},
+                    "projection_rank_fallback": "adj_proj_vor",
+                    "projection_overall_key": "fitted_season_points",
+                    "projection_season_games": 17,
+                }
+            ),
+        }
+    )
+    ranked = apply_rank_key(pl.DataFrame(rows), cfg)
+    by_id = {row["player_id"]: row for row in ranked.iter_rows(named=True)}
+
+    rookie = by_id["rookie"]
+    assert rookie[RANK_SOURCE] == "market" and rookie["v2_rank_key"] == "market"
+    # Median of the three nearest rated players by market rank (WR2, WR3, WR1/WR4 tie
+    # resolved by order): equals the value of a WR2-3 level player.
+    assert by_id["wr2"][OVERALL_VOR] <= rookie[OVERALL_VOR] <= by_id["wr1"][OVERALL_VOR]
+    assert rookie["v2_position_rank"] in (2, 3)
+    assert rookie["rank"] < by_id["wr3"]["rank"]
+    # The roster simulation inputs are borrowed on the same scale.
+    assert by_id["wr2"]["fitted_ppg"] <= rookie["fitted_ppg"] <= by_id["wr1"]["fitted_ppg"]
+    assert rookie["fitted_season_points"] is not None
+    assert by_id["ghost"][RANK_SOURCE] is None and by_id["ghost"][OVERALL_VOR] is None
+    assert by_id["ghost"]["rank"] == ranked.height  # unranked players sort last
+    assert all(by_id[f"wr{i}"][RANK_SOURCE] == "model" for i in range(5))

@@ -22,6 +22,12 @@ vor_baseline_rank:
 
 board_positions: [QB, RB, WR, TE]
 
+# nflverse position corrections by GSIS id, applied before the board's position
+# filter. Travis Hunter is filed as CB in the weekly stats despite a full receiving
+# line; without this he never reaches the board.
+position_overrides:
+  "00-0040718": WR   # Travis Hunter (JAX), 2025: 7 games, WR/CB
+
 # Games thresholds. The reference script used three different values in three
 # places (>=8 for baselines, >=6 at print time, and the published board carried
 # 4-game players); they are consolidated here.
@@ -36,19 +42,13 @@ min_games_board: 1
 small_sample_games: 10
 
 metrics:
-  # A PPR target is worth roughly 2.2x a carry.
-  target_weight: 2.2
-  # TD-over-expectation flag thresholds.
-  td_regress_down: 4.0      # >= this -> "TD-luck" (sell)
-  td_regress_up: -2.5       # <= this -> "BUY", but only with volume:
-  td_regress_up_min_opp: 150
   # RB age cliff, as of Sept 1 of the upcoming season.
   rb_age_cliff: 27.5
   # Weekly floor percentile.
   floor_quantile: 0.25
-  # Position-average TD rate window. The reference script pooled all seasons into a
-  # single blended rate; "all" preserves that. "season" computes it per season.
-  td_rate_window: all
+  # The TD-over-expectation flags (td_regress_*), weighted opportunity
+  # (target_weight), and their windows were removed in the 2026-08-31 focus round:
+  # the backtest found no repeatable next-season signal (docs/v2_metrics_review.md §4).
 
   # v2 projection controls. The model weights the most recent season at 1.0, the
   # prior season at this decay, and the season before that at decay squared.
