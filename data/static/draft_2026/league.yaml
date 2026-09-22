@@ -1,0 +1,107 @@
+# Sweaty Plays league shape and board-building parameters.
+
+name: Sweaty Plays
+team_count: 10
+
+# Seasons pulled from nflverse. board_season is the one the board is built for.
+seasons: [2023, 2024, 2025]
+# The season the board is BUILT FROM — the most recent complete season of tape.
+board_season: 2025
+# The season the board is FOR. Ages are measured as of Sept 1 of this season, because
+# the question is how old a player will be while producing, not how old he was while
+# producing the tape.
+draft_season: 2026
+
+# VOR replacement level: the positional rank of the freely-available player in a
+# 10-team league. Re-derive these if the league size changes.
+vor_baseline_rank:
+  QB: 12
+  RB: 25
+  WR: 35
+  TE: 12
+
+board_positions: [QB, RB, WR, TE]
+
+# nflverse position corrections by GSIS id, applied before the board's position
+# filter. Travis Hunter is filed as CB in the weekly stats despite a full receiving
+# line; without this he never reaches the board.
+position_overrides:
+  "00-0040718": WR   # Travis Hunter (JAX), 2025: 7 games, WR/CB
+
+# Games thresholds. The reference script used three different values in three
+# places (>=8 for baselines, >=6 at print time, and the published board carried
+# 4-game players); they are consolidated here.
+#   min_games_baseline — who is eligible to SET replacement level. Kept at 8 so a
+#     three-game cameo can't define the baseline.
+#   min_games_board    — who appears ON the board. Kept at 1 to match the published
+#     board, which carries 4-game players flagged as small samples.
+min_games_baseline: 8
+min_games_board: 1
+
+# Players with fewer than this many games get the "Xgms" small-sample flag.
+small_sample_games: 10
+
+metrics:
+  # RB age cliff, as of Sept 1 of the upcoming season.
+  rb_age_cliff: 27.5
+  # Weekly floor percentile.
+  floor_quantile: 0.25
+  # The TD-over-expectation flags (td_regress_*), weighted opportunity
+  # (target_weight), and their windows were removed in the 2026-08-31 focus round:
+  # the backtest found no repeatable next-season signal (docs/v2_metrics_review.md §4).
+
+  # v2 projection controls. The model weights the most recent season at 1.0, the
+  # prior season at this decay, and the season before that at decay squared.
+  projection_season_decay: 0.55
+  # Effective games needed before a player's multi-year PPG prior mostly stands on
+  # its own. Smaller samples are pulled toward the position mean.
+  projection_shrinkage_games: 8.0
+  # V2 combines a bottom-up projected stat line with the normalized historical PPG
+  # branch. This is the bottom-up branch's share of projected PPG.
+  projection_component_weight: 0.65
+  # Expected-games projections preserve PPG as ability per active game, then scale
+  # VOR by availability for the actual draft rank.
+  projection_season_games: 17
+  projection_availability_prior: 0.94
+  projection_availability_shrinkage_games: 17.0
+  # When nflverse participation is present, route-opportunity x TPRR supplies this
+  # share of the projected target estimate. Participation identifies who was on a
+  # dropback; it does not prove every TE/RB released into a route.
+  projection_route_weight: 0.55
+  # Maximum automatic role change from the current nflverse depth-chart rank.
+  projection_depth_chart_cap: 0.18
+  # Which players define the positional priors that small samples shrink toward and
+  # that anchor every projected rate (target share, catch rate, TD rates, ...).
+  #   all        — every player-season at the position (games-weighted). A three-game
+  #                player shrinks toward what three-game players actually become.
+  #   rosterable — the top 2x-baseline-rank players with 8+ games. This was the
+  #                original v2 choice; the 2026-08-29 backtest showed it pulls every
+  #                low-sample player toward starter production (+2 to +7 PPG below
+  #                rank 36) and cost ~0.09 rank correlation. Retained for comparison.
+  projection_prior_pool: all
+  # Which v2 output ranks each position on the live board. Chosen from the metric
+  # report's "does v2 beat the naive baseline" table (docs/v2_metrics_review.md §8):
+  # the walk-forward fitted ranker wins at QB/WR/TE, the bottom-up projection at RB.
+  # fitted_* columns come from the pending-season models in data/outputs/
+  # metric_report.json; if that report is absent the position falls back.
+  projection_rank_key:
+    QB: fitted_ppg
+    RB: fitted_ppg
+    WR: fitted_season_points
+    TE: ppg
+  projection_rank_fallback: adj_proj_vor
+  # Cross-position (overall) order: the metric report's OVERALL test ranks every
+  # position by one key as per-game VOR against its own replacement. The fitted
+  # season-points projection beat the naive baselines 7-0-0 (modern) and 15-0-4
+  # (2007-2025); the hand-built v2_score/proj_ppg overall orders lost to naive.
+  projection_overall_key: fitted_season_points
+  # Roster simulation inputs (League team-strength rating and lineup scans). The
+  # roster-level expected weekly points, risk, and floor are built from these three
+  # per-player fields, so they follow the backtest's choice: the fitted per-game mean
+  # and the fitted games projection (availability = fitted_games / 17). Volatility is
+  # the historical weekly-shape ratio rescaled to the fitted mean; it is not yet
+  # backtested at the roster level. Fallbacks apply in order when a column is absent.
+  roster_mean_columns: [fitted_ppg, proj_ppg, ppg]
+  roster_games_columns: [fitted_games]
+  roster_availability_columns: [projected_availability]
+  roster_volatility_columns: [projected_volatility, volatility]

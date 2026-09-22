@@ -75,10 +75,10 @@ const V2_COLUMNS: PlayerColumn[] = [
     render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
   },
   {
-    key: 'proj_ppg',
+    key: 'forecast_active_ppg',
     label: 'Proj PPG',
-    title: 'V2 projection per active game (history and stat-line branches); a fitted-ranker input, not the sort.',
-    render: (p) => number(p.proj_ppg),
+    title: 'Production forecast per active game. Frozen Adaptive season totals do not identify a PPG/games decomposition.',
+    render: (p) => number(p.forecast_active_ppg ?? (p.metric_version === 'adaptive' ? null : p.fitted_ppg)),
   },
   {
     key: 'season_equivalent_ppg',
@@ -87,10 +87,10 @@ const V2_COLUMNS: PlayerColumn[] = [
     render: (p) => <span className="dim">{number(p.season_equivalent_ppg)}</span>,
   },
   {
-    key: 'expected_games',
+    key: 'forecast_expected_games',
     label: 'Exp G',
-    title: 'Expected games from nflverse participation and injury history.',
-    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+    title: 'Fitted expected games underlying the season forecast.',
+    render: (p) => <span className="dim">{number(p.forecast_expected_games ?? (p.metric_version === 'adaptive' ? null : p.fitted_games))}</span>,
   },
   {
     key: 'projected_floor',
@@ -101,7 +101,7 @@ const V2_COLUMNS: PlayerColumn[] = [
   {
     key: 'ppg',
     label: 'Actual PPG',
-    title: 'Most recent season’s PPG, shown as baseline evidence.',
+    title: 'Historical PPG using participation-observed active games. V1 uses production rows.',
     render: (p) => <span className="dim">{number(p.ppg)}</span>,
   },
   {

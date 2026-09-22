@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -11,7 +12,13 @@ from typing import Any
 import polars as pl
 import yaml
 
-from patron.metrics.backtest import AnalysisWindow, MetricReportConfig, analyze_rankings
+from patron.config.settings import CONFIG_DIR
+from patron.metrics.backtest import (
+    AnalysisWindow,
+    MetricReportConfig,
+    RankingConfig,
+    analyze_rankings,
+)
 
 FROZEN_RANKERS = (
     "fitted_season_points",
@@ -69,9 +76,12 @@ def frozen_snapshot(predictions: pl.DataFrame, season: int) -> pl.DataFrame:
 
 def snapshot_bytes(snapshot: pl.DataFrame) -> bytes:
     """Canonical CSV representation used by the prospective audit digest."""
-    return snapshot.select(SNAPSHOT_COLUMNS).sort(["player_id", "position"]).write_csv(
-        float_precision=12
-    ).encode()
+    return (
+        snapshot.select(SNAPSHOT_COLUMNS)
+        .sort(["player_id", "position"])
+        .write_csv(float_precision=12)
+        .encode()
+    )
 
 
 def snapshot_sha256(snapshot: pl.DataFrame) -> str:
@@ -141,9 +151,7 @@ def _grading_frame(
     )
 
 
-def _overall_result(
-    rankings: list[dict[str, Any]], ranker: str
-) -> dict[str, Any] | None:
+def _overall_result(rankings: list[dict[str, Any]], ranker: str) -> dict[str, Any] | None:
     return next(
         (
             row
@@ -169,9 +177,7 @@ def grade_frozen_forecast(
     """Grade only frozen values, joining fresh data solely for the actual outcomes."""
     actual_sha256 = snapshot_sha256(snapshot)
     if actual_sha256 != expected_sha256:
-        raise ValueError(
-            f"frozen snapshot digest mismatch: {actual_sha256} != {expected_sha256}"
-        )
+        raise ValueError(f"frozen snapshot digest mismatch: {actual_sha256} != {expected_sha256}")
     frame = _grading_frame(
         snapshot,
         outcomes,
@@ -179,7 +185,29 @@ def grade_frozen_forecast(
         grade_not_before=grade_not_before,
         today=today or date.today(),
     )
-    ranking = replace(report_config.ranking, candidates=FROZEN_RANKERS)
+    grading_path = CONFIG_DIR / f"prospective_grading_{season}.json"
+    if season == 2026:
+        if (
+            file_sha256(grading_path)
+            != "3ea599e42ebd90dfeb8268a2da6c2eaa57f7925ba55e68d6d0c7490dc2aa5a87"
+        ):
+            raise ValueError("Frozen grading rules changed")
+        raw = json.loads(grading_path.read_text())
+        ranking = RankingConfig(
+            outcome_pool="scored_legacy",
+            baselines=tuple(raw["baselines"]["default"]),
+            baselines_by_target={
+                k: tuple(v) for k, v in raw["baselines"].items() if k != "default"
+            },
+            candidates=FROZEN_RANKERS,
+            targets=tuple(raw["targets"]),
+            top_k=raw["top_k"],
+            pool=raw["pool"],
+            overall=raw["overall"],
+            market_baseline=raw["market_baseline"],
+        )
+    else:
+        ranking = replace(report_config.ranking, candidates=FROZEN_RANKERS)
     grading_config = replace(
         report_config,
         analysis_windows=(

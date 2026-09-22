@@ -81,39 +81,53 @@ fit:
   per_position: true
   inner_validation_folds: 3
   models:
+    - name: candidate_games_nonredundant
+      population: returner
+      target: actual_games
+      features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor]
+      absent_as_zero: true
+      clip: [0, 17]
+      apply_live: false
     # Per-active-game PPG. No availability input: that belongs to the games models.
     - name: fitted_ppg
+      population: returner
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg]
       lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
     # Calibrated games on the full population (absent players count as zero games).
     - name: fitted_games
+      population: returner
       target: actual_games
       features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
       absent_as_zero: true
       clip: [0, 17]
     # (a) PPG x calibrated availability.
     - name: fitted_season_points
+      population: returner
       kind: product
       factors: [fitted_ppg, fitted_games]
     # (b) Season points fitted directly, absent players scored as zero.
     - name: fitted_season_points_direct
+      population: all
       target: actual_season_points
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, expected_games, season_pts]
       absent_as_zero: true
       clip: [0, null]
     # (c) Two-stage: P(appears) x games given appearance x PPG.
     - name: fitted_return_prob
+      population: all
       target: actual_played
       features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
       absent_as_zero: true
       clip: [0, 1]
     - name: fitted_games_if_played
+      population: all
       target: actual_games
       features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor]
       played_only: true
       clip: [1, 17]
     - name: fitted_two_stage
+      population: all
       kind: product
       factors: [fitted_return_prob, fitted_games_if_played, fitted_ppg]
     # Staged report-only challengers make each research family independently
@@ -126,6 +140,7 @@ fit:
     # so this model trains only on rows that carry it and scores 2023+ (two prior
     # folds minimum), reported with its own fold count.
     - name: fitted_market_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, market_ecr_score, market_ecr_sd]
       require_features: [market_ecr_score]
@@ -133,6 +148,7 @@ fit:
       lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_market_season_points
+      population: all
       kind: product
       factors: [fitted_market_ppg, fitted_games]
       apply_live: false
@@ -140,21 +156,25 @@ fit:
     # (scrambles, designed carries, neutral EPA, xFP). The NGS and opportunity models
     # were retired: no lift anywhere, small unstable weights, sparse coverage.
     - name: fitted_core_plus_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, scramble_carries, designed_carries, neutral_epa_per_play, xfp_pg]
       lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_core_plus_season_points
+      population: all
       kind: product
       factors: [fitted_core_plus_ppg, fitted_games]
       apply_live: false
     # Research subset retained: the only candidate with a TE signal (xFP).
     - name: fitted_research_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, xfp_pg, scramble_carries, neutral_pass_oe, ngs_yac_oe, ngs_ryoe_per_att]
       lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_research_season_points
+      population: all
       kind: product
       factors: [fitted_research_ppg, fitted_games]
       apply_live: false
@@ -164,10 +184,12 @@ fit:
     # leans on rushing). The dummy and its rushing-reliance interaction let the
     # ridge price the sophomore leap; report-only until it wins.
     - name: fitted_soph_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, entering_sophomore, sophomore_rush_share]
       apply_live: false
     - name: fitted_soph_season_points
+      population: all
       kind: product
       factors: [fitted_soph_ppg, fitted_games]
       apply_live: false
@@ -175,30 +197,36 @@ fit:
     # dated transactions through the August cutoff; every model remains report-only
     # until it wins both the modern and long windows and the market comparison.
     - name: fitted_rostered_games
+      population: all
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_rostered, team_changed]
       absent_as_zero: true
       clip: [0, 17]
       apply_live: false
     - name: fitted_rostered_season_points
+      population: all
       kind: product
       factors: [fitted_ppg, fitted_rostered_games]
       apply_live: false
     - name: fitted_status_games
+      population: all
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_status_score, preseason_reserve, team_changed]
       absent_as_zero: true
       clip: [0, 17]
       apply_live: false
     - name: fitted_status_season_points
+      population: all
       kind: product
       factors: [fitted_ppg, fitted_status_games]
       apply_live: false
     - name: fitted_roster_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, preseason_status_score, preseason_reserve, team_changed, player_experience]
       apply_live: false
     - name: fitted_roster_season_points
+      population: all
       kind: product
       factors: [fitted_roster_ppg, fitted_status_games]
       apply_live: false
@@ -209,11 +237,13 @@ fit:
     # plus an undrafted indicator as the lean core. Everything remains shadow-only
     # until the prospective and market-disagreement gates pass.
     - name: fitted_nextgen_returner_ppg
+      population: returner
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg]
       require_features: [returning_indicator]
       apply_live: false
     - name: fitted_nextgen_returner_games
+      population: returner
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_status_score, preseason_reserve, cutoff_injured_reserve, cutoff_pup_nfi, cutoff_suspended, cutoff_reserve_other, cutoff_recent_event_score, team_changed]
       require_features: [returning_indicator]
@@ -221,15 +251,18 @@ fit:
       clip: [0, 17]
       apply_live: false
     - name: fitted_nextgen_returner_season_points
+      population: all
       kind: product
       factors: [fitted_nextgen_returner_ppg, fitted_nextgen_returner_games]
       apply_live: false
     - name: fitted_nextgen_rookie_ppg
+      population: rookie
       target: actual_ppg
       features: [rookie_draft_capital_score, rookie_was_drafted]
       require_features: [rookie_indicator]
       apply_live: false
     - name: fitted_nextgen_rookie_games
+      population: rookie
       target: actual_games
       features: [rookie_draft_capital_score, rookie_was_drafted]
       require_features: [rookie_indicator]
@@ -237,14 +270,17 @@ fit:
       clip: [0, 17]
       apply_live: false
     - name: fitted_nextgen_rookie_season_points
+      population: all
       kind: product
       factors: [fitted_nextgen_rookie_ppg, fitted_nextgen_rookie_games]
       apply_live: false
     - name: fitted_nextgen_ppg
+      population: all
       kind: coalesce
       factors: [fitted_nextgen_rookie_ppg, fitted_nextgen_returner_ppg]
       apply_live: false
     - name: fitted_nextgen_season_points
+      population: all
       kind: coalesce
       factors: [fitted_nextgen_rookie_season_points, fitted_nextgen_returner_season_points]
       apply_live: false
@@ -253,6 +289,7 @@ fit:
     # carrier for soft injuries/recovery news absent from the public historical feed.
     # This is evaluated as a market-conditioned challenger, not independent alpha.
     - name: fitted_market_availability_games
+      population: returner
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_status_score, preseason_reserve, cutoff_injured_reserve, cutoff_pup_nfi, cutoff_suspended, cutoff_reserve_other, cutoff_recent_event_score, team_changed, market_ecr_score, market_ecr_sd, market_overall_ecr_score]
       require_features: [returning_indicator, market_ecr_score, market_overall_ecr_score]
@@ -261,10 +298,12 @@ fit:
       clip: [0, 17]
       apply_live: false
     - name: fitted_market_availability_returner_season_points
+      population: all
       kind: product
       factors: [fitted_nextgen_returner_ppg, fitted_market_availability_games]
       apply_live: false
     - name: fitted_market_availability_season_points
+      population: all
       kind: coalesce
       factors: [fitted_nextgen_rookie_season_points, fitted_market_availability_returner_season_points]
       apply_live: false
@@ -277,31 +316,37 @@ fit:
     # depth/contract/opportunity security are kept in separate lean stages before any
     # stack is allowed to combine them.
     - name: fitted_career_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, early_career_score, source_opportunities_pg, source_opportunities_pg_sq, career_opportunities_log, career_pass_attempts_log]
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_career_season_points
+      population: all
       kind: product
       factors: [fitted_career_ppg, fitted_games]
       apply_live: false
     - name: fitted_athletic_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, entering_sophomore, sophomore_rush_share, early_career_score, combine_speed_score, combine_burst_score, young_speed_score, young_burst_score]
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_athletic_season_points
+      population: all
       kind: product
       factors: [fitted_athletic_ppg, fitted_games]
       apply_live: false
     # fitted_security_ppg survives only as a factor of the role-security product,
     # which the frozen full-stack selector feature list depends on.
     - name: fitted_security_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, early_career_score, contract_years_remaining, contract_depth_security, draft_capital_score, vacated_target_opportunity, vacated_carry_opportunity, vacated_target_early_career, vacated_carry_early_career]
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_role_security_games
+      population: all
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_rostered, team_changed, early_career_score, source_opportunities_pg, source_opportunities_pg_sq, career_opportunities_log, career_pass_attempts_log, contract_depth_security, vacated_target_opportunity, vacated_carry_opportunity]
       absent_as_zero: true
@@ -309,20 +354,24 @@ fit:
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
       apply_live: false
     - name: fitted_role_security_season_points
+      population: all
       kind: product
       factors: [fitted_security_ppg, fitted_role_security_games]
       apply_live: false
     - name: fitted_additive_ppg
+      population: all
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, preseason_status_score, preseason_reserve, team_changed, player_experience, source_offense_snap_pct, offense_snap_pct_trend, team_vacated_target_share, team_vacated_carry_share, vacated_target_opportunity, vacated_carry_opportunity, draft_capital_score, was_drafted, contract_apy_cap_pct, contract_guaranteed_log, contract_years_remaining]
       apply_live: false
     - name: fitted_additive_games
+      population: all
       target: actual_games
       features: [expected_games, games, age_factor, historical_ppg_prior, depth_role_factor, preseason_status_score, preseason_reserve, team_changed, player_experience, source_offense_snap_pct, offense_snap_pct_trend, draft_capital_score, was_drafted, contract_apy_cap_pct, contract_guaranteed_log, contract_years_remaining]
       absent_as_zero: true
       clip: [0, 17]
       apply_live: false
     - name: fitted_additive_season_points
+      population: all
       kind: product
       factors: [fitted_additive_ppg, fitted_additive_games]
       apply_live: false
@@ -332,6 +381,7 @@ fit:
     # Frozen: this spec is a factor of the 2026 adaptive selectors — do not rename,
     # reorder its features, or delete it before grade-prospective runs.
     - name: fitted_full_stack_season_points
+      population: all
       target: actual_season_points
       features: [fitted_season_points, fitted_rostered_season_points, fitted_status_season_points, fitted_roster_season_points, fitted_additive_season_points, fitted_soph_season_points, fitted_career_season_points, fitted_role_security_season_points]
       require_features: [fitted_season_points]
@@ -343,12 +393,14 @@ fit:
     # Quality and availability remain separate; the product preserves the season-point
     # scale required by the adaptive board and cross-position VOR ranking.
     - name: fitted_rich_weekly_ppg
+      population: returner
       target: actual_ppg
       features: [historical_ppg_prior, ppg, age_factor, depth_role_factor, component_proj_ppg, rich_s0_points_last4, rich_s0_xfp_last4, rich_s0_expected_td_mean, rich_s0_snap_pct_mean, rich_s0_snap_pct_q75, rich_s0_route_participation_mean, rich_s0_route_participation_q75, rich_s0_targets_per_route_mean, rich_s0_targets_per_route_q75, rich_s0_targets_per_route_entropy, rich_s0_targets_per_route_zero_rate]
       require_features: [returning_indicator]
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
       apply_live: false
     - name: fitted_rich_weekly_games
+      population: returner
       target: actual_games
       features: [expected_games, projected_availability, games, age_factor, historical_ppg_prior, depth_role_factor, rich_s0_points_coverage, rich_s0_snap_pct_mean, rich_s0_snap_pct_zero_rate, rich_s0_snap_pct_end_streak, rich_s0_roster_score_mean, rich_s0_roster_score_end_streak, rich_s0_injury_severity_mean, rich_s0_practice_limit_mean]
       require_features: [returning_indicator]
@@ -357,10 +409,12 @@ fit:
       lambda_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
       apply_live: false
     - name: fitted_rich_weekly_season_points
+      population: all
       kind: product
       factors: [fitted_rich_weekly_ppg, fitted_rich_weekly_games]
       apply_live: false
     - name: fitted_rich_weekly_direct
+      population: returner
       target: actual_season_points
       features: [ppg, season_pts, games, age_at_season]
       feature_prefixes: [rich_]
@@ -372,6 +426,7 @@ fit:
       min_train_folds: 5
       apply_live: false
     - name: fitted_rich_weekly_combined
+      population: all
       kind: coalesce
       factors: [fitted_nextgen_rookie_season_points, fitted_rich_weekly_direct]
       apply_live: false
@@ -380,6 +435,7 @@ fit:
     # the best mean top-K result through S-1. Candidate order makes the incumbent
     # win exact ties. These remain report-only and use no modern-era hard-coding.
     - name: fitted_adaptive_ppg_hybrid
+      population: all
       kind: adaptive_select
       target: actual_ppg
       selection_metric: hit_rate
@@ -388,6 +444,7 @@ fit:
       fallback: fitted_two_stage
       apply_live: false
     - name: fitted_adaptive_season_hybrid
+      population: all
       kind: adaptive_select
       target: actual_season_points
       selection_metric: ndcg
@@ -423,6 +480,7 @@ targets:
     missing_as_zero: true
 
 metrics:
+  - {key: candidate_games_nonredundant, label: Nonredundant availability candidate, group: Research availability, description: Returner-only games model without the duplicate projected availability input; report-only., targets: [actual_games], prediction_target: actual_games}
   - {key: market_ecr_score, label: Preseason market ECR, group: Market baseline, description: Negative positional FantasyPros ECR from the latest archived (2020+) or Wayback-captured (2011-2019) snapshot on or before August 31; higher is better., targets: [actual_ppg, actual_vor, actual_availability_value, actual_season_points], available_from_forecast: 2011}
   - {key: market_overall_ecr_score, label: Overall market price, group: Market baseline, description: Negative overall FantasyPros redraft ECR from the latest archived (2020+) or Wayback-captured (2011-2019) snapshot on or before August 31; a dated cross-position price proxy and explicitly not observed ADP., targets: [actual_availability_value, actual_season_points], available_from_forecast: 2011}
   - {key: rookie_draft_capital_score, label: Rookie draft capital, group: Rookie model, description: "Negative log overall NFL draft pick with undrafted players placed after pick 257 so the baseline and challenger retain the same rookie universe.", targets: [actual_ppg, actual_games, actual_availability_value, actual_season_points], available_from_forecast: 2004}
@@ -477,8 +535,8 @@ metrics:
   - {key: projected_availability, label: Projected availability, group: Availability, description: Expected share of the season available., targets: [actual_games, actual_availability_value]}
   - {key: historical_injury_report_weeks, label: Injury report weeks, group: Availability, description: Recency-weighted historical injury-report burden., targets: [actual_games, actual_availability_value], available_from_forecast: 2012, expected_sign: negative}
   - {key: injury_missed_equivalents, label: Injury missed equivalents, group: Availability, description: Weighted OUT doubtful and questionable history., targets: [actual_games, actual_availability_value], available_from_forecast: 2012, expected_sign: negative}
-  - {key: projection_confidence, label: Projection confidence, group: Confidence, description: Support supplied by the effective production sample., targets: [actual_ppg, actual_availability_value]}
-  - {key: availability_confidence, label: Availability confidence, group: Confidence, description: Support supplied by the availability sample., targets: [actual_games, actual_availability_value]}
+  - {key: projection_confidence, label: Projection sample support, group: Sample support, description: Support supplied by the effective production sample., targets: [actual_ppg, actual_availability_value]}
+  - {key: availability_confidence, label: Availability sample support, group: Sample support, description: Support supplied by the availability sample., targets: [actual_games, actual_availability_value]}
   - {key: ppg, label: Latest-season PPG, group: Historical production, description: Actual league-scored PPG in the season immediately before the forecast., targets: [actual_ppg, actual_vor, actual_availability_value]}
   - {key: xfp_pg, label: Expected fantasy points/game, group: Expected opportunity, description: ffopportunity expected PPR points from source-season usage per regular-season game., targets: [actual_ppg, actual_vor, actual_availability_value], available_from_forecast: 2007}
   - {key: expected_first_downs_pg, label: Expected first downs/game, group: Expected opportunity, description: Modelled passing rushing and receiving first downs from source-season opportunities., targets: [actual_ppg, actual_vor], available_from_forecast: 2007}

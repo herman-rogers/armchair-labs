@@ -11,7 +11,6 @@ import pytest
 from patron.config.league import get_league
 from patron.metrics.backtest import MetricReportConfig
 from patron.metrics.prospective import (
-    FROZEN_RANKERS,
     SNAPSHOT_COLUMNS,
     ProspectiveGradePending,
     frozen_snapshot,
@@ -113,23 +112,31 @@ def test_grade_refuses_to_peek_before_the_declared_date() -> None:
 
 
 def test_grade_uses_frozen_rankers_and_fresh_outcomes() -> None:
-    snapshot = frozen_snapshot(_pending_predictions(), 2026)
+    def expand(frame: pl.DataFrame) -> pl.DataFrame:
+        return pl.concat(
+            [
+                frame.with_columns((pl.col("player_id") + pl.lit(f"-{i}")).alias("player_id"))
+                for i in range(15)
+            ]
+        )
+
+    snapshot = frozen_snapshot(expand(_pending_predictions()), 2026)
+    outcomes = expand(_completed_outcomes())
     report = grade_frozen_forecast(
         snapshot,
-        _completed_outcomes(),
+        outcomes,
         _grading_config(),
         2026,
         expected_sha256=snapshot_sha256(snapshot),
         grade_not_before=date(2027, 1, 15),
         today=date(2027, 1, 15),
     )
-
-    assert report["frozen_rows"] == 8
+    # The mutated k=4 test config is ignored in favor of frozen overall k=60.
+    assert report["frozen_rows"] == 120
     assert report["passes_primary_gates"] is True
-    assert report["overall"]["adaptive_hit_rate"] == 1.0
-    assert report["overall"]["incumbent_hit_rate"] == 0.0
-    assert report["overall"]["ecr_hit_rate"] == 0.0
-    assert {row["ranker"] for row in report["ranking_results"]} >= set(FROZEN_RANKERS)
+    assert report["overall"]["adaptive_hit_rate"] > report["overall"]["incumbent_hit_rate"]
+    assert report["overall"]["adaptive_hit_rate"] > report["overall"]["ecr_hit_rate"]
+    assert all(row["k"] == 60 for row in report["ranking_results"] if row["position"] == "ALL")
 
 
 def test_adaptive_board_ranks_the_live_pool_on_frozen_scores() -> None:

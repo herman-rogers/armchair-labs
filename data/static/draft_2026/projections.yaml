@@ -1,0 +1,28 @@
+# v2 forward-projection assumptions.
+#
+# The statistical model defaults to the latest nflverse depth-chart team/rank, then
+# uses that team's latest pass/rush/scoring environment. If no current depth entry is
+# available it falls back to the player's most recent statistical team. Put only facts
+# the feeds cannot know here: a future trade, a new quarterback, a materially changed
+# target tree, or a clearly different camp role.
+#
+# Team multipliers alter the destination environment for every projected player on
+# that team. A value of 1.08 means eight percent above the latest historical profile.
+teams: {}
+# Example:
+#  PIT:
+#    pass_volume_multiplier: 1.03
+#    rush_volume_multiplier: 0.98
+#    scoring_multiplier: 1.05
+#    reason: "New quarterback and coordinator projection."
+
+# Player entries match normalized display name + position. projected_team makes a
+# move use the destination team's context. opportunity_multiplier handles depth-chart
+# information which team totals cannot infer: 1.10 is a ten-percent role increase.
+players: []
+# Example:
+#  - player: Example Receiver
+#    position: WR
+#    projected_team: BUF
+#    opportunity_multiplier: 1.05
+#    reason: "Trade plus expected starting role."

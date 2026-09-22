@@ -11,7 +11,7 @@ const RANKER_LABELS: Record<string, string> = {
   fitted_season_points: 'fitted season points',
   fitted_season_points_direct: 'fitted season points (direct)',
   fitted_two_stage: 'fitted season points (two-stage)',
-  adaptive_season_points: 'frozen Adaptive PPG selector',
+  adaptive_season_points: 'frozen Adaptive season points',
   actual_ppg: 'next-season PPG',
   actual_season_points: 'next-season points',
 }
@@ -67,4 +67,4 @@ export const POSITION_RANK_TITLE =
   'Rank within the position using that position’s backtest-selected projection. See Rank basis for the model and value used on this row.'
 
 export const SEASON_EQUIVALENT_TITLE =
-  'Fitted season points converted to a per-scheduled-game rate. Unlike active-game PPG, this includes fitted availability and is the value used for waiver comparisons.'
+  'Selected forecast season points converted to a per-scheduled-game rate. Unlike active-game PPG, this includes fitted availability and is the value used for waiver comparisons.'

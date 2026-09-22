@@ -139,14 +139,34 @@ export function MetricReportView({ available }: { available: boolean }) {
         </label>
       </div>
 
+      <details>
+        <summary>Production coverage and comparison populations</summary>
+        <p>{data.evaluation_contract ?? 'Legacy evaluation: player pools differ. Regenerate evidence before using these results for model selection.'}</p>
+        <p>Automatic production policy, including market fallbacks; historical manual overrides are excluded.</p>
+        <table>
+          <thead><tr><th>Season</th><th>Complete-pool hit rate</th><th>Coverage</th><th>Market fallbacks</th></tr></thead>
+          <tbody>{data.deployment_results?.map((row) => <tr key={row.forecast_season}>
+            <td>{row.forecast_season}</td><td>{(100 * row.hit_rate).toFixed(1)}%</td>
+            <td>{(100 * row.coverage).toFixed(1)}%</td><td>{row.market_fallback_n}</td>
+          </tr>)}</tbody>
+        </table>
+        <p>Ranking quality against overall ECR on common players only; coverage is reported against the retained draft pool.</p>
+        <table>
+          <thead><tr><th>Season</th><th>Common players</th><th>Coverage</th><th>Hit-rate lift vs ECR</th></tr></thead>
+          <tbody>{data.common_pool_results?.filter((row) => row.ranker === 'fitted_season_points').sort((a, b) => a.forecast_season - b.forecast_season).map((row) => <tr key={row.forecast_season}>
+            <td>{row.forecast_season}</td><td>{row.common_n}</td><td>{(100 * row.coverage).toFixed(1)}%</td>
+            <td>{(100 * row.hit_rate_lift).toFixed(1)} pp</td>
+          </tr>)}</tbody>
+        </table>
+      </details>
       <div className="ranking-verdict">
         <div className="ranking-heading">
           <div>
             <h3>Do projection rankers beat naive history?</h3>
             <p className="legend tight">
-              Every ranker is tested on the same top-K player slice. “Beats” requires a
+              Complete-pool results keep the actual outcome universe fixed and count missing forecasts as coverage failures. “Beats” requires a
               positive pooled hit-rate lift and more head-to-head fold wins than losses
-              against the best baseline available on the same seasons.
+              against the best baseline available on the same seasons. This is diagnostic evidence, not a model promotion. Pairwise common-player results, market-fallback deployment coverage, and interval calibration are retained in the report artifact.
             </p>
           </div>
           <label>

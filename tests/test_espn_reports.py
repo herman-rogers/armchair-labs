@@ -62,9 +62,9 @@ class TestWireReplacement:
         )
         levels = wire_replacement_levels(frame, {"RB": 2})
 
-        assert levels["RB"] == pytest.approx(5.0), "second-best FREE back, not the rostered one"
+        assert levels["RB"] == pytest.approx(9.0), "best FREE back, not the rostered one"
 
-    def test_a_thin_pool_falls_back_to_the_worst_available(self) -> None:
+    def test_a_thin_pool_uses_the_best_available(self) -> None:
         levels = wire_replacement_levels(tagged({"position": "TE", "ppg": 7.0}), {"TE": 12})
         assert levels["TE"] == pytest.approx(7.0)
 
@@ -103,7 +103,7 @@ class TestRankedWire:
         )
 
         assert wire["player_display_name"].to_list() == ["Durable", "Fragile", "Bar"]
-        assert wire[WIRE_VOR][0] == pytest.approx(9.0)
+        assert wire[WIRE_VOR][0] == pytest.approx(0.0)
 
     def test_rostered_players_never_appear(self) -> None:
         wire = ranked_wire(
@@ -128,7 +128,7 @@ class TestRankedWire:
             min_vor=None,
         )
         assert wire["player_display_name"].to_list() == ["Best", "Mid", "Bar"]
-        assert wire[WIRE_VOR][0] == pytest.approx(10.0)
+        assert wire[WIRE_VOR][0] == pytest.approx(0.0)
 
     def test_min_vor_floors_the_list(self) -> None:
         wire = ranked_wire(
@@ -139,7 +139,7 @@ class TestRankedWire:
             {"RB": 2},
             min_vor=1.0,
         )
-        assert wire["player_display_name"].to_list() == ["Good"]
+        assert wire.height == 0  # nobody can exceed the best freely available player
 
     def test_injured_players_are_kept_by_default(self) -> None:
         """An OUT player at the top of the wire is information — a cheap stash — not an

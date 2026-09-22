@@ -1,3 +1,8 @@
+> 2026-09-22 contract update: see [implementation notes](stat_system_implementation_2026-09-22.md).
+> Forecast tables now use fitted PPG/games; waiver replacement is the best free agent;
+> support and scenario risk are uncalibrated heuristics. Older descriptions below
+> document the original implementation and are superseded where they conflict.
+
 # Patron metrics: the goal, the surviving catalog, and the graveyard
 
 This document is the contract for the player-ranking metrics. It states the one goal

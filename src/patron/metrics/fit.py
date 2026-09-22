@@ -28,19 +28,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
 from scipy.stats import rankdata
 
+logger = logging.getLogger(__name__)
+
 FITTED_PPG = "fitted_ppg"
 FITTED_SEASON_POINTS = "fitted_season_points"
 ACTUAL_PLAYED = "actual_played"
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 3
 MODEL_VERSION = "ridge-walk-forward-2"
 
 _CORE_FEATURES = (
@@ -74,6 +78,7 @@ class ModelSpec:
     """
 
     name: str
+    population: str = "all"
     kind: str = "ridge"
     target: str = "actual_ppg"
     features: tuple[str, ...] = _CORE_FEATURES
@@ -97,11 +102,16 @@ class ModelSpec:
     # Override the global minimum number of completed folds before scoring.
     min_train_folds: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.population not in {"all", "returner", "rookie"}:
+            raise ValueError(f"Unknown model population: {self.population}")
+
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> ModelSpec:
         clip = raw.get("clip") or (None, None)
         return cls(
             name=str(raw["name"]),
+            population=str(raw.get("population", "all")),
             kind=str(raw.get("kind") or "ridge"),
             target=str(raw.get("target") or "actual_ppg"),
             features=tuple(raw.get("features") or _CORE_FEATURES),
@@ -322,6 +332,12 @@ class RidgeModel:
 
 
 def _has_required(row: dict[str, Any], spec: ModelSpec) -> bool:
+    rookie = (_number(row.get("rookie_indicator")) or 0) > 0
+    returning = (_number(row.get("returning_indicator")) or 0) > 0
+    if spec.population == "rookie" and not rookie:
+        return False
+    if spec.population == "returner" and (rookie or not returning):
+        return False
     return all(_number(row.get(feature)) is not None for feature in spec.require_features)
 
 
@@ -534,9 +550,7 @@ def _choose_adaptive_source(
         mean_hit = sum(score[0] for score in fold_scores) / len(fold_scores)
         mean_ndcg = sum(score[1] for score in fold_scores) / len(fold_scores)
         primary, secondary = (
-            (mean_ndcg, mean_hit)
-            if spec.selection_metric == "ndcg"
-            else (mean_hit, mean_ndcg)
+            (mean_ndcg, mean_hit) if spec.selection_metric == "ndcg" else (mean_hit, mean_ndcg)
         )
         # Config order is a deterministic conservative tie-break: put the incumbent
         # first and a challenger must actually outperform it on past folds.
@@ -575,6 +589,7 @@ def fit_walk_forward(
     available_columns = set(predictions.columns)
     models: list[dict[str, Any]] = []
     for spec in config.models:
+        logger.info("fitting %s (%s population)", spec.name, spec.population)
         if spec.kind == "adaptive_select":
             if spec.target not in predictions.columns:
                 continue
@@ -801,9 +816,7 @@ def summarize_fitted_models(models: list[dict[str, Any]]) -> list[dict[str, Any]
                     math.sqrt(sum((v - mean) ** 2 for v in values) / len(values)), 4
                 )
         lambdas = sorted(
-            float(value)
-            for m in history
-            if (value := _number(m.get("ridge_lambda"))) is not None
+            float(value) for m in history if (value := _number(m.get("ridge_lambda"))) is not None
         )
         summary.append(
             {
@@ -911,6 +924,29 @@ def apply_fitted_models(
     return _apply_products(frame, config)
 
 
+PRODUCTION_OUTPUTS = ("fitted_ppg", "fitted_games", "fitted_season_points")
+
+
+def production_config(config: FitConfig) -> FitConfig:
+    """Only explicitly approved outputs and their transitive dependencies."""
+    specs = {spec.name: spec for spec in config.models}
+    needed: set[str] = set()
+
+    def include(name: str) -> None:
+        if name in needed or name not in specs:
+            return
+        needed.add(name)
+        spec = specs[name]
+        for dependency in (*spec.factors, *(v for _, v in spec.by_position)):
+            include(dependency)
+        if spec.fallback:
+            include(spec.fallback)
+
+    for name in PRODUCTION_OUTPUTS:
+        include(name)
+    return replace(config, models=tuple(s for s in config.models if s.name in needed))
+
+
 def fit_fingerprint(config: FitConfig) -> str:
     """Stable digest of everything that changes what a fitted model means."""
     payload = {
@@ -924,6 +960,20 @@ def fit_fingerprint(config: FitConfig) -> str:
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode())
     return digest.hexdigest()[:16]
+
+
+def production_definitions_digest() -> str:
+    """Scoring and feature construction used to train/apply the production model."""
+    root = Path(__file__).parents[1]
+    paths = [
+        root / "config/scoring.yaml",
+        root / "config/projections.yaml",
+        root / "metrics/projection.py",
+        root / "metrics/enrichment.py",
+        *sorted((root / "scoring").glob("*.py")),
+    ]
+    payload = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def build_fit_artifact(
@@ -947,8 +997,38 @@ def build_fit_artifact(
     completed_max = _number(completed.max()) if completed.len() else None
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "production_definitions_sha256": production_definitions_digest(),
+        "production_training_population": "returner",
+        "production_training_sha256": hashlib.sha256(
+            predictions.filter(pl.col("returning_indicator") == 1)
+            .select(
+                sorted(
+                    set(predictions.columns)
+                    & {
+                        "forecast_season",
+                        "player_id",
+                        "position",
+                        "outcome_complete",
+                        "actual_ppg",
+                        "actual_games",
+                        "returning_indicator",
+                        *(
+                            feature
+                            for spec in production_config(config).models
+                            for feature in spec.features
+                        ),
+                    }
+                )
+            )
+            .sort(["forecast_season", "player_id"])
+            .write_json()
+            .encode()
+        ).hexdigest()
+        if "returning_indicator" in predictions.columns
+        else None,
         "model_version": MODEL_VERSION,
         "fingerprint": fit_fingerprint(config),
+        "production_fingerprint": fit_fingerprint(production_config(config)),
         "fit_config": {
             "models": [asdict(spec) for spec in config.models],
             "min_train_folds": config.min_train_folds,
@@ -989,11 +1069,13 @@ def check_fit_artifact(
         raise FittedArtifactError(
             f"artifact schema {artifact.get('schema_version')} != {ARTIFACT_SCHEMA_VERSION}"
         )
-    if artifact.get("fingerprint") != fit_fingerprint(config):
+    if artifact.get("production_fingerprint") != fit_fingerprint(production_config(config)):
         raise FittedArtifactError(
             "fitted-model fingerprint does not match the current fit configuration; "
             "run `patron metric-report`"
         )
+    if artifact.get("production_definitions_sha256") != production_definitions_digest():
+        raise FittedArtifactError("scoring or feature definitions changed; refit production models")
     if artifact.get("pending_forecast_season") != forecast_season:
         raise FittedArtifactError(
             f"artifact was fitted for {artifact.get('pending_forecast_season')}, "

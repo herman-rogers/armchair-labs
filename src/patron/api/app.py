@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from patron.api.league_routes import router as league_router
+from patron.artifacts import artifact_status, verify_draft
 from patron.config.league import get_league
 from patron.config.settings import get_settings
 from patron.observability import configure_logging
@@ -57,7 +58,13 @@ METRIC_VERSIONS: tuple[MetricVersion, ...] = ("v1", "v2", "adaptive")
 
 def board_path(version: MetricVersion = "v1") -> Path:
     """Artifact path for one metric generation, with the legacy v1 alias supported."""
-    outputs = get_settings().outputs_dir
+    settings = get_settings()
+    static = getattr(settings, "static_dir", None)
+    if version == "v1" and static is not None:
+        archive = static / f"draft_{get_league().draft_season}"
+        if archive.exists():
+            return verify_draft(archive)
+    outputs = settings.outputs_dir
     explicit = outputs / f"board_{version}.json"
     if version == "v1" and not explicit.exists():
         return outputs / "board.json"
@@ -79,7 +86,11 @@ def load_board(version: MetricVersion = "v1") -> list[dict[str, Any]]:
 
 
 def metric_report_path() -> Path:
-    return get_settings().outputs_dir / "metric_report.json"
+    outputs = get_settings().outputs_dir
+    production = outputs / "production_report.json"
+    research = outputs / "metric_report.json"
+    available = [path for path in (production, research) if path.exists()]
+    return max(available, key=lambda path: path.stat().st_mtime) if available else research
 
 
 def load_metric_report() -> dict[str, Any]:
@@ -124,6 +135,7 @@ def status() -> dict[str, Any]:
         "metric_versions": {
             version: {
                 "available": available[version],
+                "provenance": artifact_status(paths[version]),
                 "player_count": len(load_board(version)) if available[version] else 0,
             }
             for version in METRIC_VERSIONS
