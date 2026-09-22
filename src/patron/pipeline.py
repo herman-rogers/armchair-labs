@@ -16,6 +16,7 @@ from typing import Any
 
 import polars as pl
 
+from patron.artifacts import atomic_write, verify_draft
 from patron.board.builder import build_board, build_player_seasons
 from patron.board.rank import apply_rank_key
 from patron.config.league import LeagueConfig, get_league
@@ -58,7 +59,9 @@ from patron.metrics.fit import (
     check_fit_artifact,
     fit_walk_forward,
     models_for_season,
+    production_config,
 )
+from patron.metrics.forecast import FORECAST_COLUMNS, attach_forecast
 from patron.metrics.projection import METRIC_VERSION, build_projection_board
 from patron.metrics.prospective import load_verified_snapshot
 from patron.metrics.rich_weekly import (
@@ -172,6 +175,7 @@ def attach_market(board: pl.DataFrame, market: pl.DataFrame | None) -> pl.DataFr
     """
     if market is None or market.height == 0:
         return board.with_columns(pl.lit(None, dtype=pl.Float64).alias("market_ecr"))
+    market = market.filter(pl.col("market_position").is_in(["QB", "RB", "WR", "TE"]))
     joined = board.join(market.select("player_id", *MARKET_COLUMNS), on="player_id", how="left")
     missing = market.filter(~pl.col("player_id").is_in(board["player_id"].to_list()))
     if missing.height == 0:
@@ -293,7 +297,7 @@ def load_fitted_models(
         logger.info(
             "fitted ranker loaded for %s (%s): %s",
             forecast_season,
-            report["fitted_artifact"]["fingerprint"],
+            report["fitted_artifact"]["production_fingerprint"],
             ", ".join(sorted(models)),
         )
     return models
@@ -302,6 +306,7 @@ def load_fitted_models(
 def load_draft_depth_chart(
     config: LeagueConfig,
     report_config: MetricReportConfig,
+    snapshot_date: str | None = None,
 ) -> pl.DataFrame | None:
     """Depth chart for the draft season, selected exactly as the backtest selects it.
 
@@ -316,7 +321,8 @@ def load_draft_depth_chart(
         except Exception:  # noqa: BLE001 - one missing season must not erase the board
             logger.warning("depth charts unavailable for %s", season)
     depth = pl.concat(frames, how="diagonal_relaxed") if frames else None
-    selected = depth_chart_as_of(depth, config.draft_season, report_config.depth_chart_cutoff)
+    cutoff = str(snapshot_date)[:10][5:] if snapshot_date else report_config.depth_chart_cutoff
+    selected = depth_chart_as_of(depth, config.draft_season, cutoff)
     if selected is None:
         logger.warning(
             "no depth chart on or before %s-%s",
@@ -335,6 +341,7 @@ def build(
     force: bool = False,
     strict_overrides: bool = True,
     report_config: MetricReportConfig | None = None,
+    include_experiments: bool = False,
 ) -> BuildResult:
     """Run the full Phase 1 pipeline and return every artifact it produced."""
     config = config or get_league()
@@ -372,7 +379,24 @@ def build(
     )
     projection_seasons = normalize_ppg_for_active_games(player_seasons)
     report_config = report_config or MetricReportConfig.from_config()
-    depth_chart = load_draft_depth_chart(config, report_config)
+    # Build from the same dated pending-fold inputs that the approved artifact records.
+    # A newer cached depth chart does not silently change the production forecast.
+    snapshot_date = None
+    model_path = settings.outputs_dir / "production_model.json"
+    if model_path.exists():
+        artifact = json.loads(model_path.read_text()).get("fitted_artifact")
+        try:
+            check_fit_artifact(
+                artifact,
+                report_config.fit,
+                config.draft_season,
+                report_config.depth_chart_cutoff,
+                None,
+            )
+            snapshot_date = artifact.get("depth_chart_latest")
+        except FittedArtifactError:
+            pass  # load_fitted_models reports the rejection; the board is marked degraded.
+    depth_chart = load_draft_depth_chart(config, report_config, snapshot_date=snapshot_date)
     live_depth_latest = (
         depth_chart["depth_chart_date"].cast(pl.String).max() if depth_chart is not None else None
     )
@@ -397,34 +421,44 @@ def build(
         current_players=depth_chart,
     )
     board_v2 = apply_fitted_models(
-        board_v2,
+        board_v2.with_columns(pl.lit(1.0).alias("returning_indicator")),
         load_fitted_models(
-            settings.outputs_dir / "metric_report.json",
+            settings.outputs_dir / "production_model.json",
             config.draft_season,
             report_config,
             live_depth_latest,
         ),
-        report_config.fit,
+        production_config(report_config.fit),
     )
     # Consensus ranks join every row; players the model cannot rate but the market
     # ranks are added as rows and given a rank-matched value inside apply_rank_key.
     board_v2_base = attach_market(board_v2, load_draft_market(config, report_config))
-    snapshot, freeze = load_verified_snapshot(
-        settings.static_dir / f"experimental_{config.draft_season}_predictions.csv",
-        CONFIG_DIR / f"experimental_freeze_{config.draft_season}.yaml",
-    )
-    selected_sources = freeze["selectors"]["fitted_adaptive_ppg_hybrid"][
-        "selected_source_by_position"
-    ]
-    board_adaptive = build_adaptive_board(
-        board_v2_base,
-        snapshot,
-        config,
-        selected_sources={str(k): str(v) for k, v in selected_sources.items()},
-    )
+    board_adaptive = pl.DataFrame()
+    if include_experiments:
+        snapshot, freeze = load_verified_snapshot(
+            settings.static_dir / f"experimental_{config.draft_season}_predictions.csv",
+            CONFIG_DIR / f"experimental_freeze_{config.draft_season}.yaml",
+        )
+        selected_sources = freeze["selectors"]["fitted_adaptive_ppg_hybrid"][
+            "selected_source_by_position"
+        ]
+        board_adaptive = build_adaptive_board(
+            board_v2_base,
+            snapshot,
+            config,
+            selected_sources={str(k): str(v) for k, v in selected_sources.items()},
+        )
     board_v2 = _season_equivalent(
         apply_rank_key(board_v2_base, config), config.metrics.projection_season_games
     )
+
+    as_of = f"{config.draft_season}-{report_config.depth_chart_cutoff}"
+    board_v2 = attach_forecast(board_v2, as_of)
+    if board_adaptive.height:
+        board_adaptive = attach_forecast(board_adaptive, str(freeze["frozen_on"]))
+    archive = settings.static_dir / f"draft_{config.draft_season}"
+    if archive.exists():
+        board = pl.read_json(verify_draft(archive))
 
     board_weeks = weeks.filter(pl.col("season") == config.board_season)
     kickers = aggregate_kicker_seasons(
@@ -728,6 +762,7 @@ def _analyze_with_fit(
 def reanalyze_metric_report(
     settings: Settings | None = None,
     report_config: MetricReportConfig | None = None,
+    production_only: bool = False,
 ) -> MetricReportBuildResult:
     """Refit and re-score from the retained fold predictions without rebuilding them.
 
@@ -741,16 +776,72 @@ def reanalyze_metric_report(
         raise FileNotFoundError(
             f"no retained fold predictions at {path}; run `patron metric-report`"
         )
-    report, predictions = _analyze_with_fit(pl.read_parquet(path), report_config)
+    predictions = pl.read_parquet(path)
+    if production_only:
+        # Research columns cannot become incidental inputs to production evaluation.
+        columns = {
+            "forecast_season",
+            "source_season",
+            "player_id",
+            "player_display_name",
+            "position",
+            "player_population",
+            "returning_indicator",
+            "rookie_indicator",
+            "outcome_complete",
+            "actual_matched",
+            "depth_chart_date",
+            "draft_pool_version",
+            "games",
+            "ppg",
+            "season_pts",
+            "ppg_denominator_games",
+            "proj_ppg",
+            "adj_proj_vor",
+            "market_ecr",
+            "market_position",
+            "market_ecr_score",
+            "market_overall_ecr_score",
+            "market_snapshot",
+            *(target.key for target in report_config.targets),
+            *(feature for spec in report_config.fit.models for feature in spec.features),
+        }
+        predictions = predictions.select(sorted(columns & set(predictions.columns)))
+    report, predictions = _analyze_with_fit(predictions, report_config)
     return MetricReportBuildResult(report=report, predictions=predictions)
 
 
-def export_metric_report(result: MetricReportBuildResult, outputs: Path) -> tuple[Path, Path, Path]:
+def export_metric_report(
+    result: MetricReportBuildResult, outputs: Path, stem: str = "metric_report"
+) -> tuple[Path, Path, Path]:
     """Write JSON for the API, Markdown for humans, and detailed forecast rows."""
-    json_path = outputs / "metric_report.json"
-    markdown_path = outputs / "metric_report.md"
-    predictions_path = outputs / "metric_backtest_predictions.parquet"
-    json_path.write_text(json.dumps(result.report, indent=2, default=str))
+    json_path = outputs / f"{stem}.json"
+    markdown_path = outputs / f"{stem}.md"
+    predictions_path = outputs / (
+        "metric_backtest_predictions.parquet"
+        if stem == "metric_report"
+        else f"{stem}_predictions.parquet"
+    )
+    atomic_write(json_path, json.dumps(result.report, indent=2, default=str))
+    artifact = result.report.get("fitted_artifact")
+    if artifact:
+        from patron.metrics.fit import PRODUCTION_OUTPUTS
+
+        production = {
+            "fitted_artifact": {
+                key: value
+                for key, value in artifact.items()
+                if key not in {"fingerprint", "fit_config", "outputs", "created_at", "pending_rows"}
+            },
+            "fitted_models": [
+                m
+                for m in result.report.get("fitted_models", [])
+                if m["model"] in PRODUCTION_OUTPUTS
+            ],
+        }
+        atomic_write(
+            outputs / "production_model.json", json.dumps(production, indent=2, default=str)
+        )
     markdown_path.write_text(render_metric_report_markdown(result.report))
     result.predictions.write_parquet(predictions_path)
     return json_path, markdown_path, predictions_path
@@ -758,6 +849,7 @@ def export_metric_report(result: MetricReportBuildResult, outputs: Path) -> tupl
 
 #: Board columns written to JSON, in display order.
 BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
+    *FORECAST_COLUMNS,
     "metric_version",
     "rank",
     "player_display_name",
@@ -863,10 +955,18 @@ BOARD_EXPORT_COLUMNS: tuple[str, ...] = (
 def export_board(board: pl.DataFrame, path: Path) -> Path:
     """Write the board as JSON records, rounded for display."""
     columns = [column for column in BOARD_EXPORT_COLUMNS if column in board.columns]
-    export = board.select(columns).with_columns(
-        pl.col(pl.Float64).round(3),
-    )
-    path.write_text(json.dumps(export.to_dicts(), indent=2, default=str))
+    preserved = set(FORECAST_COLUMNS)
+    if "forecast_source" in board.columns:
+        preserved.update(
+            feature
+            for spec in production_config(MetricReportConfig.from_config().fit).models
+            for feature in spec.features
+        )
+    rounded = [
+        name for name in columns if board.schema[name] == pl.Float64 and name not in preserved
+    ]
+    export = board.select(columns).with_columns(pl.col(rounded).round(3))
+    atomic_write(path, json.dumps(export.to_dicts(), indent=2, default=str))
     return path
 
 
@@ -880,7 +980,11 @@ def export_markdown(board: pl.DataFrame, path: Path, limit: int | None = None) -
     is_v2 = "proj_ppg" in rows.columns
     version = "v2 projected" if is_v2 else "v1 historical"
     vor_column = "v2_overall_vor" if is_v2 else "adj_vor"
-    ppg_column = "proj_ppg" if is_v2 else "ppg"
+    ppg_column = (
+        "forecast_active_ppg"
+        if "forecast_active_ppg" in rows.columns
+        else ("proj_ppg" if is_v2 else "ppg")
+    )
     team_column = "projected_team" if is_v2 else "team"
     lines = [
         f"# Overall Draft Board ({version}) — {rows.height} players",

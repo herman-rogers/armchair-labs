@@ -101,14 +101,13 @@ def wire_replacement_levels(
     definition. Preseason baselines assume an undrafted pool; once a league has drafted,
     the honest bar is whatever is still sitting there.
 
-    Falls back to the best available player when the pool is thinner than the baseline
-    rank, which is the common case at tight end.
+    Baseline keys select positions only; draft replacement ranks do not apply here.
     """
     ppg_column = ppg_column or _projection_ppg_column(tagged_board)
     levels: dict[str, float] = {}
     available = tagged_board.filter(pl.col(IS_FREE_AGENT))
 
-    for position, rank in baseline_ranks.items():
+    for position in baseline_ranks:
         pool = (
             available.filter(pl.col("position") == position)
             .sort(ppg_column, descending=True)
@@ -117,7 +116,7 @@ def wire_replacement_levels(
         )
         if pool.len() == 0:
             continue
-        levels[position] = float(pool[min(rank, pool.len()) - 1])
+        levels[position] = float(pool[0])
 
     return levels
 
@@ -130,7 +129,7 @@ UNAVAILABLE_INJURY_TAGS = frozenset({"OUT", "INJURY_RESERVE", "SUSPENSION"})
 def ranked_wire(
     tagged_board: pl.DataFrame,
     baseline_ranks: dict[str, int],
-    min_vor: float | None = 0.0,
+    min_vor: float | None = None,
     limit: int | None = 50,
     healthy_only: bool = False,
 ) -> pl.DataFrame:
@@ -754,3 +753,25 @@ def draft_analysis(
         team["captured_value"] = round(team["captured_value"], 1)
         team["value_left_on_board"] = round(team["value_left_on_board"], 1)
     return {"picks": picks, "teams": teams, "ranking_metric": value_column}
+
+
+def wire_lineup_improvements(
+    wire: pl.DataFrame, board: pl.DataFrame, roster_slots: dict[str, int]
+) -> pl.DataFrame:
+    """Season-equivalent lineup gain from adding a player, before a specific drop.
+
+    Uses all rostered players and legal slots. This is a preseason opportunity value,
+    not a current-week recommendation, and does not presume a bench player is dropped.
+    """
+    from patron.espn.lineup import best_lineup
+
+    value = _projection_ppg_column(board)
+    mine = board.filter(pl.col(IS_MINE))
+    if not mine.height:
+        return wire.with_columns(pl.lit(None, dtype=pl.Float64).alias("lineup_improvement"))
+    baseline = best_lineup(mine, roster_slots, value).total
+    gains = []
+    for row in wire.iter_slices(1):
+        augmented = pl.concat([mine, row], how="diagonal_relaxed")
+        gains.append(max(0.0, best_lineup(augmented, roster_slots, value).total - baseline))
+    return wire.with_columns(pl.Series("lineup_improvement", gains, dtype=pl.Float64))

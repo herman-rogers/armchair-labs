@@ -19,7 +19,7 @@ const COLUMNS: PlayerColumn[] = [
     key: 'wire_vor',
     label: 'Wire VOR',
     title:
-      'Historical PPG above the configured replacement-ranked player in the current free-agent pool. This is not preseason draft VOR.',
+      'Historical PPG above the best freely available player in the current free-agent pool. This is not preseason draft VOR.',
     render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
   },
   {
@@ -43,7 +43,7 @@ const V2_COLUMNS: PlayerColumn[] = [
   {
     key: 'wire_vor',
     label: 'Wire VOR',
-    title: 'Season-equivalent projected PPG above the configured replacement-ranked player in the current free-agent pool.',
+    title: 'Season-equivalent projected PPG above the best freely available player in the current free-agent pool.',
     render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
   },
   {
@@ -53,16 +53,22 @@ const V2_COLUMNS: PlayerColumn[] = [
     render: (p) => number(p.season_equivalent_ppg),
   },
   {
-    key: 'proj_ppg',
-    label: 'Active PPG',
-    title: 'Hand-built projected points per active game. Compare with Avail PPG to see the effect of expected missed time.',
-    render: (p) => <span className="dim">{number(p.proj_ppg)}</span>,
+    key: 'lineup_improvement',
+    label: 'Lineup gain',
+    title: 'Preseason season-equivalent lineup gain from adding this player before choosing a drop.',
+    render: (p) => number(p.lineup_improvement),
   },
   {
-    key: 'expected_games',
+    key: 'forecast_active_ppg',
+    label: 'Active PPG',
+    title: 'Fitted points per active game. Adaptive season totals have no identified active-game decomposition.',
+    render: (p) => <span className="dim">{number(p.forecast_active_ppg ?? (p.metric_version === 'adaptive' ? null : p.fitted_ppg))}</span>,
+  },
+  {
+    key: 'forecast_expected_games',
     label: 'Exp G',
-    title: 'Expected games from nflverse participation and injury history.',
-    render: (p) => <span className="dim">{number(p.expected_games)}</span>,
+    title: 'Fitted expected games underlying the season forecast.',
+    render: (p) => <span className="dim">{number(p.forecast_expected_games ?? (p.metric_version === 'adaptive' ? null : p.fitted_games))}</span>,
   },
   {
     key: 'projected_targets_pg',
@@ -89,7 +95,7 @@ const V2_COLUMNS: PlayerColumn[] = [
  * The ranked wire.
  *
  * The one screen that wins waivers. Its numbers deliberately differ from the draft
- * board's: replacement is recalculated at the configured positional slot within the
+ * board's: replacement is the best player at each position among the
  * players currently unowned. Using the preseason pool would misstate pickup value.
  */
 export function WirePanel({ version }: { version: MetricVersion }) {
@@ -148,8 +154,8 @@ export function WirePanel({ version }: { version: MetricVersion }) {
           .sort()
           .map(([pos, ppg]) => `${pos} ${ppg.toFixed(1)}`)
           .join(' · ')}{' '}
-        — the configured replacement slot within the players currently unowned, not the
-        best free agent and not the preseason pool. {version !== 'v1' &&
+        — the best freely available player at each position. Wire VOR is zero for that
+        player and negative for weaker alternatives. Lineup gain measures improvement to your starters. {version !== 'v1' &&
           'Both the pool baseline and Wire VOR use availability-adjusted season-equivalent PPG.'}
       </p>
 

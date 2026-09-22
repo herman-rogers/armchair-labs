@@ -23,7 +23,7 @@ type WorkspaceView = 'compare' | 'roster'
 const SORT_LABELS: Record<SortKey, string> = {
   team_rank: 'Power',
   ranking_total: 'Overall VOR',
-  risk_adjusted_total: 'RA-VOR',
+  risk_adjusted_total: 'Scenario VOR',
   wins: 'Record',
   expected_weekly_points: 'Expected',
   weekly_floor: 'Floor',
@@ -214,7 +214,7 @@ export function LeagueBoard({
                 <th className="left sticky-team">Team</th>
                 <MetricHeader metric="team_rank" active={sort.key === 'team_rank'} direction={sort.direction} onSort={changeSort} title={`League-wide power rank: best legal full-strength lineup on ${boardMetricLabel(myTeam.ranking_metric)}`} />
                 <MetricHeader metric="ranking_total" active={sort.key === 'ranking_total'} direction={sort.direction} onSort={changeSort} title={`Best legal full-strength lineup summed on ${boardMetricLabel(myTeam.ranking_metric)}: per-game points above a replacement lineup`} />
-                <MetricHeader metric="risk_adjusted_total" active={sort.key === 'risk_adjusted_total'} direction={sort.direction} onSort={changeSort} title="Risk-adjusted VOR: expected best-active-lineup VOR across availability scenarios, less 0.674 x its spread (an approximate 25th percentile). Penalises stars-and-scrubs rosters whose absent stars expose a weak bench." />
+                <MetricHeader metric="risk_adjusted_total" active={sort.key === 'risk_adjusted_total'} direction={sort.direction} onSort={changeSort} title="Experimental, uncalibrated scenario statistic: availability is applied to already availability-adjusted VOR. Do not interpret as a calibrated risk rank." />
                 <MetricHeader metric="wins" active={sort.key === 'wins'} direction={sort.direction} onSort={changeSort} title="Current ESPN record" />
                 <MetricHeader metric="expected_weekly_points" active={sort.key === 'expected_weekly_points'} direction={sort.direction} onSort={changeSort} title="Availability-aware points from the best legal active lineup" />
                 <MetricHeader metric="weekly_floor" active={sort.key === 'weekly_floor'} direction={sort.direction} onSort={changeSort} title="Approximate 25th-percentile weekly lineup score" />

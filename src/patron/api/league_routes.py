@@ -219,6 +219,7 @@ def wire(
     if position:
         frame = frame.filter(pl.col("position") == position.upper())
 
+    frame = reports.wire_lineup_improvements(frame, state.tagged_board, state.snapshot.roster_slots)
     levels = reports.wire_replacement_levels(state.tagged_board, config.vor_baseline_rank)
 
     return {

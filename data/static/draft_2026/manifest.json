@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "role": "immutable_draft_reference",
+  "season": 2026,
+  "files": {
+    "board_v1.json": "ad726895d69481d0f4e2a423d90d300908875b031717ebd7ee92d8536bd772a9",
+    "league.yaml": "fb9d67746e36d6803f16944f0afa4b875fa07e4c26c2eaf27cf09c38973ef13e",
+    "scoring.yaml": "45d33e9ea361fa71078aa497fddb4d4589014e0af407312a4f8b3bac76a91a99",
+    "overrides.yaml": "4da3d923c1c45d481c64b42e27a12d92ef63b5e86dae6cfaeb7e16997cf4833d",
+    "projections.yaml": "30f2083e6dccb11d0d8adf4aa0ca41e7ae3ec5ef1b216a4a831fee22c566a088"
+  }
+}

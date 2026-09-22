@@ -1,0 +1,73 @@
+# Sweaty Plays league scoring — §3 of the implementation plan.
+# This file is the single source of truth. Changing a league setting means editing
+# here, not in code; tests/test_scoring_engine.py scores against these values.
+
+passing:
+  yards_per_point: 25       # 0.04 pts/yd
+  touchdown: 4
+  interception: -2
+  two_point_conversion: 2
+
+rushing:
+  points_per_yard: 0.1      # 1 pt / 10 yds
+  touchdown: 6
+  two_point_conversion: 2
+
+receiving:
+  points_per_reception: 1.0 # full PPR
+  points_per_yard: 0.1
+  touchdown: 6
+  two_point_conversion: 2
+
+misc:
+  fumble_lost: -2
+  # Kick and punt return touchdowns. Absent from the design doc's write-up of the
+  # league sheet, but nflverse scores them at 6 in its PPR total and the parity test
+  # between the two scoring paths found the gap. Standard ESPN scoring; if this league
+  # somehow does not pay them, set to 0 and the fast path must stop being the default.
+  special_teams_touchdown: 6
+
+# Big-play touchdown bonuses, by TD distance in yards.
+# Brackets are EXCLUSIVE — a 55-yard TD scores +3, not +2 and +3.
+# On a passing TD the bonus is credited to BOTH passer and receiver;
+# on a rushing TD, to the rusher only.
+bonuses:
+  brackets:
+    - {min_yards: 40, max_yards: 49, points: 2}
+    - {min_yards: 50, max_yards: null, points: 3}
+
+kicking:
+  field_goals:
+    - {min_yards: 0,  max_yards: 39,   points: 3}
+    - {min_yards: 40, max_yards: 49,   points: 4}
+    - {min_yards: 50, max_yards: 59,   points: 5}
+    - {min_yards: 60, max_yards: null, points: 6}
+  extra_point: 1
+  missed_field_goal: -1
+  # The league sheet says "miss -1" without distinguishing a blocked kick from a
+  # plain miss. nflverse tracks fg_missed and fg_blocked separately. Default is to
+  # penalise plain misses only; flip to true if the league counts blocks as misses.
+  blocked_counts_as_miss: false
+
+defense:
+  sack: 1
+  interception: 2
+  fumble_recovery: 2
+  touchdown: 6
+  safety: 2
+  points_allowed:
+    - {min: 0,  max: 0,    points: 10}
+    - {min: 1,  max: 6,    points: 7}
+    - {min: 7,  max: 13,   points: 4}
+    - {min: 14, max: 17,   points: 1}
+    - {min: 18, max: 27,   points: 0}
+    - {min: 28, max: 34,   points: -1}
+    - {min: 35, max: null, points: -4}
+  yards_allowed:
+    - {min: 0,   max: 99,   points: 5}
+    - {min: 100, max: 199,  points: 3}
+    - {min: 200, max: 299,  points: 2}
+    - {min: 300, max: 349,  points: 0}
+    - {min: 350, max: 399,  points: -1}
+    - {min: 400, max: 449,  points: -3}
+    - {min: 450, max: null, points: -5}

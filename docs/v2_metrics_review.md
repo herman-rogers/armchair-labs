@@ -1,3 +1,9 @@
+> Evidence status (2026-09-22): the numerical results below are historical records.
+> Earlier rankers were evaluated on different player populations and do not establish
+> market outperformance. See [the stat-system review](stat_system_review_2026-09-22.md)
+> and [implementation and corrected evidence](stat_system_implementation_2026-09-22.md).
+> The frozen Adaptive snapshot remains experimental; no research model was promoted.
+
 # V2 metrics review
 
 Date: 2026-08-29. Scope: the v2 projection model (`src/patron/metrics/projection.py`,

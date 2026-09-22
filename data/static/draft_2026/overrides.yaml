@@ -1,0 +1,76 @@
+# Manual situational overrides — §5 of the implementation plan.
+#
+# The model's blind spots are trades, coaching changes, and injuries: things that
+# happened after the last snap of last season and so cannot be in the data. This
+# file is where that judgement lives, with a reason attached to every entry.
+#
+# An override is a delta applied to computed VOR, in VOR points (which are PPG
+# points — a -2.5 says "I expect this player to produce 2.5 fewer points per game
+# than his 2025 tape implies"). Deltas rather than fixed ranks on purpose: a delta
+# composes with re-ranking, so these entries keep working in-season as the player
+# pool shifts around them. A hardcoded rank breaks the first time the wire changes.
+#
+# Matching is by normalized name + position. An entry that matches nothing is an
+# ERROR, not a warning — a silently-dropped override is how a hurt player quietly
+# climbs back onto the board.
+#
+# The six entries below are reverse-engineered from data/static/2026_draft_list.md,
+# where they are the rows sitting out of pure VOR order. Each reproduces that row's
+# published position.
+
+overrides:
+  - player: George Kittle
+    position: TE
+    vor_delta: -2.5
+    reason: "Achilles tear Jan '26; Week 1 not guaranteed. Published board demoted him from ~22 to 53."
+
+  - player: Tucker Kraft
+    position: TE
+    vor_delta: -1.1
+    reason: "Off PUP from ACL tear, Week 1 possible but risky. Demoted from ~22 to 33."
+
+  - player: Ashton Jeanty
+    position: RB
+    vor_delta: -1.0
+    reason: "Ankle sprain in 8/23 practice, Week 1 uncertain. Short-term, not structural."
+
+  - player: Patrick Mahomes
+    position: QB
+    vor_delta: -0.5
+    reason: "Knee (ACL) rehab, on track for Week 1; rushing upside written down."
+
+  - player: Daniel Jones
+    position: QB
+    vor_delta: -0.5
+    reason: "Returning from Achilles tear."
+
+  - player: DeVonta Smith
+    position: WR
+    vor_delta: -0.25
+    reason: "Recurring hamstring, fourth occurrence; expected Week 1."
+
+# Players the model cannot rank at all — no usable prior-season sample — but who are
+# draftable. They do not enter the board (there is no VOR to adjust); they are carried
+# here so the reporter can surface them alongside it. Phase 4's in-season data is what
+# eventually promotes them into the board proper.
+blind_spots:
+  - player: Malik Nabers
+    position: WR
+    team: NYG
+    note: "ACL return, on track Week 1, WR1 upside. Only 4 games in '25."
+  - player: Mike Washington Jr.
+    position: RB
+    team: LV
+    note: "Jeanty handcuff, strong preseason, late-round priority."
+
+# Players confirmed out for the season — removed from the board entirely.
+#
+# NOTE: data/static/2026_draft_list.md contradicts itself here. Its footer reads
+# "Removed (out for 2026): Pearsall, Higgins", but Tee Higgins is ranked #30 in the
+# same file's table. Pearsall is genuinely absent from all 160 rows. Treating the
+# ranked table as authoritative (it is the artifact we validate against), so only
+# Pearsall is removed. Confirm Higgins' status before trusting either.
+removed:
+  - player: Ricky Pearsall
+    position: WR
+    reason: "Out for 2026 per the draft board footer; absent from all 160 ranked rows."

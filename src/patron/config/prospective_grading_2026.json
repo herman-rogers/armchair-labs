@@ -1,0 +1,95 @@
+{
+  "baselines": {
+    "default": [
+      "historical_ppg_prior",
+      "ppg",
+      "market_ecr_score"
+    ],
+    "actual_season_points": [
+      "historical_ppg_prior",
+      "ppg",
+      "season_pts",
+      "market_ecr_score"
+    ]
+  },
+  "candidates": [
+    "fitted_nextgen_ppg",
+    "fitted_nextgen_season_points",
+    "fitted_market_availability_returner_season_points",
+    "fitted_ppg",
+    "fitted_season_points",
+    "fitted_season_points_direct",
+    "fitted_two_stage",
+    "fitted_market_ppg",
+    "fitted_market_season_points",
+    "fitted_core_plus_ppg",
+    "fitted_core_plus_season_points",
+    "fitted_research_ppg",
+    "fitted_research_season_points",
+    "fitted_soph_ppg",
+    "fitted_soph_season_points",
+    "fitted_rostered_season_points",
+    "fitted_status_season_points",
+    "fitted_roster_ppg",
+    "fitted_roster_season_points",
+    "fitted_career_ppg",
+    "fitted_career_season_points",
+    "fitted_athletic_ppg",
+    "fitted_athletic_season_points",
+    "fitted_security_ppg",
+    "fitted_role_security_season_points",
+    "fitted_additive_ppg",
+    "fitted_additive_season_points",
+    "fitted_full_stack_season_points",
+    "fitted_rich_weekly_ppg",
+    "fitted_rich_weekly_games",
+    "fitted_rich_weekly_season_points",
+    "fitted_rich_weekly_direct",
+    "fitted_rich_weekly_combined",
+    "fitted_adaptive_ppg_hybrid",
+    "fitted_adaptive_season_hybrid",
+    "proj_ppg",
+    "prior_branch_ppg",
+    "component_proj_ppg"
+  ],
+  "targets": [
+    "actual_season_points",
+    "actual_ppg"
+  ],
+  "market_baseline": "market_ecr_score",
+  "market_price_ranker": "market_overall_ecr_score",
+  "disagreement_round_size": 10,
+  "disagreement_rounds": 2,
+  "value_capture_rank_gaps": [
+    0,
+    20,
+    60,
+    120
+  ],
+  "top_k": {
+    "QB": 12,
+    "RB": 24,
+    "WR": 36,
+    "TE": 12
+  },
+  "pool": {
+    "QB": 24,
+    "RB": 60,
+    "WR": 80,
+    "TE": 24
+  },
+  "overall": {
+    "k": 60,
+    "pool": 120,
+    "target": "actual_availability_value",
+    "replacement_ranks": {
+      "QB": 12,
+      "RB": 25,
+      "WR": 35,
+      "TE": 12
+    },
+    "min_games": 8,
+    "season_games": 17
+  },
+  "outcome_pool": "scored_legacy"
+}

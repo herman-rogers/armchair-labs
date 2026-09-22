@@ -218,6 +218,11 @@ def _fill_market_fallback(frame: pl.DataFrame, neighbours: int = 3) -> pl.DataFr
         nearest = sorted(rated, key=lambda r: abs(float(r["market_ecr"]) - float(ecr)))[:neighbours]
         for c in fills:
             fills[c].append(_borrow(nearest, c))
+        if "fitted_season_points" in fills and "fitted_ppg" in fills and "fitted_games" in fills:
+            mean, games = fills["fitted_ppg"][-1], fills["fitted_games"][-1]
+            fills["fitted_season_points"][-1] = (
+                mean * games if mean is not None and games is not None else None
+            )
         source.append(MARKET_KEY)
         key_fill.append(MARKET_KEY)
     return frame.with_columns(

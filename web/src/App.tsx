@@ -87,6 +87,12 @@ export default function App() {
           </div>
         </div>
 
+        <p className="dim">
+          Historical / preseason views. Ownership and injury updates do not update forecasts.
+          {version === 'adaptive' && ' Adaptive ranks use frozen season totals; roster points and risk use a separate V2 simulation.'}
+          {version !== 'v1' && status.data?.metric_versions[version]?.provenance?.state !== 'current'
+            && ' Forecast artifact is stale or unverified; rebuild with matching model evidence.'}
+        </p>
         <nav className="mainnav" role="tablist" aria-label="Section">
           {VIEWS.map((entry) => (
             <button

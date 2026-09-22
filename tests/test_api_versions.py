@@ -36,9 +36,21 @@ def test_board_version_selects_the_matching_artifact(tmp_path, monkeypatch) -> N
 
     status = api_module.status()
     assert status["metric_versions"] == {
-        "v1": {"available": True, "player_count": 1},
-        "v2": {"available": True, "player_count": 1},
-        "adaptive": {"available": True, "player_count": 1},
+        "v1": {
+            "available": True,
+            "player_count": 1,
+            "provenance": {"state": "unverified", "artifact_id": None},
+        },
+        "v2": {
+            "available": True,
+            "player_count": 1,
+            "provenance": {"state": "unverified", "artifact_id": None},
+        },
+        "adaptive": {
+            "available": True,
+            "player_count": 1,
+            "provenance": {"state": "unverified", "artifact_id": None},
+        },
     }
     assert status["metric_report"] == {"available": False, "built_at": None}
 

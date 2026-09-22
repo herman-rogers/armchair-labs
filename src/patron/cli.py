@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Annotated
@@ -20,6 +21,7 @@ import typer
 import yaml
 
 from patron import pipeline
+from patron.artifacts import publish_draft, publish_provenance
 from patron.cli_auth import app as auth_app
 from patron.config.league import get_league
 from patron.config.settings import CONFIG_DIR, get_settings
@@ -33,6 +35,7 @@ from patron.metrics.discovery import (
     render_discovery_markdown,
     report_json,
 )
+from patron.metrics.fit import production_config
 from patron.metrics.prospective import (
     ProspectiveGradePending,
     file_sha256,
@@ -62,6 +65,9 @@ def _configure_logging(verbose: bool) -> None:
 def board(
     force: bool = typer.Option(False, "--force", help="Rebuild derived caches from scratch."),
     limit: int = typer.Option(160, "--limit", help="Rows in the Markdown board."),
+    experiments: bool = typer.Option(
+        False, "--experiments", help="Also rebuild frozen Adaptive comparison."
+    ),
     show: int = typer.Option(25, "--show", help="Rows to print to the terminal."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
@@ -70,20 +76,41 @@ def board(
     settings = get_settings()
     config = get_league()
 
-    result = pipeline.build(config=config, settings=settings, force=force)
+    result = pipeline.build(
+        config=config, settings=settings, force=force, include_experiments=experiments
+    )
 
     outputs = settings.outputs_dir
     # Keep board.json as the v1 compatibility alias. New consumers select an explicit
     # version; the dashboard/API can switch without rebuilding.
-    pipeline.export_board(result.board, outputs / "board.json")
-    pipeline.export_board(result.board, outputs / "board_v1.json")
+    archive = settings.static_dir / f"draft_{config.draft_season}"
+    if archive.exists():
+        publish_draft(archive, outputs)
+    else:
+        pipeline.export_board(result.board, outputs / "board.json")
+        pipeline.export_board(result.board, outputs / "board_v1.json")
     pipeline.export_board(result.board_v2, outputs / "board_v2.json")
-    pipeline.export_board(result.board_adaptive, outputs / "board_adaptive.json")
+    dependencies = [
+        outputs / "production_model.json",
+        *(
+            CONFIG_DIR / name
+            for name in ("league.yaml", "scoring.yaml", "overrides.yaml", "projections.yaml")
+        ),
+        *(
+            Path(__file__).parent / "metrics" / name
+            for name in ("fit.py", "projection.py", "enrichment.py", "forecast.py")
+        ),
+        *(Path(__file__).parent / "scoring").glob("*.py"),
+        *(Path(__file__).parent / "board").glob("*.py"),
+    ]
+    publish_provenance(outputs / "board_v2.json", dependencies)
+    if experiments:
+        pipeline.export_board(result.board_adaptive, outputs / "board_adaptive.json")
+        publish_provenance(outputs / "board_adaptive.json", dependencies)
     pipeline.export_markdown(result.board, outputs / "board_v1.md", limit=limit)
     pipeline.export_markdown(result.board_v2, outputs / "board_v2.md", limit=limit)
-    pipeline.export_markdown(
-        result.board_adaptive, outputs / "board_adaptive.md", limit=limit
-    )
+    if experiments:
+        pipeline.export_markdown(result.board_adaptive, outputs / "board_adaptive.md", limit=limit)
     result.player_seasons.write_parquet(outputs / "player_seasons.parquet")
     result.kickers.write_parquet(outputs / "kickers.parquet")
     result.defenses.write_parquet(outputs / "defenses.parquet")
@@ -143,6 +170,39 @@ def metric_report(
         f"Built {summary['forecast_rows']} forecast rows; completed seasons "
         f"{summary['completed_forecasts']}, pending {summary['pending_forecasts']}."
     )
+    typer.echo("Wrote " + ", ".join(str(path) for path in paths))
+
+
+@app.command("production-report")
+def production_report(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
+    """Refit only approved production models from retained inputs, without research fits."""
+    _configure_logging(verbose)
+    settings = get_settings()
+    config = MetricReportConfig.from_config()
+    fit = production_config(config.fit)
+    config = replace(
+        config,
+        fit=fit,
+        ranking=replace(config.ranking, candidates=fit.output_columns),
+        metrics=tuple(
+            metric
+            for metric in config.metrics
+            if metric.key
+            in {
+                *fit.output_columns,
+                "historical_ppg_prior",
+                "ppg",
+                "season_pts",
+                "market_ecr_score",
+                "market_overall_ecr_score",
+                "expected_games",
+            }
+        ),
+    )
+    result = pipeline.reanalyze_metric_report(
+        settings=settings, report_config=config, production_only=True
+    )
+    paths = pipeline.export_metric_report(result, settings.outputs_dir, stem="production_report")
     typer.echo("Wrote " + ", ".join(str(path) for path in paths))
 
 
@@ -239,9 +299,7 @@ def feature_discovery(
     json_path.write_text(report_json(report))
     markdown_path.write_text(render_discovery_markdown(report))
     predictions.write_parquet(output_predictions)
-    promoted = [
-        row["candidate"] for row in report["promotion_gates"] if row["promotion_ready"]
-    ]
+    promoted = [row["candidate"] for row in report["promotion_gates"] if row["promotion_ready"]]
     typer.echo(
         f"Scored {predictions.height} rows across {len(fits)} walk-forward refits; "
         f"promotion-ready: {', '.join(promoted) if promoted else 'none'}."

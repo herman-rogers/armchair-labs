@@ -4,6 +4,15 @@ export type Position = 'QB' | 'RB' | 'WR' | 'TE'
 export type MetricVersion = 'v1' | 'v2' | 'adaptive'
 
 export interface Player {
+  lineup_improvement?: number | null
+  forecast_active_ppg?: number | null
+  forecast_expected_games?: number | null
+  forecast_season_points?: number | null
+  forecast_source?: string
+  forecast_as_of?: string
+  forecast_sample_support?: number | null
+  forecast_status?: string
+  simulation_source?: string
   metric_version: MetricVersion
   rank: number
   player_id: string
@@ -130,7 +139,7 @@ export interface Status {
   board_available: boolean
   built_at: string | null
   player_count: number
-  metric_versions: Record<MetricVersion, { available: boolean; player_count: number }>
+  metric_versions: Record<MetricVersion, { available: boolean; player_count: number; provenance?: { state: string; artifact_id: string | null } }>
   metric_report: { available: boolean; built_at: string | null }
   league: {
     name: string
@@ -266,6 +275,10 @@ export interface MetricRankingResult {
 }
 
 export interface MetricReport {
+  evaluation_contract?: string
+  deployment_results?: Array<{forecast_season: number; hit_rate: number; coverage: number; market_fallback_n: number}>
+  common_pool_results?: Array<{forecast_season: number; ranker: string; common_n: number; coverage: number; hit_rate_lift: number}>
+
   schema_version: number
   title: string
   generated_at: string

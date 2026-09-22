@@ -67,6 +67,7 @@ class RankingConfig:
     the same top-K slice per position, so the score describes the top of the board.
     """
 
+    outcome_pool: str = "complete"
     baselines: tuple[str, ...] = ("historical_ppg_prior", "ppg")
     # Target-matched baselines: a season-points outcome is compared against the
     # model-free season-points ranking too, not only PPG rankings.
@@ -329,12 +330,25 @@ def build_backtest_predictions(
                 rookies = rookies.join(candidates.select("player_id"), on="player_id", how="anti")
                 candidates = pl.concat([candidates, rookies], how="diagonal_relaxed")
 
+        # The draft universe includes market-ranked players without historical tape.
+        # Keep them as uncovered/fallback rows, rather than erasing their outcomes.
+        if market_rankings is not None and market_rankings.height:
+            market_pool = market_rankings.filter(pl.col("forecast_season") == forecast_season)
+            if "market_position" in market_pool.columns:
+                extras = market_pool.join(
+                    candidates.select("player_id"), on="player_id", how="anti"
+                )
+                extras = extras.filter(pl.col("market_position").is_in(["QB", "RB", "WR", "TE"]))
+                extras = extras.select("player_id", pl.col("market_position").alias("position"))
+                extras = extras.with_columns(pl.lit("market_only").alias("player_population"))
+                candidates = pl.concat([candidates, extras], how="diagonal_relaxed")
         fold = (
             candidates.join(actual, on="player_id", how="left")
             .with_columns(
                 pl.lit(forecast_season).cast(pl.Int32).alias("forecast_season"),
                 pl.lit(source_season).cast(pl.Int32).alias("source_season"),
                 pl.lit(complete).alias("outcome_complete"),
+                pl.lit(2).alias("draft_pool_version"),
                 pl.col("actual_ppg").is_not_null().alias("actual_matched"),
             )
             .with_columns(
@@ -709,6 +723,7 @@ def _rank_fold(
     target: str,
     k: int,
     pool: int,
+    complete_pool: bool = True,
 ) -> dict[str, Any] | None:
     """Score one ranker on one fold and position.
 
@@ -724,17 +739,24 @@ def _rank_fold(
         if (metric := _number(row.get(ranker))) is not None
         and (actual := _number(row.get(target))) is not None
     ]
-    if len(scored) < k or k <= 0:
+    outcomes = [
+        (0.0, actual, row) for row in rows if (actual := _number(row.get(target))) is not None
+    ]
+    universe = outcomes if complete_pool else scored
+    if len(universe) < k or k <= 0 or not scored:
         return None
     by_ranker = sorted(scored, key=lambda item: item[0], reverse=True)
-    by_actual = sorted(scored, key=lambda item: item[1], reverse=True)
+    by_actual = sorted(universe, key=lambda item: item[1], reverse=True)
     actual_top = {id(item[2]) for item in by_actual[:k]}
     hits = sum(1 for item in by_ranker[:k] if id(item[2]) in actual_top)
     ranked_gains = [max(item[1], 0.0) for item in by_ranker]
-    ideal_gains = sorted(ranked_gains, reverse=True)
+    ideal_gains = sorted([max(item[1], 0.0) for item in universe], reverse=True)
     draftable = by_ranker[: min(pool, len(by_ranker))]
     return {
         "n": len(scored),
+        "outcome_n": len(universe),
+        "coverage": len(scored) / len(universe),
+        "missing_scores": len(universe) - len(scored),
         "hit_rate": hits / k,
         "ndcg": _ndcg_at_k(ranked_gains, k, ideal_gains),
         "pool_spearman": _spearman(
@@ -784,6 +806,7 @@ def _overall_rows(
         for row in group:
             value = _number(row.get(ranker))
             if value is None:
+                out.append({**row, "_overall": None})
                 continue
             equivalent = (
                 value
@@ -1040,7 +1063,9 @@ def analyze_rankings(
                             if int(row["forecast_season"]) == season
                             and row.get("position") == position
                         ]
-                        scored = _rank_fold(rows, name, target, k, pool)
+                        scored = _rank_fold(
+                            rows, name, target, k, pool, ranking.outcome_pool == "complete"
+                        )
                         if scored is not None:
                             folds.append({"forecast_season": season, **scored})
                     if not folds:
@@ -1082,7 +1107,12 @@ def analyze_rankings(
                 for season in seasons:
                     rows = [row for row in window_rows if int(row["forecast_season"]) == season]
                     scored = _rank_fold(
-                        _overall_rows(rows, name, overall), "_overall", target, k, pool
+                        _overall_rows(rows, name, overall),
+                        "_overall",
+                        target,
+                        k,
+                        pool,
+                        ranking.outcome_pool == "complete",
                     )
                     if scored is not None:
                         folds.append({"forecast_season": season, **scored})
@@ -1654,6 +1684,17 @@ def build_metric_report(
         "results": metric_results,
         "model_results": model_results,
         "ranking_results": ranking_results,
+        "evaluation_contract": (
+            "fixed retained outcome pool; missing forecasts are coverage failures"
+        ),
+        "draft_pool_status": (
+            "history_rookie_market_union"
+            if "draft_pool_version" in predictions.columns
+            else "legacy_retained_pool_requires_rebuild_for_market_only_coverage"
+        ),
+        "common_pool_results": analyze_common_pools(predictions, report_config),
+        "deployment_results": analyze_deployed_policy(predictions, report_config),
+        "uncertainty_calibration": calibrate_intervals(predictions),
         "population_ranking_results": population_ranking_results,
         "market_disagreement_results": market_disagreement_results,
         "ranking_sensitivity_results": ranking_sensitivity_results,
@@ -1958,3 +1999,144 @@ def render_metric_report_markdown(report: dict[str, Any]) -> str:
     lines.extend(f"- {item}" for item in summary["limitations"])
     lines.append("")
     return "\n".join(lines)
+
+
+def analyze_common_pools(
+    predictions: pl.DataFrame, config: MetricReportConfig
+) -> list[dict[str, Any]]:
+    """Pairwise ranking quality, distinct from complete-pool deployment coverage."""
+    market = config.ranking.market_price_ranker
+    if not market or market not in predictions.columns:
+        return []
+    result = []
+    overall = config.ranking.overall
+    target = str(overall.get("target", "actual_availability_value"))
+    k, pool = int(overall.get("k", 60)), int(overall.get("pool", 120))
+    for (season,), frame in predictions.filter(pl.col("outcome_complete")).group_by(
+        "forecast_season"
+    ):
+        rows = frame.to_dicts()
+        for candidate in config.ranking.candidates:
+            common = [
+                r
+                for r in rows
+                if _number(r.get(candidate)) is not None
+                and _number(r.get(market)) is not None
+                and _number(r.get(target)) is not None
+            ]
+            model = _rank_fold(
+                _overall_rows(common, candidate, overall), "_overall", target, k, pool
+            )
+            baseline = _rank_fold(common, market, target, k, pool)
+            if model is not None and baseline is not None:
+                result.append(
+                    {
+                        "forecast_season": season,
+                        "ranker": candidate,
+                        "baseline": market,
+                        "pool": "common",
+                        "common_n": len(common),
+                        "draft_pool_n": len(rows),
+                        "coverage": len(common) / len(rows),
+                        "model": model,
+                        "market": baseline,
+                        "hit_rate_lift": model["hit_rate"] - baseline["hit_rate"],
+                    }
+                )
+    return result
+
+
+def analyze_deployed_policy(
+    predictions: pl.DataFrame, config: MetricReportConfig
+) -> list[dict[str, Any]]:
+    """Execute the production ranking and market fallback on every retained draft pool.
+
+    Historical manual overrides are unavailable: this is explicitly the automatic policy.
+    """
+    from patron.board.rank import apply_rank_key
+    from patron.config.league import get_league
+
+    required = {"fitted_season_points", "fitted_ppg", "proj_ppg", "games", "ppg"}
+    if not required <= set(predictions.columns):
+        return []
+    league = get_league().model_copy(deep=True)
+    overall = config.ranking.overall
+    league.vor_baseline_rank = overall.get("replacement_ranks", league.vor_baseline_rank)
+    league.min_games_baseline = int(overall.get("min_games", 8))
+    league.metrics.projection_season_games = int(overall.get("season_games", 17))
+    target = str(overall.get("target", "actual_availability_value"))
+    if target not in predictions.columns:
+        return []
+    results = []
+    for (season,), frame in predictions.filter(pl.col("outcome_complete")).group_by(
+        "forecast_season"
+    ):
+        if not frame["fitted_season_points"].is_not_null().any():
+            continue
+        ranked = apply_rank_key(frame.with_columns(pl.lit(0.0).alias("override_delta")), league)
+        score = _rank_fold(
+            ranked.to_dicts(),
+            "v2_overall_vor",
+            target,
+            int(overall.get("k", 60)),
+            int(overall.get("pool", 120)),
+        )
+        if score:
+            results.append(
+                {
+                    "forecast_season": season,
+                    "policy": "production_with_market_rank_match",
+                    "overrides": "excluded_no_historical_archive",
+                    **score,
+                    "market_fallback_n": ranked.filter(pl.col("rank_source") == "market").height,
+                }
+            )
+    return sorted(results, key=lambda r: r["forecast_season"])
+
+
+def calibrate_intervals(predictions: pl.DataFrame) -> list[dict[str, Any]]:
+    """80% residual intervals fitted strictly before each held-out evaluation season.
+
+    Report-only: coverage must be assessed before intervals or tiers are published live.
+    """
+    if not {"fitted_season_points", "actual_season_points", "outcome_complete"} <= set(
+        predictions.columns
+    ):
+        return []
+    import numpy as np
+
+    samples: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    for row in predictions.filter(pl.col("outcome_complete")).to_dicts():
+        forecast, actual = (
+            _number(row.get("fitted_season_points")),
+            _number(row.get("actual_season_points")),
+        )
+        if forecast is None:
+            continue
+        population = "rookie" if (_number(row.get("rookie_indicator")) or 0) > 0 else "returner"
+        samples.setdefault((str(row["position"]), population), []).append(
+            (int(row["forecast_season"]), (actual or 0.0) - forecast)
+        )
+    results = []
+    for (position, population), rows in samples.items():
+        for season in sorted({s for s, _ in rows}):
+            train = [r for s, r in rows if s < season]
+            test = [r for s, r in rows if s == season]
+            if len(train) < 100:
+                continue
+            low, high = np.quantile(train, [0.1, 0.9])
+            results.append(
+                {
+                    "position": position,
+                    "population": population,
+                    "forecast_season": season,
+                    "n_train": len(train),
+                    "n_test": len(test),
+                    "nominal_coverage": 0.8,
+                    "observed_coverage": sum(low <= r <= high for r in test) / len(test),
+                    "residual_lower": float(low),
+                    "residual_upper": float(high),
+                    "status": "report_only",
+                }
+            )
+    return results

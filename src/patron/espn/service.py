@@ -100,6 +100,12 @@ class LeagueService:
 
     def board_path(self, version: str = "v1") -> Path:
         """Where the built board lives, preferring the versioned file."""
+        if version == "v1":
+            from patron.artifacts import verify_draft
+
+            archive = self._settings.static_dir / f"draft_{self._config.draft_season}"
+            if archive.exists():
+                return verify_draft(archive)
         versioned = self._settings.outputs_dir / f"board_{version}.json"
         if version == "v1" and not versioned.exists():
             return self._settings.outputs_dir / "board.json"
