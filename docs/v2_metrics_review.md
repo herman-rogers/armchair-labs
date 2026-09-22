@@ -611,8 +611,319 @@ outputs; and their config keys. `proj_ppg`, `prior_branch_ppg`, and
 `component_proj_ppg` remain because they are fitted-ranker features and report
 diagnostics; `projected_floor/ceiling/volatility` remain as descriptive fields and
 roster-risk inputs. The board's fallback when no fitted model is available is now
-`adj_proj_vor`. The League team-strength rating reads the fitted mean and games
-(`roster_*_columns` in `league.yaml`) with volatility rescaled to the fitted mean.
+`adj_proj_vor`. The League power rank and head-to-head team comparison both total the
+canonical `v2_overall_vor` across the best legal lineup. The supporting expected-points,
+floor, and risk fields still read the fitted mean and games (`roster_*_columns` in
+`league.yaml`), with volatility rescaled to the fitted mean.
+
+## 10a. Experimental round: market-informed and research candidates (2026-08-29, commit 490bab4+)
+
+Built strictly as `apply_live: false` candidates — the live board keeps `fitted_ppg`
+(QB/RB), `fitted_season_points` (WR), `ppg` (TE), and the `fitted_season_points`
+overall order. New in the contract: `require_features` / per-spec `min_train_folds`
+on model specs, and every candidate is scored head-to-head against the FantasyPros
+ECR ranker on the folds it covers (`market_*` fields, `ranking.market_baseline`).
+
+**The market is the real bar.** ECR (preseason snapshots, 2021–2025) hits 0.650 on the
+overall top-60, 0.692 RB, 0.689 WR, 0.600 QB/TE. On its own folds our best live
+outputs are at parity overall (`fitted_season_points` −0.003, 4–1) and at RB/WR, and
+behind at QB (−0.017) and TE (−0.050).
+
+**Market as a feature (`fitted_market_*`)** — core five + `market_ecr_score` +
+`market_ecr_sd`, trained only on rows carrying ECR, scored on 2023–2025 (three folds):
+
+| slice | market on those folds | `fitted_market_season_points` | vs market | W–L |
+|---|---|---|---|---|
+| QB | 0.556 | **0.611** | **+0.056 ± 0.028** | **3–0** |
+| WR | 0.685 | **0.704** | +0.018 ± 0.009 | 2–1 |
+| Overall | 0.628 | 0.633 | +0.006 ± 0.029 | 2–1 |
+| RB | 0.708 | 0.667 | −0.042 | 0–3 |
+| TE | 0.583 | 0.528 | −0.056 | 0–3 |
+
+The ECR coefficient is the largest in every position (+4.6 QB, +2.1 WR, +2.0 RB,
++1.2 TE, stable across refits), confirming the market carries information nflverse
+cannot see. Three folds is thin: QB and WR are promising, RB/TE are not, and none of
+it is adoption evidence yet. The model needs two more seasons of ECR before it can
+pass the acceptance rule.
+
+**Core-plus (`fitted_core_plus_*`)** — core five + scrambles, designed carries,
+neutral EPA, xFP: the best non-market RB ranker (0.691, +0.042 vs naive, 6–1; at
+parity with the market, 2–3) via `designed_carries`; no gain elsewhere.
+
+**Research subset** — `fitted_research_season_points` remains the only TE candidate
+above naive (0.536, +0.012, 4–3) but is well behind the market (−0.050).
+
+Retired: `fitted_ngs_ppg`, `fitted_opportunity_ppg`, `fitted_qb_process_ppg`,
+`fitted_team_tendency_ppg` (no lift, small unstable weights, ≤ 21% NGS coverage).
+All research grids now start at 0.01.
+
+Decision: **no live change.** Re-run this comparison when the 2026 fold completes; if
+`fitted_market_season_points` stays ahead of the market at QB/WR over four or more
+folds, promote it there.
+
+## 11. Market fallback for unrated players, and the Hunter override
+
+Players the model cannot rate — 2026 rookies, or anyone without usable tape — used to
+be absent from the board, the overall order, the power rank, and the waiver views;
+the frontend showed ESPN's draft-room order as a labelled placeholder. The FantasyPros
+consensus is the ranker the backtest vindicates (0.650 overall, ahead of us at
+QB/TE), so it is now the fallback *value*, mapped onto the model's scale rather than
+mixed in as a rank:
+
+- `pipeline.load_draft_market` / `attach_market` join the draft-season ECR snapshot
+  (2026-08-28, 693 players; 87% of rated rows) onto every row and add market-only
+  players as rows (162 for 2026) with identity from the id crosswalk.
+- `board.rank._fill_market_fallback` gives each such player the median
+  `v2_overall_vor`, `v2_rank_vor`, and roster-simulation inputs (`fitted_ppg`,
+  `fitted_games`, `fitted_season_points`, `projected_volatility`, availability) of the
+  three model-rated players at his position whose ECR is nearest. He lands where the
+  board already places players the market values like him, never above rated
+  players the market ranks below him, and is tagged `rank_source = market`
+  (`v2_rank_key = market`). Players ranked by neither stay unranked and sort last.
+- The League power rank (`ranking_total` on `v2_overall_vor`) and the weekly
+  simulation therefore include market-placed players on the model's scale instead of
+  excluding them or falling back to a third-party projection; ESPN's draft rank stays
+  as an informational column.
+
+`position_overrides` in `league.yaml` maps GSIS ids to board positions before the
+position filter; Travis Hunter (`00-0040718`, filed CB by nflverse) is the first
+entry and now carries real model values (WR, 7 games).
+
+## 12. Additive structural round (2026-08-30)
+
+Added report-only Week-1 roster/status, team-change and vacated-opportunity, offensive
+snap, draft-capital, experience, and historical-contract features. The rebuild covers
+12,751 returning-player forecasts and 22 completed seasons (2004–2025). All new
+models have `apply_live: false`; no production rank key changed.
+
+Season-points hit rate shows real but position-specific lift over the existing fitted
+season-points model:
+
+| position | 2007–25 existing | best additive stage | incremental | 2019–25 existing | best additive stage | incremental |
+|---|---:|---:|---:|---:|---:|---:|
+| QB | 0.592 | **0.632 status** | **+0.040** | 0.595 | 0.607 status/rostered | +0.012 |
+| RB | 0.603 | **0.647 status** | **+0.044** | 0.667 | **0.708 combined** | **+0.042** |
+| WR | 0.656 | **0.678 roster** | **+0.022** | 0.679 | **0.698 roster** | **+0.020** |
+| TE | 0.526 | **0.561 combined** | **+0.035** | 0.512 | **0.560 combined** | **+0.048** |
+
+The gains are era-stable enough to keep researching: combined RB hit rate is 0.64,
+0.58, and 0.71 across 2007–12, 2013–18, and 2019–25; WR is 0.69, 0.66, and 0.68;
+TE is 0.58, 0.54, and 0.56. QB is the exception: the full combined stack falls to
+0.50 in 2013–18 and does not beat the existing model overall.
+
+**Availability is the main discovery.** A binary Week-1 roster control lowers
+games-played MAE from 3.52/4.41/4.43/4.43 to 2.90/3.51/3.50/3.32 for QB/RB/TE/WR
+over 2007–25. Graded ACT/INA/RES status lowers it again to
+2.73/3.14/3.19/3.00. This is much larger than any efficiency-stat gain, but it has a
+cutoff caveat: nflverse weekly rosters have no historical publication timestamp and
+Week 1 status can contain information unavailable at an August 31 draft. Membership
+is a reasonable post-cutdown proxy; graded game status is not promotion-safe until a
+truly dated transaction/PUP/injury feed replaces it.
+
+**What did not survive the paired ranking test:** prior-season snap share is mostly
+redundant with PPG/role, late snap-share trend is weak, and raw team vacated target or
+carry share is weak. Depth-weighted vacated opportunity has useful residual signal
+(modern partial Spearman: RB targets 0.187/carries 0.151, WR targets 0.234, TE targets
+0.168), but the standalone linear vacated model does not improve ranking. Contract
+guarantees and years remaining have strong raw partial correlations but a
+status-independent commitment stack is flat or worse at QB/RB/WR; it helps TE
+(0.548 modern versus 0.512 existing), so the broad contract association is mostly
+selection rather than portable incremental signal.
+
+Against the five-fold ECR market, only combined RB wins clearly (+0.017, 5–0).
+Combined TE is approximately level; QB, WR, and the overall top-60 remain behind.
+The market-augmented all-feature model is worse than ECR, indicating severe
+over-parameterization on only three trainable folds.
+
+Decision: keep the entire round experimental. The next data pull should be a dated
+preseason transaction/roster/PUP/suspension feed; then refit the roster stage using
+only information genuinely available at the draft cutoff. Preserve depth-weighted
+vacated opportunity for nonlinear/position-specific TE and RB tests. Do not promote
+snap trend, raw vacated share, or the market-plus-everything model.
+
+## 13. Hidden-pattern loop and adaptive position models (2026-08-30)
+
+The follow-up was run as a three-stage discovery/confirmation loop rather than one
+large feature search. Residual candidates had to keep the same direction in
+2007–2014, 2015–2018, and 2019–2025; every fitted candidate remained walk-forward and
+report-only; and all final comparisons use held-out forecast seasons. The JSON now
+includes both `residual_pattern_results` and a full `ranking_sensitivity_results`
+rerun restricted to the Week-1-rostered population.
+
+The durable residual patterns were positional, not a universal new scoring formula:
+
+- QB availability residuals carry contract/depth security, while age itself remains
+  weak after production and role are controlled.
+- RB residuals retain depth-weighted vacated carries/targets.
+- young WRs are under-projected; combine speed interacted with early career is stable
+  across all three eras.
+- young TE combine burst has a repeatable PPG residual, while established high-role
+  WR/TE players are slightly over-projected on next-season games.
+
+Historical combine data was added to test those young-player interactions. The
+standalone career, athletic, security, and lean residual models did **not** improve
+the overall board against ECR. This is an important rejection: stable residual
+correlation was not enough to justify a broad additive model.
+
+The first meaningful movement came from honest model selection by position. For each
+forecast and position, `adaptive_select` chooses among six already-backtested outputs
+using only folds before the forecast (minimum three); config order gives the incumbent
+an exact-tie advantage. No modern-era position choice is hard-coded.
+
+| overall ranker | 2007–25 hit | 2019–25 hit | 2021–25 hit | vs ECR | market W–L |
+|---|---:|---:|---:|---:|---:|
+| existing `fitted_season_points` | 0.599 | 0.638 | 0.647 | −0.003 | 4–1 |
+| existing `fitted_two_stage` | 0.600 | 0.641 | 0.653 | +0.003 | 3–2 |
+| full ridge stack | 0.612 | 0.641 | 0.653 | +0.003 | 3–2 |
+| adaptive PPG-quality selector | 0.604 | **0.650** | **0.660** | **+0.010** | **4–1** |
+| adaptive season-NDCG selector | **0.621** | 0.643 | 0.653 | +0.003 | 3–2 |
+
+On common folds, the PPG-quality selector improves modern overall hit rate by 0.0095
+over `fitted_two_stage` (3 wins, 0 losses, 4 ties) and the season selector improves
+long-horizon hit rate by 0.0211 (9–3). The rostered-only sensitivity rerun preserves
+the result: PPG-selector hit rate is 0.655 modern and 0.663 market, +0.013 versus ECR
+on the market folds. A ridge blend of both selectors does not improve them and is
+rejected.
+
+The latest expanding-window choices explain the pattern: PPG quality selects athletic
+QB/TE models, the roster-membership RB model, and the full WR stack; season NDCG
+selects the full stack at QB/WR and the additive stack at RB/TE. The improvement is
+therefore a regime/position effect, not evidence that every discovered feature belongs
+in one equation.
+
+Decision: **retain the adaptive selectors in the experimental layer, with no live
+promotion yet.** The market advantage is only five folds and was discovered during
+an iterative search; NDCG still trails ECR. In addition, the winning RB/WR sources use
+the Week-1 roster proxy. A genuinely dated preseason transaction/PUP/cut feed is now
+the gating data pull for promotion. Combine data is sufficient for continued
+athleticism research; another broad efficiency-stat pull is lower value.
+
+## 14. Cutoff-safe availability and 2026 prospective freeze (2026-08-30)
+
+The gating pull is complete. nflverse does not publish a historical transaction
+dataset, so the report now caches ESPN's dated team transaction archive from January 1
+through the configured August cutoff for every 2004–2026 forecast. It applies cuts,
+signings, trades, retirement, PUP/NFI/IR, suspension, activation, and practice-squad
+language to each returning player's prior-season team state. Ambiguous name matches
+are rejected unless the transaction team uniquely identifies the player. The old
+Week 1 roster remains only as a named sensitivity proxy.
+
+The rebuilt report contains 25,734 source transaction rows and 12,751 player
+forecasts. A dated event matches 42.07% of forecasts; 86.81% remain rostered at the
+cutoff. Week 1 proxy coverage is 74.59%, and membership agrees on 88.41% of rows where
+that proxy exists. The deliberate limitation is conservative carry-forward: a player
+with no matched retirement/release can remain active. This can dilute the feature but
+cannot inject a post-cutoff event.
+
+With the selector definitions and candidate order unchanged, the overall result is:
+
+| overall ranker | 2007–25 hit | 2019–25 hit | 2021–25 hit | vs ECR | market W–L | market NDCG |
+|---|---:|---:|---:|---:|---:|---:|
+| existing `fitted_season_points` | 0.599 | 0.638 | 0.647 | −0.003 | 4–1 | 0.667 |
+| existing `fitted_two_stage` | 0.600 | 0.641 | 0.653 | +0.003 | 3–2 | 0.666 |
+| cutoff roster stage | 0.606 | 0.643 | 0.647 | −0.003 | 3–2 | 0.660 |
+| full cutoff-safe ridge stack | 0.607 | 0.636 | 0.637 | −0.013 | 1–4 | 0.636 |
+| adaptive PPG-quality selector | **0.610** | **0.652** | **0.657** | **+0.007** | **4–1** | 0.670 |
+| adaptive season-NDCG selector | 0.602 | 0.633 | 0.633 | −0.017 | 1–4 | 0.634 |
+| ECR | — | — | 0.650 | — | — | **0.692** |
+
+The PPG selector improves hit rate over the incumbent by +0.0105 across 19 long
+folds (9 wins, 8 ties, 2 losses) and +0.0143 across seven modern folds (4 wins, 2
+ties, 1 loss). It
+also improves over `fitted_two_stage` by +0.0096 long and +0.0119 modern. The market
+hit lift survives at +0.0067, but its standard error is 0.0201 and its empirical
+95% interval spans −0.0328 to +0.0461. More importantly, it loses 0.022 NDCG to ECR
+and wins only one of five folds on that measure. The cutoff-safe rebuild therefore
+confirms a useful top-K inclusion pattern, not a production-ready ordering win.
+
+The old season-NDCG selector's long-horizon advantage disappears after replacing the
+Week 1 proxy (0.621 to 0.602). That failure is useful: it identifies the earlier gain
+as timing-sensitive and rejects promotion. The surviving PPG selector now chooses
+athletic QB/TE, the full stack at RB, and the cutoff-rostered stage at WR. No single
+wide feature stack wins; position/regime selection remains the hidden pattern.
+
+Decision: **wire dated cutoff state into the experimental metrics and fitted report,
+but do not change the live rank key.** The two definitions, their 2026 selected
+sources, and a digest of all 611 pending predictions are frozen in
+`experimental_freeze_2026.yaml` (fit fingerprint `4d65a1b8905e267b`). Production
+stays on the existing fitted measurements until the untouched 2026 outcome is graded.
+Another broad returning-player data pull is deferred; the next material data project
+is the separate rookie/college population, not another round of tuning on these five
+ECR folds.
+
+The freeze now includes the complete 611-row CSV, not only a configuration digest.
+`patron grade-prospective` verifies its SHA-256, refuses to grade before January 15,
+2027 or when outcomes appear partial, and attaches only fresh actual PPG, games,
+season points, VOR, and availability value. Passing requires prospective overall hit
+rate above both the incumbent and dated ECR plus NDCG at least equal to ECR. The
+command writes a review artifact and never promotes a model automatically.
+
+## 15. Focus round: purge of no-signal metrics (2026-08-31)
+
+A Moneyball-style pass with one instruction: state the goal sharply, and remove every
+metric the evidence had already condemned but the pipeline still computed. The goal
+statement now opens `docs/metrics.md`; the consolidated removal record is that
+document's graveyard table. What changed:
+
+**Dead code and display (no model change):** the `qb_context` arithmetic (export-only
+since the §10 removals), the `BUY`/`TD-luck` flags and the whole
+TD-over-expectation module (§4: noise-level), `projected_ceiling` (monotone in
+PPG + volatility, no renderer), the stale `v2_score` fallback references, the
+`market_rank_delta` join, and the unread enrichment columns (rushing/receiving EPA
+rates, neutral early-down/no-huddle rates, expected yards/TDs per game, six NGS
+columns nothing consumed). The fixture validation's advisory flag stage now compares
+only the surviving flag vocabulary (`age`, `Ngms`, `ESPN-only`).
+
+**Component-branch surgery (changes fitted feature values, harness-gated):**
+
+1. The "opportunity-implied targets" anchor was collapsed algebraically — it *is*
+   targets (§5) — folding its 0.15 weight into the historical target rate (0.35
+   total). Verified as a numeric no-op (max |Δ| 3.6e-15) before the real cuts.
+2. The 25% WOPR role blend was removed (§5: double-counted target share).
+3. The teammate-competition multipliers (`target_availability`/`backfield` ratios and
+   their depth-chart blend) were removed (§6a: inert in every era). Competition now
+   enters only through the player's own shrunk share and depth-role factor, and the
+   `target_availability_multiplier`/`backfield_availability_multiplier` override
+   levers are gone; team volume/scoring multipliers remain.
+4. The dedicated big-play bonus projection was removed (§4/§5: anti-predictive
+   partial −0.30). League bonus *scoring* is untouched; bonus points now reach the
+   component branch only through the heavily shrunk residual, keeping the branch an
+   estimate of full league-scoring PPG.
+
+**Experimental prune (rejected-only):** deleted the fit specs the record explicitly
+rejected and that are neither frozen-selector factors nor awaiting the 2026 fold:
+snap (§12 "do not promote"), standalone vacated, capital/commitment,
+hidden-residual (§13 rejection), cutdown stack, the adaptive blend (§13 "rejected"),
+both hard-coded position hybrids, and the market-plus-everything pair (§12
+over-parameterized). 46 specs → 28; the two frozen adaptive selectors, their six
+factor models, and every spec those factors depend on are untouched, and
+`tests/test_prospective_freeze.py` passes unchanged. The metric catalog dropped the
+nine no-signal entries (`td_over_exp`, `projected_bonus_pg`, `projected_wopr`,
+`wtd_opp`, `qb_context`, `team_scoring_context`, `team_pass_volume`,
+`team_rush_volume`, `teammate_competition`) plus `projected_ceiling`.
+
+**Acceptance (to the rule in §0):** the full 22-fold rebuild after the surgery and
+prune (12,751 forecast rows) shows the cuts cost nothing at the top of the board:
+
+| slice | before | after |
+|---|---|---|
+| OVERALL `fitted_season_points`, modern | 0.638 (7–0) | **0.638 (7–0)** — identical |
+| OVERALL `fitted_season_points`, long | 0.599 (15–4) | **0.599 (15–4)** — identical |
+| OVERALL `fitted_two_stage`, long | 0.600 (14–5) | **0.601 (15–4)** |
+| QB/RB `fitted_ppg`, WR `fitted_season_points` (live keys) | — | hit rates unchanged to the third decimal in both windows |
+| `component_proj_ppg` WR | 0.706 / 0.601 (modern/long) | **0.710 / 0.614** |
+| `component_proj_ppg` TE long | 0.466 | **0.473** |
+| `proj_ppg` OVERALL modern / long | 0.612 / 0.567 | 0.614 / 0.566 (±1 fold slot, noise) |
+| vs market (ECR 0.650) | −0.003 | −0.003, unchanged |
+
+Reading: four condemned terms were live inside a fitted feature and their removal
+moved no top-K membership anywhere, while the receiver component branch — the piece
+that carried the WOPR blend, the competition multiplier, and the bonus projection —
+got slightly *better* at WR and TE. The model is meaningfully smaller (two fewer
+input modules, ~10 fewer exported columns, 18 fewer fit specs, one fewer override
+lever) at zero cost to the goal. `tests/test_prospective_freeze.py` passes untouched;
+the fit fingerprint changed with the spec prune, so this rebuild also refreshed the
+live-board artifact.
 
 ## Recommended order (updated)
 
@@ -622,22 +933,29 @@ than lost against the best baseline, modern window, without losing the long hori
 Done: shrinkage prior (§1), active-game denominators (§3c), participation-position
 fallback and legacy depth charts (§3a/3b, other session), ranking evaluation (§0),
 fitted ranker and live wiring (§8), parity, contract, overall validation, and the
-market/xFP/QB/team/NGS/return research pass (§9).
+market/xFP/QB/team/NGS/return research pass (§9), additive structural round (§12),
+combine/career residual screen, adaptive position-model experiment (§13), dated
+cutoff availability, the versioned 2026 prospective freeze (§14), and the no-signal
+purge and goal refocus (§15).
 
 Next, by expected impact:
 
-1. **Vacated opportunity + depth-chart target tree** — the largest known miss (§7 and
-   the surprise analysis): sum the targets/carries of departed players per team and
-   distribute across the current depth chart; enter it as a fitted-ranker feature.
-2. **Preseason status feed** (out/PUP/suspended/retired at the cutoff) — removes the
-   known busts from both the backtest and the live board.
-3. **TE-specific challenger** — the research season-points fit now beats naive, but
-   not ECR. Combine vacated targets, route participation, xFP, and NGS YAC-OE and use
-   the five-fold market window as the acceptance test.
-4. **Experience × draft capital** — captures the year-2/3 leap and is the first half
-   of a rookie model.
-5. Cumulative RB touches, then the weekly re-rank. Do not add the earlier
-   QB-efficiency multiplier: the direct EPA/CPOE experiment was redundant (§9).
+1. **Grade the frozen 2026 selectors** — require the untouched prospective forecast
+   to retain its incumbent and market lift before any live promotion. Do not tune a
+   new selector family on the same five historical ECR folds.
+2. **Rookie/college model** — returning-player backtests cannot solve the largest
+   missing population; add draft capital, age, college production, and athletic data.
+3. **Longer dated ADP/ECR history** — the market is still the strongest missing-data
+   aggregator, but three trainable folds cannot support a 20-feature blend.
+4. **TE/RB nonlinear opportunity challenger** — keep it outside the frozen selector;
+   revisit only with new folds or a separately held-out hypothesis.
+5. Complete the dated soft-injury/recovery archive, then cumulative RB touches and the
+   weekly re-rank. Market folds now stop at the exact archived ECR date and use official
+   club IR/PUP/NFI/suspension transactions for 31 teams. That structured status raises
+   value-capture precision over the plain season model, but the next-gen challenger
+   still loses ECR on net swap VOR; adding same-date ECR to the games leg does not turn
+   parity into independent alpha. Do not add the earlier QB-efficiency multiplier: the
+   direct EPA/CPOE experiment was redundant (§9).
 
 ## Reproducing the cuts
 

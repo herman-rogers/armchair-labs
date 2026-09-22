@@ -318,8 +318,18 @@ def _ranking_stage(
 
 
 def _flag_stage(matched: pl.DataFrame, worst_shown: int) -> Stage:
+    # BUY and TD-luck were removed from the pipeline (no repeatable next-season
+    # signal; docs/v2_metrics_review.md §4). The published fixture still carries
+    # them, so they are stripped from both sides: the stage now compares only the
+    # flag vocabulary the board still produces.
+    retired = {"BUY", "TD-luck"}
+
     def flag_set(value: str | None) -> set[str]:
-        return {part for part in (value or "").split("/") if part and not part.endswith("gms")}
+        return {
+            part
+            for part in (value or "").split("/")
+            if part and not part.endswith("gms") and part not in retired
+        }
 
     disagreements = []
     agreed = 0

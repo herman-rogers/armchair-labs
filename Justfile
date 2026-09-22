@@ -48,6 +48,14 @@ board *ARGS:
 metric-report *ARGS:
     uv run patron metric-report {{ARGS}}
 
+# Run report-only automated feature discovery on the retained historical folds.
+feature-discovery *ARGS:
+    uv run patron feature-discovery {{ARGS}}
+
+# Grade the frozen 2026 prospective forecast against final outcomes (post-season only).
+grade-prospective *ARGS:
+    uv run patron grade-prospective {{ARGS}}
+
 # Rebuild ignoring every cache.
 rebuild:
     uv run patron board --force

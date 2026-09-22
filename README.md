@@ -13,13 +13,16 @@ design, and `docs/saints_metrics_example.py` for the original draft-prep script.
 
 ## Status
 
-**Static boards v1 + v2.** V1 preserves the league-scored historical VOR board
+**Static boards v1 + v2 + Adaptive shadow.** V1 preserves the league-scored historical VOR board
 validated against the Aug 2026 fixture. V2 blends a normalized multi-year PPG prior
-with projected player stat lines driven by role, efficiency, age, team/QB context,
-teammate competition, route opportunities/TPRR, official attempts, high-value usage,
-current depth charts, and injury-based expected games. Walk-forward fitted rankers
-learned from 22 seasons of backtest folds set the board order (`docs/v2_metrics_review.md`).
-The API and dashboard can switch between both versions.
+with projected player stat lines driven by role, efficiency, age, team volume,
+route opportunities/TPRR, official attempts, high-value usage, current depth charts,
+and injury-based expected games. Walk-forward fitted rankers learned from 22 seasons
+of backtest folds set the board order; everything the backtest disproved is recorded
+in the metrics graveyard (`docs/metrics.md`, `docs/v2_metrics_review.md`).
+The separate Adaptive board ranks 2026 from the immutable prospective selector
+snapshot, without changing the production v2 default or its future grade. The API and
+dashboard can switch among all three systems.
 
 nflverse is the football-statistics source. ESPN is deliberately limited to private-
 league state such as ownership, free agency, fantasy lineups, transactions, and a live
@@ -32,6 +35,7 @@ uv sync                  # install deps into .venv
 just test                # fast offline unit suite
 just board               # build the board -> data/outputs/
 just metric-report       # rebuild rolling v2 backtests, metric evidence, and the fitted ranker
+just feature-discovery   # automated nonlinear/temporal/latent feature discovery backtest
 just api                 # serve it at :8000
 just web                 # React dev server at :5173
 just dev                 # run both under one Ctrl+C-safe supervisor
@@ -55,7 +59,7 @@ Without `just`, every recipe is a plain command — see the `Justfile`.
 | `src/patron/config/` | League scoring rules, VOR baselines, manual overrides |
 | `src/patron/data/` | nflverse statistical loading and the derived-artifact cache |
 | `src/patron/scoring/` | League scorer, big-play bonuses, kickers, DST |
-| `src/patron/metrics/` | PPG, VOR, opportunity, TD-over-expectation, age, floor/volatility |
+| `src/patron/metrics/` | PPG, VOR, opportunity shares, age, floor/volatility, projections, fitted rankers |
 | `src/patron/config/metric_report.yaml` | Backtest seasons, outcomes, and swappable metric catalog |
 | `src/patron/board/` | Board assembly, flags, override application |
 | `src/patron/api/` | FastAPI read API |
@@ -72,6 +76,17 @@ stored model only when its artifact matches the current fit config, season, and
 depth-chart snapshot, so refit before rebuilding: `just metric-report && just board`
 (`just metric-report --reanalyze` re-scores from the retained folds without a rebuild). The same run retains detailed player/fold
 predictions in Parquet and writes a compact Markdown summary for offline review.
+
+`just feature-discovery` is a separate, report-only research lab. It consumes the
+retained metric folds, derives generic weekly time-series and random-convolution
+features, and builds a richer source-aware weekly panel of snaps, routes, target and
+carry share, expected opportunity, injury/practice state, roster state, team volume,
+red-zone work, and EPA rates. It tests nonlinear, latent-archetype,
+symbolic-residual, stacked, and market-correction challengers with nested
+walk-forward validation. Use `--force-rich` to rebuild the cached rich panel and
+descriptors. It writes
+`feature_discovery_report.{json,md}` and `feature_discovery_predictions.parquet` but
+does not change the production metric configuration or frozen 2026 forecast.
 
 ## Design note
 

@@ -216,7 +216,6 @@ def value_column_for(board: pl.DataFrame) -> str:
         "v2_overall_vor",
         "v2_rank_vor",
         "adj_proj_vor",
-        "v2_score",
         "adj_vor",
         "vor",
         "ppg",

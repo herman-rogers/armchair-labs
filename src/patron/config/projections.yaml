@@ -11,12 +11,9 @@
 teams: {}
 # Example:
 #  PIT:
-#    qb_context_multiplier: 1.08
 #    pass_volume_multiplier: 1.03
 #    rush_volume_multiplier: 0.98
 #    scoring_multiplier: 1.05
-#    target_availability_multiplier: 1.00
-#    backfield_availability_multiplier: 1.00
 #    reason: "New quarterback and coordinator projection."
 
 # Player entries match normalized display name + position. projected_team makes a

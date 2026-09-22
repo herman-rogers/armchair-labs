@@ -78,6 +78,37 @@ class TestFetching:
         assert state.tagged_board.height == 2
         assert state.join_report.matched_by_name == 2
 
+    def test_a_rookie_without_model_history_is_kept_as_an_espn_fallback(
+        self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        snapshot = make_snapshot()
+        snapshot.players.append(
+            PlayerState(
+                888,
+                "Jeremiyah Love",
+                "RB",
+                "ARI",
+                "ACTIVE",
+                95.0,
+                0.0,
+                14.0,
+                None,
+                None,
+                None,
+                espn_draft_rank=1,
+                espn_position_rank=1,
+                espn_adp=1.5,
+            )
+        )
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: snapshot)
+
+        state = service.get()
+        rookie = state.tagged_board.filter(pl.col("player_id") == "espn:888")
+
+        assert state.tagged_board.height == 3
+        assert rookie["rank_source"][0] == "espn_ppr"
+        assert rookie["ppg"][0] is None
+
     def test_a_fresh_snapshot_is_not_refetched(
         self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
     ) -> None:

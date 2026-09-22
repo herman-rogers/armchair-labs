@@ -1,0 +1,61 @@
+# Prospective audit record. This file is intentionally not consumed by the live board.
+# Its test prevents an accidental change to the two selector definitions after their
+# 2026 predictions were observed but before the 2026 outcome is graded.
+schema_version: 1
+forecast_season: 2026
+frozen_on: "2026-08-30"
+outcomes_through: 2025
+report_fingerprint: 4d65a1b8905e267b
+pending_rows: 611
+snapshot_file: data/static/experimental_2026_predictions.csv
+pending_prediction_sha256: 8938f6f961bd0b5d767fff92c7a7a9ce0d86c9c671eb176e2dab117f7f9df2c0
+grade_not_before: "2027-01-15"
+availability_source: dated ESPN transactions through the configured August cutoff
+promotion_status: shadow_only
+promotion_gate: grade the untouched 2026 forecast before any live promotion
+
+selectors:
+  fitted_adaptive_ppg_hybrid:
+    target: actual_ppg
+    selection_metric: hit_rate
+    selection_top_k: {QB: 12, RB: 24, WR: 36, TE: 12}
+    factors: [fitted_season_points, fitted_two_stage, fitted_rostered_season_points, fitted_athletic_season_points, fitted_additive_season_points, fitted_full_stack_season_points]
+    fallback: fitted_two_stage
+    apply_live: false
+    selected_source_by_position:
+      QB: fitted_athletic_season_points
+      RB: fitted_full_stack_season_points
+      WR: fitted_rostered_season_points
+      TE: fitted_athletic_season_points
+  fitted_adaptive_season_hybrid:
+    target: actual_season_points
+    selection_metric: ndcg
+    selection_top_k: {QB: 12, RB: 24, WR: 36, TE: 12}
+    factors: [fitted_season_points, fitted_two_stage, fitted_rostered_season_points, fitted_athletic_season_points, fitted_additive_season_points, fitted_full_stack_season_points]
+    fallback: fitted_two_stage
+    apply_live: false
+    selected_source_by_position:
+      QB: fitted_full_stack_season_points
+      RB: fitted_additive_season_points
+      WR: fitted_full_stack_season_points
+      TE: fitted_athletic_season_points
+
+backtest_snapshot:
+  long_horizon:
+    seasons: "2007-2025"
+    adaptive_ppg_hit_rate: 0.6096
+    incumbent_hit_rate: 0.5991
+    two_stage_hit_rate: 0.6000
+  modern:
+    seasons: "2019-2025"
+    adaptive_ppg_hit_rate: 0.6524
+    incumbent_hit_rate: 0.6381
+    two_stage_hit_rate: 0.6405
+  market:
+    seasons: "2021-2025"
+    adaptive_ppg_hit_rate: 0.6567
+    ecr_hit_rate: 0.6500
+    hit_rate_lift: 0.0067
+    hit_rate_wins_losses: "4-1"
+    adaptive_ppg_ndcg: 0.6701
+    ecr_ndcg: 0.6921

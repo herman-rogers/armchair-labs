@@ -34,6 +34,8 @@ RANK_VALUE = "v2_rank_value"
 RANK_VOR = "v2_rank_vor"
 POSITION_RANK = "v2_position_rank"
 OVERALL_VOR = "v2_overall_vor"
+RANK_SOURCE = "rank_source"
+MARKET_KEY = "market"
 
 _ALREADY_VOR = frozenset({"adj_proj_vor", "proj_vor"})
 
@@ -94,13 +96,6 @@ def apply_rank_key(board: pl.DataFrame, config: LeagueConfig) -> pl.DataFrame:
         .otherwise(pl.col(RANK_VALUE) - repl_expr + override)
     )
     frame = frame.with_columns(rank_vor.alias(RANK_VOR))
-    frame = frame.with_columns(
-        pl.col(RANK_VOR)
-        .rank(method="ordinal", descending=True)
-        .over("position")
-        .cast(pl.Int32)
-        .alias(POSITION_RANK)
-    )
 
     # Overall order on one scale. Keys differ in spread (the bottom-up projection is
     # wider than the shrunk fitted ranker), so their VORs must not be interleaved.
@@ -137,9 +132,96 @@ def apply_rank_key(board: pl.DataFrame, config: LeagueConfig) -> pl.DataFrame:
         )
         if overall_key in _ALREADY_VOR:
             overall = pl.col(overall_key).cast(pl.Float64).fill_null(pl.col(RANK_VOR))
-    frame = frame.with_columns(overall.alias(OVERALL_VOR)).sort(
-        OVERALL_VOR, descending=True, nulls_last=True
-    )
+    frame = frame.with_columns(overall.alias(OVERALL_VOR))
     if "_overall_equivalent" in frame.columns:
         frame = frame.drop("_overall_equivalent")
+    frame = _fill_market_fallback(frame)
+    frame = frame.with_columns(
+        pl.col(RANK_VOR)
+        .rank(method="ordinal", descending=True)
+        .over("position")
+        .cast(pl.Int32)
+        .alias(POSITION_RANK)
+    ).sort(OVERALL_VOR, descending=True, nulls_last=True)
     return frame.with_columns(pl.int_range(1, frame.height + 1, dtype=pl.Int32).alias("rank"))
+
+
+#: Model-scale fields a market-only player borrows from his rank-matched neighbours, so
+#: the roster simulation (mean, games, volatility) and waiver views see him on the same
+#: scale as everyone else rather than falling back to a third-party projection.
+MARKET_FILL_COLUMNS = (
+    "fitted_ppg",
+    "fitted_games",
+    "fitted_season_points",
+    "adaptive_season_points",
+    "projected_volatility",
+    "projected_availability",
+    "expected_games",
+)
+
+
+def _fill_market_fallback(frame: pl.DataFrame, neighbours: int = 3) -> pl.DataFrame:
+    """Give market-only players a value on the model's scale by rank matching.
+
+    A player the model cannot rate (a rookie, or a player with no usable tape) but
+    whom the consensus market ranks gets the median ``v2_overall_vor`` /
+    ``v2_rank_vor`` of the ``neighbours`` model-rated players at the same position
+    whose market rank is nearest his own.  He therefore lands where the board already
+    places players the market values like him — never above rated players the market
+    ranks below him — and is tagged ``rank_source = market`` so the UI can say so.
+    Players ranked by neither stay unranked.
+    """
+    if "market_ecr" not in frame.columns:
+        return frame.with_columns(
+            pl.when(pl.col(OVERALL_VOR).is_not_null())
+            .then(pl.lit("model"))
+            .otherwise(None)
+            .alias(RANK_SOURCE)
+        )
+    rows = frame.to_dicts()
+    by_position: dict[str, list[dict]] = {}
+    for row in rows:
+        if row.get(OVERALL_VOR) is not None and row.get("market_ecr") is not None:
+            by_position.setdefault(str(row["position"]), []).append(row)
+    for group in by_position.values():
+        group.sort(key=lambda r: float(r["market_ecr"]))
+
+    def _median(values: list[float]) -> float:
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+    extra = [c for c in MARKET_FILL_COLUMNS if c in frame.columns]
+    fills: dict[str, list[float | None]] = {c: [] for c in (OVERALL_VOR, RANK_VOR, *extra)}
+    source: list[str | None] = []
+    key_fill: list[str | None] = []
+
+    def _borrow(nearest: list[dict], column: str) -> float | None:
+        values = [float(r[column]) for r in nearest if r.get(column) is not None]
+        return _median(values) if values else None
+
+    for row in rows:
+        if row.get(OVERALL_VOR) is not None:
+            for c in fills:
+                fills[c].append(row.get(c))
+            source.append("model")
+            key_fill.append(row.get(RANK_KEY))
+            continue
+        rated = by_position.get(str(row.get("position")), [])
+        ecr = row.get("market_ecr")
+        if ecr is None or len(rated) < neighbours:
+            for c in fills:
+                fills[c].append(row.get(c))
+            source.append(None)
+            key_fill.append(row.get(RANK_KEY))
+            continue
+        nearest = sorted(rated, key=lambda r: abs(float(r["market_ecr"]) - float(ecr)))[:neighbours]
+        for c in fills:
+            fills[c].append(_borrow(nearest, c))
+        source.append(MARKET_KEY)
+        key_fill.append(MARKET_KEY)
+    return frame.with_columns(
+        *[pl.Series(c, values, dtype=pl.Float64) for c, values in fills.items()],
+        pl.Series(RANK_SOURCE, source, dtype=pl.String),
+        pl.Series(RANK_KEY, key_fill, dtype=pl.String),
+    )

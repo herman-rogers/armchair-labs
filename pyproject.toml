@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.34.2",
     "types-requests>=2.33.0.20260712",
     "numpy>=2.5.2",
+    "scikit-learn>=1.7.2",
 ]
 
 [project.scripts]

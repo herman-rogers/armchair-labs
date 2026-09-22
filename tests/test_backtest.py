@@ -13,6 +13,7 @@ from patron.metrics.backtest import (
     _assessment,
     _depth_chart_before,
     _finalize_entries,
+    analyze_market_disagreements,
     analyze_predictions,
     analyze_rankings,
     build_metric_report,
@@ -258,6 +259,128 @@ def test_ranking_verdict_renders_in_markdown() -> None:
     assert "loses" in markdown
 
 
+def test_market_disagreements_use_the_common_pool_and_score_two_round_calls() -> None:
+    rows = []
+    for season in (2023, 2024):
+        for index in range(1, 9):
+            rows.append(
+                {
+                    "player_id": f"{season}-{index}",
+                    "forecast_season": season,
+                    "outcome_complete": True,
+                    "position": "WR",
+                    "games": 17.0,
+                    "model": float(index),
+                    "market": float(9 - index),
+                    "actual_availability_value": float(index),
+                }
+            )
+    cfg = MetricReportConfig(
+        title="moneyball",
+        forecast_seasons=(2023, 2024, 2025),
+        history_seasons=3,
+        depth_chart_cutoff="08-31",
+        minimum_sample=4,
+        baseline_metric="market",
+        targets=(TargetDefinition("actual_availability_value", "Value", "", True),),
+        metrics=(),
+        analysis_windows=(AnalysisWindow("market", "Market", 2023, 2024),),
+        ranking=RankingConfig(
+            baselines=("market",),
+            candidates=("model",),
+            targets=("actual_availability_value",),
+            top_k={"WR": 3},
+            pool={"WR": 6},
+            market_baseline="market",
+            market_price_ranker="market",
+            disagreement_round_size=1,
+            disagreement_rounds=2,
+            overall={
+                "k": 3,
+                "pool": 6,
+                "target": "actual_availability_value",
+                "replacement_ranks": {"WR": 3},
+                "min_games": 0,
+                "season_games": 17,
+            },
+        ),
+    )
+
+    result = analyze_market_disagreements(pl.DataFrame(rows), cfg)[0]
+
+    assert result["common_players_mean"] == 8.0
+    assert result["hit_rate_lift"] == 1.0
+    assert result["model_only_hits"] == 6
+    assert result["market_only_hits"] == 0
+    assert result["contrarian_precision"] == 1.0
+    assert result["missed_value_capture_rate"] == 1.0
+    assert result["net_swap_value"] > 0
+    assert result["value_capture_bands"][0] == {
+        "rank_gap": 0,
+        "calls": 6,
+        "hits": 6,
+        "precision": 1.0,
+        "actual_value_sum": 42.0,
+        "false_positive_cost": 0.0,
+    }
+    assert result["bullish_correct_rate"] == 1.0
+
+
+def test_directional_improvement_is_not_counted_as_captured_draft_value() -> None:
+    rows = []
+    market_order = ["a", "b", "c", "d", "e", "f"]
+    model_order = ["c", "d", "a", "b", "e", "f"]
+    actual_order = ["c", "a", "d", "b", "e", "f"]
+    for player_id in market_order:
+        rows.append(
+            {
+                "player_id": player_id,
+                "forecast_season": 2024,
+                "outcome_complete": True,
+                "position": "WR",
+                "games": 17.0,
+                "market": float(7 - market_order.index(player_id)),
+                "model": float(7 - model_order.index(player_id)),
+                "actual_availability_value": float(7 - actual_order.index(player_id)),
+            }
+        )
+    cfg = MetricReportConfig(
+        title="value, not direction",
+        forecast_seasons=(2024,),
+        history_seasons=3,
+        depth_chart_cutoff="08-31",
+        minimum_sample=2,
+        baseline_metric="market",
+        targets=(TargetDefinition("actual_availability_value", "Value", "", True),),
+        metrics=(),
+        analysis_windows=(AnalysisWindow("market", "Market", 2024, 2024),),
+        ranking=RankingConfig(
+            baselines=("market",),
+            candidates=("model",),
+            targets=("actual_availability_value",),
+            market_price_ranker="market",
+            disagreement_round_size=1,
+            disagreement_rounds=1,
+            overall={
+                "k": 2,
+                "pool": 6,
+                "target": "actual_availability_value",
+                "replacement_ranks": {"WR": 2},
+                "min_games": 0,
+                "season_games": 17,
+            },
+        ),
+    )
+
+    result = analyze_market_disagreements(pl.DataFrame(rows), cfg)[0]
+
+    # D improved from market rank 4 to actual rank 3, so the old directional test
+    # calls both C and D correct. Only C actually entered the draftable top-two tier.
+    assert result["bullish_correct_rate"] == 1.0
+    assert result["contrarian_precision"] == 0.5
+    assert result["model_captured_market_misses"] == 1
+
+
 def test_baselines_are_target_matched_and_wtl_is_strict() -> None:
     """A season-points outcome is compared against last season's points too, and a
     candidate that merely ties the baseline does not pass."""
@@ -325,3 +448,50 @@ def test_depth_chart_selection_ignores_stale_seasons() -> None:
     result = _depth_chart_before(depth, 2026, "08-31")
     assert result is not None
     assert result["player_id"].to_list() == ["current"]
+
+
+def test_candidates_are_scored_head_to_head_against_the_market_on_its_folds() -> None:
+    rows = []
+    for season in (2023, 2024, 2025):
+        for index in range(1, 9):
+            rows.append(
+                {
+                    "forecast_season": season,
+                    "outcome_complete": True,
+                    "position": "WR",
+                    "prior": float(index),
+                    "market": float(index) if season >= 2024 else None,
+                    "reversed": float(9 - index),
+                    "actual_season_points": float(index) * 10.0,
+                }
+            )
+    cfg = MetricReportConfig(
+        title="t",
+        forecast_seasons=(2023, 2024, 2025, 2026),
+        history_seasons=3,
+        depth_chart_cutoff="08-31",
+        minimum_sample=4,
+        baseline_metric="prior",
+        targets=(TargetDefinition("actual_season_points", "Pts", "", True),),
+        metrics=(),
+        ranking=RankingConfig.from_raw(
+            {
+                "baselines": ["prior", "market"],
+                "candidates": ["reversed"],
+                "targets": ["actual_season_points"],
+                "market_baseline": "market",
+                "top_k": {"WR": 3},
+                "pool": {"WR": 6},
+            }
+        ),
+    )
+    rows_out = {r["ranker"]: r for r in analyze_rankings(pl.DataFrame(rows), cfg)}
+    reversed_row = rows_out["reversed"]
+    # Lift is against `prior` (the only baseline covering all three candidate folds)...
+    assert reversed_row["best_baseline"] == "prior"
+    # ...while the market comparison uses only the two market folds.
+    assert reversed_row["market_baseline"] == "market"
+    assert reversed_row["market_folds"] == 2
+    assert reversed_row["market_lift"] == -1.0
+    assert (reversed_row["market_won"], reversed_row["market_lost"]) == (0, 2)
+    assert reversed_row["beats_market"] is False

@@ -70,7 +70,6 @@ def test_team_tendencies_keep_only_neutral_scrimmage_plays() -> None:
 
     assert row["neutral_plays"] == 2
     assert row["neutral_pass_rate"] == 0.5
-    assert row["neutral_early_down_pass_rate"] == 1.0
     assert row["neutral_epa_per_play"] == pytest.approx(0.05)
 
 
@@ -154,6 +153,28 @@ def test_market_rankings_select_latest_preseason_snapshot_and_crosswalk_id() -> 
     assert row["market_ecr"] == 2.0
     assert row["market_ecr_score"] == -2.0
     assert row["market_snapshot"] == "2025-08-29"
+
+
+def test_market_rankings_keep_dated_overall_price_separate_from_positional_ecr() -> None:
+    rankings = pl.DataFrame(
+        {
+            "page_type": ["redraft-wr", "redraft-overall", "redraft-overall"],
+            "id": ["10", "10", "10"],
+            "pos": ["WR4", "WR4", "WR3"],
+            "ecr": [4.0, 37.0, 25.0],
+            "sd": [1.0, 5.0, 3.0],
+            "scrape_date": ["2025-08-29", "2025-08-29", "2025-09-02"],
+        }
+    )
+    crosswalk = pl.DataFrame({"fantasypros_id": [10], "gsis_id": ["wr"]})
+
+    row = build_market_rankings(rankings, crosswalk).to_dicts()[0]
+
+    assert row["market_ecr"] == 4.0
+    assert row["market_overall_ecr"] == 37.0
+    assert row["market_overall_ecr_score"] == -37.0
+    assert row["market_overall_snapshot"] == "2025-08-29"
+    assert row["market_price_source"] == "fantasypros_ecr"
 
 
 def test_participation_and_pbp_build_route_and_high_value_usage() -> None:

@@ -16,6 +16,7 @@ from patron.espn.sync import (
     PlayerState,
     TeamState,
     TransactionState,
+    _fetch_draft_market,
     _number,
     _player_state,
     _text,
@@ -78,6 +79,18 @@ class TestPlayerState:
         assert state.owner_team_id == 3
         assert state.percent_owned == pytest.approx(99.87)
 
+    def test_market_fields_are_kept_separate_from_projections(self) -> None:
+        state = _player_state(
+            FakePlayer(playerId=1, name="Rookie", position="WR", proTeam="NYJ"),
+            draft_rank=12,
+            position_rank=5,
+            adp=14.7,
+        )
+
+        assert state.espn_draft_rank == 12
+        assert state.espn_position_rank == 5
+        assert state.espn_adp == pytest.approx(14.7)
+
     def test_a_free_agent_has_no_owner(self) -> None:
         state = _player_state(FakePlayer(playerId=1, name="Free", position="WR", proTeam="SEA"))
         assert state.owner_team_id is None
@@ -136,6 +149,37 @@ class TestSnapshotFrame:
 
         assert frame.schema["injury_status"] == pl.String
         assert frame.schema["percent_owned"] == pl.Float64
+        assert frame.schema["espn_draft_rank"] == pl.Int64
+        assert frame.schema["espn_adp"] == pl.Float64
+
+    def test_observed_adp_is_archived_once_per_date(self, tmp_path: Path) -> None:
+        snapshot = self._snapshot(
+            [
+                PlayerState(
+                    1,
+                    "Market Player",
+                    "WR",
+                    "NYJ",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    espn_draft_rank=20,
+                    espn_position_rank=8,
+                    espn_adp=22.4,
+                )
+            ]
+        )
+
+        path = snapshot.write_adp_snapshot(tmp_path)
+
+        assert path == tmp_path / "espn_adp_2026_2026-08-29.parquet"
+        row = pl.read_parquet(path).to_dicts()[0]
+        assert row["espn_id"] == 1
+        assert row["espn_adp"] == pytest.approx(22.4)
 
     def test_round_trips_through_disk(self, tmp_path: Path) -> None:
         original = self._snapshot(
@@ -181,6 +225,37 @@ class TestSnapshotFrame:
         assert restored.teams[0].division_name is None
 
 
+class TestDraftMarket:
+    def test_ppr_response_order_becomes_skill_and_position_rank(self) -> None:
+        class Request:
+            def league_get(self, **_: object) -> dict[str, object]:
+                def player(player_id: int, position_id: int, adp: float) -> dict[str, object]:
+                    return {
+                        "player": {
+                            "id": player_id,
+                            "defaultPositionId": position_id,
+                            "ownership": {"averageDraftPosition": adp},
+                        }
+                    }
+
+                return {
+                    "players": [
+                        player(11, 2, 1.3),
+                        player(-16001, 16, 2.0),  # D/ST is not on Patron's board.
+                        player(12, 3, 4.8),
+                        player(13, 2, 5.1),
+                    ]
+                }
+
+        league = FakePlayer(espn_request=Request(), current_week=1)
+        market = _fetch_draft_market(league)
+
+        assert market[11] == (1, 1, pytest.approx(1.3))
+        assert market[12] == (2, 1, pytest.approx(4.8))
+        assert market[13] == (3, 2, pytest.approx(5.1))
+        assert -16001 not in market
+
+
 class TestTimestamps:
     """ESPN's activity feed reports times as epoch milliseconds. Passed through as a
     string it renders as "1787929226212" in the UI — technically the data, and useless
@@ -211,3 +286,21 @@ class TestTimestamps:
         from patron.espn.sync import _epoch_ms_to_iso
 
         assert _epoch_ms_to_iso("2026-08-28T15:00:00Z") == "2026-08-28T15:00:00Z"
+
+
+def test_snapshot_round_trips_the_draft_recap(tmp_path) -> None:
+    from patron.espn.sync import DraftPick, LeagueSnapshot
+
+    snapshot = LeagueSnapshot(
+        captured_at="2026-08-29T00:00:00+00:00",
+        league_id=1,
+        league_name="Test",
+        season=2026,
+        week=1,
+        my_team_id=3,
+        draft=[DraftPick(1, 1, 1, 3, "Mine", 100, "Star", bid_amount=None, keeper=False)],
+    )
+    path = snapshot.write(tmp_path / "snapshot.json")
+    restored = LeagueSnapshot.read(path)
+    assert restored.draft[0] == snapshot.draft[0]
+    assert LeagueSnapshot.read(path).draft[0].overall == 1

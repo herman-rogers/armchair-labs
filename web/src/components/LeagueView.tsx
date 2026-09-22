@@ -6,13 +6,15 @@ import { Freshness } from './Freshness'
 import { LeagueBoard } from './LeagueBoard'
 import { MatchupsPanel } from './MatchupsPanel'
 import { WirePanel } from './WirePanel'
+import { DraftPanel } from './DraftPanel'
 
-type Tab = 'board' | 'matchups' | 'wire'
+type Tab = 'board' | 'matchups' | 'wire' | 'draft'
 
 const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: 'board', label: 'League Board', hint: 'Power ranks, roster detail, and team comparisons' },
   { id: 'matchups', label: 'Matchups', hint: 'The schedule and each weekly lineup edge' },
   { id: 'wire', label: 'Waiver Wire', hint: 'Free agents ranked against what is actually available' },
+  { id: 'draft', label: 'Draft', hint: 'The draft recap scored against the board, pick by pick' },
 ]
 
 /** Everything that needs live ESPN state. */
@@ -90,6 +92,7 @@ export function LeagueView({ version }: { version: MetricVersion }) {
       {tab === 'board' && hasMyTeam && <LeagueBoard teams={league.data.teams} version={version} />}
       {tab === 'matchups' && <MatchupsPanel version={version} />}
       {tab === 'wire' && <WirePanel version={version} />}
+      {tab === 'draft' && <DraftPanel version={version} />}
     </>
   )
 }

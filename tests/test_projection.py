@@ -42,8 +42,6 @@ def season_row(
         "rushing_tds": 0.0,
         "carries": carries,
         "targets": targets,
-        "wtd_opp": carries + 2.2 * targets,
-        "td_over_exp": 0.0,
     }
     row.update(stats)
     return row
@@ -130,14 +128,13 @@ def test_a_receiver_move_uses_the_destination_quarterback_context(league_config)
     assert move["projected_team"] == "HIGH"
     # Destination context enters through the component branch's team inputs. The
     # prior-branch context scalar was removed after it tested inert (review §4).
-    assert move["qb_context"] > stay["qb_context"]
     assert move["team_scoring_context"] > stay["team_scoring_context"]
     assert move["projected_targets_pg"] != stay["projected_targets_pg"]
 
 
-def test_more_projected_teammate_competition_reduces_receiver_projection(
-    league_config,
-) -> None:
+def test_a_team_volume_override_reduces_projected_opportunity(league_config) -> None:
+    """The teammate-competition multiplier was removed (inert in every era, review
+    §6a); the surviving manual lever on a receiver's environment is team volume."""
     receiver = season_row("wr", "Context Receiver", "WR", "SEA", 14.0, targets=120)
     mate = season_row("mate", "Target Hog", "WR", "SEA", 13.0, targets=130)
     qb = season_row("qb", "Quarterback", "QB", "SEA", 20.0, passing_yards=4200, passing_tds=30)
@@ -150,24 +147,21 @@ def test_more_projected_teammate_competition_reduces_receiver_projection(
         .filter(pl.col("player_id") == "wr")
         .to_dicts()[0]
     )
-    crowded = (
+    throttled = (
         build_projection_board(
             seasons,
             base,
             config,
             assumptions=ProjectionAssumptions(
-                teams={
-                    "SEA": TeamProjectionOverride(team="SEA", target_availability_multiplier=0.80)
-                }
+                teams={"SEA": TeamProjectionOverride(team="SEA", pass_volume_multiplier=0.80)}
             ),
         )
         .filter(pl.col("player_id") == "wr")
         .to_dicts()[0]
     )
 
-    assert crowded["teammate_competition"] > neutral["teammate_competition"]
-    # Competition enters through projected opportunity, not a separate scalar.
-    assert crowded["projected_targets_pg"] < neutral["projected_targets_pg"]
+    assert throttled["team_pass_volume"] < neutral["team_pass_volume"]
+    assert throttled["projected_targets_pg"] < neutral["projected_targets_pg"]
 
 
 def test_v2_reports_true_season_team_shares(league_config) -> None:
@@ -215,7 +209,6 @@ def test_v2_blends_historical_and_component_branches(league_config) -> None:
         receptions=95,
         receiving_yards=1250,
         receiving_tds=8,
-        wopr=0.65,
         air_yards_share=0.32,
         floor=9.0,
         volatility=7.0,
@@ -254,7 +247,6 @@ def test_receiving_role_metrics_drive_projected_opportunity(league_config) -> No
         targets=150,
         receptions=90,
         receiving_yards=1100,
-        wopr=0.75,
         air_yards_share=0.38,
     )
     secondary = season_row(
@@ -266,7 +258,6 @@ def test_receiving_role_metrics_drive_projected_opportunity(league_config) -> No
         targets=75,
         receptions=50,
         receiving_yards=700,
-        wopr=0.35,
         air_yards_share=0.16,
     )
     qb = season_row("qb", "Quarterback", "QB", "SEA", 20.0, passing_yards=4200, passing_tds=30)

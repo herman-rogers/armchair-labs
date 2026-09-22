@@ -37,35 +37,33 @@ Implementation note from the draft build: nflverse's `fantasy_points_ppr` matche
 
 DST is the one place the draft build approximated: the proxy (sacks + 2×takeaways + 6×defTD, plus average points allowed from schedules) ranked units directionally without modeling the PA/YA brackets per-week. A faithful per-week DST scorer from play-by-play is listed as Phase 4 polish; the proxy was adequate for a position drafted last.
 
-## 4. Metrics catalog
+## 4. Metrics: the goal, and where the catalog lives
 
-> This section records the original v1 design. The reviewed formulas, known defects,
-> and implemented v2 forward/team-context model are now specified in
-> [`metrics.md`](metrics.md), which is authoritative for metric behavior.
+> The metric catalog is no longer duplicated here. The single source of truth for
+> which metrics exist is `src/patron/config/metric_report.yaml` (`metrics:` block);
+> [`metrics.md`](metrics.md) is authoritative for metric behavior and carries the
+> graveyard of everything the backtest disproved.
 
-These are the aspects actually used, with definitions and the reasoning each one earned during the draft:
+**The goal** (stated fully at the top of `metrics.md`): rank the top of the draft
+board correctly on next-season **season points = per-active-game PPG × games played**,
+measured as hit rate @K against the naive baselines and the FantasyPros market.
+Availability and role security are the demonstrated repeatable edge; team-context
+narratives and touchdown-regression stories were the demonstrated noise.
 
-**PPG (league points per game).** Season league-scored points ÷ games. The base currency; season *totals* mislead whenever games were missed (the Skattebo/Nabers lesson).
+A historical note this document owes the reader: the original draft-prep design
+(preserved in earlier revisions of this section) called TD-over-expectation "the
+single most exploitable signal the model produced." The 22-fold backtest disproved
+that — TDOE carried no repeatable next-season signal, and it was removed along with
+weighted opportunity, the WOPR blend, and the team-context scalar
+(`docs/v2_metrics_review.md` §4–§6a). The surviving core is deliberately plain:
+league-exact PPG, VOR, target/carry shares of official team volume, floor/volatility
+as descriptors, the RB age curve, depth-chart role, and injury-based expected games.
 
-**VOR (value over replacement).** PPG minus the PPG of the freely-available player at the same position — baselines set at QB12, RB25, WR35, TE12 for a 10-team league (config-driven; re-derive if league size changes). This is the number the whole draft board sorted by, and the reason McBride ranked #9 and kickers ranked last. In-season, replacement level is recomputed from what's actually on the wire, which is more honest than fixed ranks.
-
-**Weighted opportunity.** Carries + 2.2×targets. Volume is the sticky, predictive stat; efficiency regresses. In PPR a target is worth roughly 2.2× a carry, hence the weighting. The Chase Brown metric.
-
-**Target share / air-yards share / WOPR.** Taken directly from nflverse weekly data (WOPR = 1.5×target share + 0.7×air-yards share). The receiver-opportunity lens; air-yards share matters extra in this league because deep targets feed the bonus brackets.
-
-**TD-over-expectation (the regression engine).** Actual TDs minus (touches × position-average TD rate). Flags: ≥ +4 → regress-down / sell (the Gibbs–Taylor flag); ≤ −2.5 with ≥150 weighted opportunities → positive-regression BUY (the CeeDee/Reed/Shaheed flag). The single most exploitable signal the model produced — it found the draft's mispricings and it will find the wire's.
-
-**Weekly floor and volatility.** 25th percentile and standard deviation of weekly league points. Floor decides who starts (the JSN argument); volatility is drafted deliberately or avoided deliberately — floor for favored weeks, ceiling rentals when an underdog (the Shaheed doctrine).
-
-**Age curve.** Age as of Sept 1 from roster birth dates; RB cliff flag at 27.5+ (it's really age × cumulative touches — a workload column is a cheap Phase 4 improvement). WRs age gently to ~31–32, QBs later; discounts, not disqualifiers.
-
-**Big-play bonus points.** The 40+/50+ bonus totals per player-season, kept as a visible column because it's this league's private edge — it's why Stafford and deep threats rank rounds above consensus here.
-
-**Kicker bracket profile.** League-scored kicker points plus counts of 50–59 and 60+ makes. The distance brackets create a real ~4 PPG spread at a position the room treats as random.
-
-**DST proxy score.** As in §3, with the year-over-year caveat: sack rate persists, takeaways regress — weight accordingly when re-ranking.
-
-**Live-state overlays (from ESPN rather than nflverse):** fantasy ownership/free agency, fantasy lineup placement, transactions, injury display, and percent-rostered/started market sentiment. ESPN's projected points and fantasy lineup slots are not V2 inputs; nflverse supplies production, usage, NFL depth charts, and injury-history modeling.
+**Kicker bracket profile** and the **DST proxy score** (per §3) remain positional
+sideshows outside the fitted model. **Live-state overlays from ESPN** (ownership,
+lineup placement, transactions, injury display) tag the board but never feed the
+football projection; nflverse supplies production, usage, depth charts, and
+injury-history modeling.
 
 ## 5. Architecture
 
@@ -110,7 +108,14 @@ Runtime shape: a single long-running process with two timers (or two cron/system
 
 **Name joining is the tax.** nflverse keys on `gsis_id`; ESPN uses its own player IDs and display names ("D.J. Moore" vs "DJ Moore", "Sr."/"Jr." suffixes, Marquise/Hollywood problems). Plan a normalization function plus a small manual alias map, and log unmatched names loudly — silent join failures are how a ranked wire quietly omits the one player that matters. (nflverse publishes an ID-crosswalk table that covers most of it.)
 
-**Rookies and movers.** 2026 rookies have no history — they enter the board only via the override file or, once games start, via Phase 4's live data. Team changes (the Moore/Doubs/Waddle class) make prior-season situational stats stale even when the player row looks healthy; the override file is the bridge until current-season usage data takes over.
+**Rookies and movers.** The next-generation report now scores rookies through a
+separate walk-forward NFL-draft-capital model; it never pretends they have prior NFL
+production. Age/combine/college context remains measurable but was rejected from the
+core after losing to draft capital alone. The connected production board still treats
+that challenger as shadow-only and keeps its ESPN fallback until the challenger wins
+the stated gates. Team changes (the Moore/Doubs/Waddle class)
+make prior-season situational stats stale even when the player row looks healthy; the
+override file is the bridge until current-season usage data takes over.
 
 **ESPN endpoint drift.** The unofficial API changes base URLs every couple of years; the espn-api package tracks it, so pin the version, watch its repo when something 401s, and keep the raw-endpoint fallback in mind.
 

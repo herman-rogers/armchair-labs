@@ -64,7 +64,6 @@ SPECIAL_TEAMS_COLUMNS: Final[tuple[str, ...]] = ("special_teams_tds",)
 OPPORTUNITY_COLUMNS: Final[tuple[str, ...]] = (
     "target_share",
     "air_yards_share",
-    "wopr",
 )
 
 # nflverse's own PPR total. Used as the fast path for base scoring and, in

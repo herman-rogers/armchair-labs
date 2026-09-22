@@ -14,6 +14,7 @@ import { Freshness } from './Freshness'
 import {
   FLAGS_COLUMN,
   IDENTITY,
+  ESPN_RANK,
   OWNERSHIP,
   PlayerTable,
   ROSTERED_PERCENT,
@@ -23,7 +24,7 @@ import {
 } from './PlayerTable'
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE']
-const FLAGS = ['BUY', 'TD-luck', 'age'] as const
+const FLAGS = ['age', 'ESPN-only'] as const
 
 type Ownership = 'all' | 'free_agent' | 'rostered' | 'mine'
 
@@ -36,6 +37,7 @@ const OWNERSHIP_FILTERS: { id: Ownership; label: string; hint: string }[] = [
 
 const LEAGUE_COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
+  ESPN_RANK,
   OWNERSHIP,
   {
     key: 'adj_vor',
@@ -51,28 +53,12 @@ const LEAGUE_COLUMNS: PlayerColumn[] = [
     title: '25th-percentile weekly score.',
     render: (p) => <span className="dim">{number(p.floor)}</span>,
   },
-  {
-    key: 'td_over_exp',
-    label: 'TDOE',
-    title:
-      'Touchdowns above or below a volume-only expectation. Useful as a regression signal, but high-value usage may repeat.',
-    render: (p) => (
-      <span
-        style={{
-          color:
-            p.td_over_exp > 2 ? 'var(--sell)' : p.td_over_exp < -2 ? 'var(--buy)' : undefined,
-        }}
-      >
-        {p.td_over_exp > 0 ? '+' : ''}
-        {p.td_over_exp.toFixed(1)}
-      </span>
-    ),
-  },
   ROSTERED_PERCENT,
 ]
 
 const V2_LEAGUE_COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
+  ESPN_RANK,
   OWNERSHIP,
   {
     key: 'projected_team',
@@ -97,6 +83,17 @@ const V2_LEAGUE_COLUMNS: PlayerColumn[] = [
     label: 'Rank basis',
     title: 'The configured projection and raw value used for this player’s position rank.',
     render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
+  },
+  {
+    key: 'market_ecr',
+    label: 'ECR',
+    title: 'FantasyPros consensus positional rank at the draft snapshot. Kept as information; it is the fallback basis only for players the model cannot rate.',
+    render: (p) => (
+      <span className={p.rank_source === 'market' ? 'strong' : 'dim'}>
+        {p.market_ecr == null ? '—' : `${p.market_position ?? ''}${Math.round(p.market_ecr)}`}
+        {p.rank_source === 'market' ? ' ★' : ''}
+      </span>
+    ),
   },
   {
     key: 'proj_ppg',
@@ -275,20 +272,22 @@ export function PlayersView({ version }: { version: MetricVersion }) {
       {connected ? (
         <PlayerTable
           players={filtered}
-          columns={version === 'v2' ? V2_LEAGUE_COLUMNS : LEAGUE_COLUMNS}
-          defaultSort={version === 'v2' ? 'v2_overall_vor' : 'adj_vor'}
+          columns={version !== 'v1' ? V2_LEAGUE_COLUMNS : LEAGUE_COLUMNS}
+          defaultSort="rank"
         />
       ) : (
         <BoardTable players={filtered} version={version} />
       )}
 
       {connected && <Freshness data={league.data} />}
-      {connected && version === 'v2' && (
+      {connected && version !== 'v1' && (
         <p className="legend tight faint">
-          V2 football metrics come from nflverse. ESPN contributes ownership, fantasy
-          lineup, transactions, and the live injury badge only; ESPN projected points do
-          not affect player ranks. The separate league power simulation may use them as
-          a labeled fallback for players the board cannot project.
+          Projection football metrics come from nflverse. ESPN contributes ownership, fantasy
+          lineup, transactions, and the live injury badge. ESPN projected points do not
+          affect model-backed ranks. A player without prior NFL production is visibly
+          flagged ESPN-only and placed by ESPN’s current PPR draft-room rank; model
+          metrics remain blank. The separate league power simulation may use ESPN points
+          as a labeled fallback for players the board cannot project.
         </p>
       )}
     </>

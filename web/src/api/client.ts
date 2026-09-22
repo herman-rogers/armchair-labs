@@ -1,4 +1,5 @@
 import type {
+  DraftResponse,
   BoardResponse,
   CompareResponse,
   LeaguePlayersResponse,
@@ -65,6 +66,8 @@ export const fetchOpponents = (version: MetricVersion) =>
   get<OpponentsResponse>(`/api/league/opponents?version=${version}`)
 
 export const fetchTransactions = () => get<TransactionsResponse>('/api/league/transactions')
+
+export const fetchDraft = (version: MetricVersion) => get<DraftResponse>(`/api/league/draft?version=${version}`)
 
 /** Force a pull from ESPN, ignoring the TTL. */
 export const refreshLeague = (version: MetricVersion) =>
