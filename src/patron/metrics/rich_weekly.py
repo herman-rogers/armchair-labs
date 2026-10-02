@@ -5,9 +5,9 @@ the role and context that a zero-point week cannot explain by itself: offensive 
 dropback participation, target rate per route opportunity, injury/practice status,
 weekly roster state, expected fantasy opportunity, team volume, and red-zone usage.
 
-Every output row summarizes only the three seasons before ``forecast_season``. Source
-coverage is represented explicitly, so a feed unavailable in an older era is null
-rather than fabricated zero evidence.
+Every output row summarizes only seasons before ``forecast_season`` (three by
+default). Source coverage is represented explicitly, so a feed unavailable in an
+older era is null rather than fabricated zero evidence.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from patron.metrics.positions import canonical_positions
 from patron.scoring.columns import require_columns
 
 _POSITIONS = ("QB", "RB", "WR", "TE")
@@ -43,7 +44,7 @@ RICH_SIGNALS: tuple[tuple[str, str | None], ...] = (
     ("injury_severity", "injury_data_available"),
     ("practice_limit", "injury_data_available"),
     ("roster_score", "roster_data_available"),
-    ("red_zone_opportunities", "route_data_available"),
+    ("red_zone_opportunities", "play_data_available"),
     ("passing_epa_rate", None),
     ("rushing_epa_rate", None),
     ("receiving_epa_rate", None),
@@ -115,8 +116,10 @@ def build_weekly_route_panel(
     valuable: dict[tuple[str, int, int], dict[str, float]] = defaultdict(
         lambda: {"red_zone_opportunities": 0.0, "designed_carries": 0.0, "scrambles": 0.0}
     )
-    for row in plays.iter_rows(named=True):
+    for row in plays.unique(subset=["game_id", "play_id"]).iter_rows(named=True):
         if row.get("season_type") != "REG" or _number(row.get("two_point_attempt")) == 1:
+            continue
+        if row.get("play_type") == "no_play":
             continue
         week = int(row.get("week") or 0)
         if not 1 <= week <= 18:
@@ -150,6 +153,17 @@ def build_weekly_route_panel(
     role: dict[tuple[str, int, int], dict[str, object]] = defaultdict(
         lambda: {"route_opportunities": 0.0, "offensive_plays": 0.0, "team": None}
     )
+    expected_dropbacks: dict[tuple[int, int, str], int] = defaultdict(int)
+    observed_dropbacks: dict[tuple[int, int, str], int] = defaultdict(int)
+    for season, week, team, dropback in valid.values():
+        expected_dropbacks[(season, week, team)] += int(dropback)
+    # Identical duplicate feed rows must not count a second play. Conflicting
+    # versions are excluded, not arbitrarily selected from input order.
+    participation = (
+        participation.unique()
+        .with_columns(pl.len().over("nflverse_game_id", "play_id").alias("_versions"))
+        .filter(pl.col("_versions") == 1)
+    )
     for row in participation.iter_rows(named=True):
         game_id = str(row.get("nflverse_game_id") or "")
         play_id = row.get("play_id")
@@ -162,7 +176,15 @@ def build_weekly_route_panel(
         ids = _split(row.get("offense_players"))
         supplied = _split(row.get("offense_positions"))
         team = str(row.get("possession_team") or play_team)
+        team = {"OAK": "LV", "STL": "LA", "SD": "LAC"}.get(team, team)
+        if not ids or team != play_team:
+            continue
+        observed_dropbacks[(season, week, team)] += int(dropback)
+        seen_players: set[str] = set()
         for index, player_id in enumerate(ids):
+            if player_id in seen_players:
+                continue
+            seen_players.add(player_id)
             position = supplied[index].upper() if index < len(supplied) else ""
             position = position or positions.get((player_id, season), "")
             if position not in _SKILL_POSITIONS:
@@ -176,15 +198,18 @@ def build_weekly_route_panel(
     keys = set(role) | set(valuable)
     rows: list[dict[str, object]] = []
     for player_id, season, week in sorted(keys):
-        weekly_role = role[(player_id, season, week)]
+        weekly_role = role.get((player_id, season, week), {})
+        team_key = (season, week, str(weekly_role.get("team") or ""))
         rows.append(
             {
                 "player_id": player_id,
                 "season": season,
                 "week": week,
-                "route_team": weekly_role["team"],
-                "route_opportunities": weekly_role["route_opportunities"],
-                "offensive_plays": weekly_role["offensive_plays"],
+                "route_team": weekly_role.get("team"),
+                "route_opportunities": weekly_role.get("route_opportunities"),
+                "offensive_plays": weekly_role.get("offensive_plays"),
+                "route_team_dropbacks": observed_dropbacks.get(team_key),
+                "route_expected_dropbacks": expected_dropbacks.get(team_key),
                 **valuable[(player_id, season, week)],
             }
         )
@@ -216,7 +241,8 @@ def _canonical_stats(player_weeks: pl.DataFrame) -> pl.DataFrame:
     )
     require_columns(player_weeks.columns, required, "rich weekly stat input")
     return (
-        player_weeks.filter(pl.col("position").is_in(_POSITIONS) & pl.col("week").is_between(1, 18))
+        canonical_positions(player_weeks)
+        .filter(pl.col("position").is_in(_POSITIONS) & pl.col("week").is_between(1, 18))
         .group_by("player_id", "season", "week")
         .agg(
             pl.col("position").last(),
@@ -391,6 +417,8 @@ def build_rich_weekly_panel(
 ) -> pl.DataFrame:
     """Join every weekly source while retaining source-coverage indicators."""
     keys = ["player_id", "season", "week"]
+    player_weeks = canonical_positions(player_weeks)
+    rosters = canonical_positions(rosters)
     stats = _canonical_stats(player_weeks)
     snaps = _canonical_snaps(snap_counts, players)
     roster = _canonical_rosters(rosters)
@@ -400,10 +428,18 @@ def build_rich_weekly_panel(
     for source in (snaps, injury, xfp, route_panel):
         if source.height:
             panel = panel.join(source, on=keys, how="full", coalesce=True)
+    # Old cached route panels do not have a compatible denominator. Fail closed.
+    panel = panel.with_columns(
+        *(
+            pl.lit(None, dtype=pl.Float64).alias(name)
+            for name in ("route_team_dropbacks", "route_expected_dropbacks", "route_opportunities")
+            if name not in panel.columns
+        )
+    )
     panel = panel.with_columns(
         pl.coalesce(
-            "roster_position",
             "position",
+            "roster_position",
         ).alias("position"),
         pl.coalesce(
             "roster_team", "stat_team", "snap_team", "route_team", "injury_team", "xfp_team"
@@ -426,7 +462,12 @@ def build_rich_weekly_panel(
     panel = panel.join(team, on=["season", "week", "team"], how="left")
     source_seasons = {
         "snap_data_available": set(snaps["season"].unique().to_list()),
-        "route_data_available": set(route_panel["season"].unique().to_list())
+        "route_data_available": set(
+            route_panel.filter(pl.col("offensive_plays").is_not_null())["season"].unique().to_list()
+        )
+        if route_panel.height
+        else set(),
+        "play_data_available": set(route_panel["season"].unique().to_list())
         if route_panel.height
         else set(),
         "injury_data_available": set(injury["season"].unique().to_list()),
@@ -436,10 +477,22 @@ def build_rich_weekly_panel(
     panel = panel.with_columns(
         *(pl.col("season").is_in(values).alias(name) for name, values in source_seasons.items())
     )
+    panel = panel.with_columns(
+        (pl.col("route_team_dropbacks") / pl.col("route_expected_dropbacks")).alias(
+            "route_play_coverage"
+        ),
+        (
+            pl.col("route_team_dropbacks").is_not_null()
+            & (pl.col("route_team_dropbacks") == pl.col("route_expected_dropbacks"))
+            & pl.col("route_opportunities").is_not_null()
+        )
+        .fill_null(False)
+        .alias("route_data_available"),
+    )
     attempts = pl.col("attempts").fill_null(0.0)
     carries = pl.col("carries").fill_null(0.0)
     targets = pl.col("targets").fill_null(0.0)
-    route_opportunities = pl.col("route_opportunities").fill_null(0.0)
+    route_opportunities = pl.col("route_opportunities")
     return (
         panel.with_columns(
             pl.col("points").fill_null(0.0),
@@ -456,11 +509,11 @@ def build_rich_weekly_panel(
             .then(pl.col("team_dropbacks") / (pl.col("team_dropbacks") + pl.col("team_carries")))
             .otherwise(None)
             .alias("team_pass_rate"),
-            pl.when(pl.col("team_dropbacks") > 0)
-            .then(route_opportunities / pl.col("team_dropbacks"))
+            pl.when(pl.col("route_data_available") & (pl.col("route_team_dropbacks") > 0))
+            .then(route_opportunities / pl.col("route_team_dropbacks"))
             .otherwise(None)
             .alias("route_participation"),
-            pl.when(route_opportunities > 0)
+            pl.when(pl.col("route_data_available") & (route_opportunities > 0))
             .then(targets / route_opportunities)
             .otherwise(None)
             .alias("targets_per_route"),
@@ -477,12 +530,21 @@ def build_rich_weekly_panel(
             .otherwise(None)
             .alias("receiving_epa_rate"),
         )
+        .with_columns(
+            *(
+                pl.when(pl.col(name).is_finite()).then(pl.col(name)).otherwise(None).alias(name)
+                for name, _ in RICH_SIGNALS
+            )
+        )
         .select(
             "player_id",
             "season",
             "week",
             "position",
             "team",
+            "route_team_dropbacks",
+            "route_expected_dropbacks",
+            "route_play_coverage",
             *(name for name, _ in RICH_SIGNALS),
             *dict.fromkeys(name for _, name in RICH_SIGNALS if name is not None),
         )
@@ -520,7 +582,6 @@ def _descriptor(values: np.ndarray) -> dict[str, float]:
     mean = float(observed.mean())
     std = float(observed.std())
     slope = float(np.polyfit(weeks, observed, 1)[0]) if len(observed) > 1 else 0.0
-    filled = np.where(present, values, 0.0)
     adjacent = present[:-1] & present[1:]
     if np.any(adjacent):
         left = values[:-1][adjacent]
@@ -537,11 +598,17 @@ def _descriptor(values: np.ndarray) -> dict[str, float]:
         if len(positive)
         else 0.0
     )
-    rolling = np.convolve(filled, np.ones(4) / 4.0, mode="valid")
+
+    def observed_mean(window: np.ndarray) -> float:
+        finite = window[np.isfinite(window)]
+        return float(finite.mean()) if len(finite) else math.nan
+
+    rolling = np.array([observed_mean(values[start : start + 4]) for start in range(15)])
     jumps = np.diff(rolling)
+    jumps = jumps[np.isfinite(jumps)]
     streak = 0
-    for value in filled[::-1]:
-        if value <= 0:
+    for value in values[::-1]:
+        if not math.isfinite(value) or value <= 0:
             break
         streak += 1
     return {
@@ -549,18 +616,18 @@ def _descriptor(values: np.ndarray) -> dict[str, float]:
         "mean": mean,
         "std": std,
         "slope": slope,
-        "last4": float(filled[-4:].mean()),
-        "last4_delta": float(filled[-4:].mean() - filled[-8:-4].mean()),
-        "late_delta": float(filled[9:].mean() - filled[:9].mean()),
+        "last4": observed_mean(values[-4:]),
+        "last4_delta": observed_mean(values[-4:]) - observed_mean(values[-8:-4]),
+        "late_delta": observed_mean(values[9:]) - observed_mean(values[:9]),
         "max": float(observed.max()),
         "q75": float(np.quantile(observed, 0.75)),
         "zero_rate": float(np.mean(observed == 0)),
         "lag1": lag1,
         "entropy": entropy,
         "peak_week": float(np.nanargmax(values) + 1) / 18.0,
-        "max_jump4": float(jumps.max()) if len(jumps) else 0.0,
-        "min_jump4": float(jumps.min()) if len(jumps) else 0.0,
-        "end_streak": float(streak) / 18.0,
+        "max_jump4": float(jumps.max()) if len(jumps) else math.nan,
+        "min_jump4": float(jumps.min()) if len(jumps) else math.nan,
+        "end_streak": float(streak) / 18.0 if present[-1] else math.nan,
     }
 
 
@@ -570,7 +637,9 @@ def build_rich_weekly_features(
     *,
     history_seasons: int = 3,
 ) -> pl.DataFrame:
-    """Summarize three distinct prior-season weekly sequences for each forecast row."""
+    """Summarize the requested history, keeping named three-year trends to three years."""
+    if history_seasons < 1:
+        raise ValueError("history_seasons must be positive")
     require_columns(
         forecast_rows.columns,
         ("forecast_season", "player_id"),
@@ -601,7 +670,16 @@ def build_rich_weekly_features(
                 source_available = availability is None or season_coverage[season].get(
                     availability, False
                 )
-                values = np.full(18, 0.0 if source_available else np.nan, dtype=float)
+                missing_is_unknown = signal in {
+                    "route_participation",
+                    "targets_per_route",
+                    "snap_pct",
+                    "xfp",
+                    "expected_td",
+                }
+                values = np.full(
+                    18, 0.0 if source_available and not missing_is_unknown else np.nan, dtype=float
+                )
                 if source_available:
                     for row in rows:
                         week = int(row["week"]) - 1
@@ -613,15 +691,16 @@ def build_rich_weekly_features(
                 for name, value in summary.items():
                     result[f"rich_s{lag}_{signal}_{name}"] = value if math.isfinite(value) else None
         for signal, seasons in summaries.items():
-            source, previous, oldest = seasons
+            source = seasons[0]
+            previous = seasons[1] if len(seasons) > 1 else {"mean": math.nan, "last4": math.nan}
             mean_yoy = source["mean"] - previous["mean"]
             last4_yoy = source["last4"] - previous["last4"]
             result[f"rich_{signal}_mean_yoy"] = mean_yoy if math.isfinite(mean_yoy) else None
             result[f"rich_{signal}_last4_yoy"] = last4_yoy if math.isfinite(last4_yoy) else None
-            means = np.array([oldest["mean"], previous["mean"], source["mean"]])
+            means = np.array([summary["mean"] for summary in reversed(seasons[:3])])
             finite = np.isfinite(means)
             three_year_trend = (
-                float(np.polyfit(np.arange(3)[finite], means[finite], 1)[0])
+                float(np.polyfit(np.arange(len(means))[finite], means[finite], 1)[0])
                 if finite.sum() > 1
                 else math.nan
             )

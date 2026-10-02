@@ -12,6 +12,7 @@ export interface Player {
   forecast_as_of?: string
   forecast_sample_support?: number | null
   forecast_status?: string
+  historical_ppg_definition?: string
   simulation_source?: string
   metric_version: MetricVersion
   rank: number
@@ -139,7 +140,7 @@ export interface Status {
   board_available: boolean
   built_at: string | null
   player_count: number
-  metric_versions: Record<MetricVersion, { available: boolean; player_count: number; provenance?: { state: string; artifact_id: string | null } }>
+  metric_versions: Record<MetricVersion, { available: boolean; player_count: number; built_at?: string | null; forecast_as_of?: string[]; provenance?: { state: string; artifact_id: string | null } }>
   metric_report: { available: boolean; built_at: string | null }
   league: {
     name: string
@@ -225,6 +226,9 @@ export interface MetricModelResult {
 export interface MetricRankingFoldResult {
   forecast_season: number
   n: number
+  outcome_n?: number
+  missing_scores?: number
+  coverage?: number
   hit_rate: number
   ndcg: number | null
   pool_spearman: number | null
@@ -238,7 +242,7 @@ export interface MetricRankingResult {
   window: string
   window_label: string
   target: string
-  position: Position
+  position: Position | 'ALL'
   k: number
   pool: number
   folds: number
@@ -275,7 +279,22 @@ export interface MetricRankingResult {
 }
 
 export interface MetricReport {
+  uncertainty_calibration?: Array<{
+    position: string; population: string; forecast_season: number; n_train: number; n_test: number
+    nominal_coverage: number; observed_coverage: number; residual_lower: number; residual_upper: number
+    status: string
+  }>
   evaluation_contract?: string
+  population_ranking_results?: Array<MetricRankingResult & { population: string }>
+  ranking_sensitivity_results?: Array<MetricRankingResult & { population: string }>
+  market_disagreement_results?: Array<{
+    candidate: string; market: string; window: string; target: string; k: number; folds: number
+    common_players_mean: number; top_k_overlap_mean: number
+    model_only_hits: number; market_only_hits: number
+    contrarian_precision: number | null; missed_value_capture_rate: number | null
+    contrarian_false_positives: number; net_swap_value_per_fold: number
+    value_capture_bands?: Array<{rank_gap: number; calls: number; hits: number; precision: number | null; false_positive_cost: number}>
+  }>
   deployment_results?: Array<{forecast_season: number; hit_rate: number; coverage: number; market_fallback_n: number}>
   common_pool_results?: Array<{forecast_season: number; ranker: string; common_n: number; coverage: number; hit_rate_lift: number}>
 
@@ -363,12 +382,17 @@ export interface FittedModelSummary {
   position: Position
   latest_forecast_season: number
   scope: 'position' | 'pooled'
-  n_train: number
+  n_train?: number
   ridge_lambda: number | null
   lambdas_chosen: number[]
   intercept: number
-  coefficients: Record<string, number>
-  coefficient_sd_across_refits: Record<string, number>
+  kind?: string
+  selected_source?: string
+  selected_source_counts?: Record<string, number>
+  selection_score?: number | null
+  selection_folds?: number
+  coefficients?: Record<string, number>
+  coefficient_sd_across_refits?: Record<string, number>
   refits: number
 }
 
@@ -431,12 +455,13 @@ export interface LeagueTeam {
   ranking_metric: string
   /** Best legal full-strength lineup total on ranking_metric. */
   ranking_total: number
-  /** Expected best-active-lineup VOR across availability scenarios. */
-  expected_lineup_vor: number
-  /** Spread of that scenario VOR: availability and replacement risk on the VOR scale. */
-  lineup_vor_risk: number
-  /** expected_lineup_vor - 0.674 x lineup_vor_risk: an approximate 25th-percentile lineup VOR. */
-  risk_adjusted_total: number
+  /** Retired: availability must not be applied twice to board VOR. */
+  expected_lineup_vor: number | null
+  lineup_vor_risk: number | null
+  risk_adjusted_total: number | null
+  /** 25th percentile of conditional lineup means over availability scenarios. */
+  availability_floor_points?: number
+  availability_spread_points?: number
   team_rank: number
   scored_players: number
   /** Players without nflverse tape whose ESPN projection supplied the fallback. */
@@ -670,4 +695,200 @@ export interface DraftResponse {
   teams: DraftTeamGrade[]
   ranking_metric: string
   pick_count: number
+}
+
+export interface ResearchDataset {
+  id: string
+  label: string
+  accepted: boolean
+  accepted_at: string | null
+  checks_passed: number | null
+  forecast_rows: number | null
+  report_available: boolean
+  description: string
+}
+export interface ResearchSources {
+  datasets: ResearchDataset[]
+  default_id: string | null
+  unavailable: Array<{ id: string; reason: string }>
+  gold?: DataReleaseReference | null
+}
+
+export type DataReleaseReference = { version: string; manifest_sha256: string }
+export type DataCatalog = { available: false; gold: null } | {
+  available: true
+  gold: DataReleaseReference
+  published_at: string
+  current_observations: { season: number; through_week: number; saved_at: string }
+  products: Record<string, DataReleaseReference>
+  historical_research_reference: { version: string }
+  tables: { name: string; rows: number; primary_key: string[]; role: string; description: string }[]
+  coverage: {
+    forecast_rows: number; coverage_complete: boolean; observed_roster_state: number
+    inferred_prior_team: number; known_absence: number; missing_names: number
+    nonnull_fields: Record<string, number>; interpretation: string
+  }
+  quality: { checks: Record<string, boolean>; coverage_complete: boolean }
+  limitations: string[]
+}
+export interface ResearchCatalog {
+  dataset: ResearchDataset
+  saved_at: string
+  seasons: Array<{ season: number; complete: boolean; cutoff_dates?: string[] }>
+  models: Array<{ id: string; seasons: number[]; unit: string }>
+}
+export interface ResearchPlayer {
+  historical_context?: {
+    cutoff_date: string | null
+    roster_evidence: string | null
+    roster_status: string | null
+    prior_games: number | null
+    prior_ppg: number | null
+    prior_snap_share: number | null
+  }
+  player_id: string
+  player_display_name: string
+  position: string
+  team: string | null
+  population: string
+  model_value: number | null
+  actual_value: number | null
+  benchmark_value: number | null
+  model_rank: number | null
+  actual_rank: number | null
+  benchmark_rank: number | null
+  rank_gap: number | null
+}
+export interface ResearchPlayers {
+  season: number
+  model: string
+  model_unit: string
+  saved_at: string
+  pool_size: number
+  scored_players: number
+  complete: boolean
+  ranking_basis: string
+  outcome_status: string
+  players: ResearchPlayer[]
+}
+export interface IntelligenceTeam {
+  team_id: number
+  team_name: string
+  wins: number
+  losses: number
+  baseline_value: number
+  scenario_value: number
+  value_change: number
+  baseline_rank: number
+  scenario_rank: number
+  rank_change: number
+  modeled_players: number
+  fallback_players: number
+  missing_players: number
+  starters: Array<{name: string | null; slot: string; value: number}>
+}
+export interface LeagueImpact {
+  teams: IntelligenceTeam[]
+  basis: string
+  saved_at: string
+  season: number
+  week: number
+  stale: boolean
+}
+
+export interface RookiePlayer {
+  position_rank?: number | null
+  latest_targets?: number
+  latest_carries?: number
+  player_id: string
+  player_display_name: string
+  position: string
+  team: string | null
+  draft_pick: number | null
+  points_to_date: number
+  targets: number
+  carries: number
+  snap_share: number | null
+  observed_stat_weeks: number
+  snap_observations: number
+  forecast_next4: number | null
+  pace_next4: number | null
+  analog_p10: number | null
+  analog_p90: number | null
+  history_count: number
+  neighbor_count: number
+  forecast_status: string
+  availability: 'unknown' | 'free_agent' | 'rostered'
+  owner_team_name: string | null
+  is_mine: boolean
+  injury_status: string | null
+  analogs: Array<{
+    player_display_name: string; season: number; points_per_week: number
+    targets: number; carries: number; snap_share: number | null; next4_actual: number
+  }>
+}
+export interface RookieWatch {
+  history?: { version: string }
+  history_seasons?: number[]
+  current_source?: string
+  season: number
+  through_week: number
+  horizon: number[]
+  saved_at: string
+  forecast_age_hours: number
+  newer_week_possible: boolean
+  ownership_available: boolean
+  ownership_stale: boolean
+  ownership_captured_at: string | null
+  method: string
+  limitations: string[]
+  players: RookiePlayer[]
+  backtest: {
+    basis: string
+    positions: Array<{
+      position: string; eligible: number; scored: number; seasons: number[]
+      forecast_next4_mae: number | null; pace_next4_mae: number | null
+      historical_mean_next4_mae: number | null
+    }>
+  }
+}
+
+export interface OutlookPlayer {
+  player_id: string; player_display_name: string; position: string; team: string | null
+  population: string; position_rank?: number; eligible: boolean; forecast_status: string
+  forecast_next4: number | null; usage_baseline_next4: number | null; points_pace_next4: number | null
+  recent_targets_pg: number | null; recent_carries_pg: number | null; recent_attempts_pg: number | null
+  recent_points_pg: number | null; recent_snap_share: number | null
+  usage_change: number | null; snap_change: number | null; snap_std: number | null
+  points_std: number | null; spike_share: number | null; bonus_share: number | null
+  past_team_games: number; future_team_games: number; observed_offensive_weeks: number
+  prior_offensive_weeks: number | null; snap_observations: number; snap_feed_complete: boolean
+  opportunity_trend: string; role_evidence: string; expected_offensive_weeks: number | null
+  expected_active_snap_share: number | null; participation_pace_next4: number | null
+  outcome_range: { low: number; high: number; nominal_coverage: number } | null
+  range_status: string; confidence_score: null
+  availability: 'unknown' | 'free_agent' | 'rostered'; owner_team_name: string | null
+  is_mine: boolean; injury_status: string | null
+}
+
+export interface OutlookValidation {
+  position: string; cutoff_week: number; cohort: string; n: number
+  mae: { outlook: number; recent_usage: number; recent_points: number }
+  season_bootstrap_95_improvement_vs_usage: number[]
+  folds: Array<{ season: number; n: number; mae_improvement_vs_usage: number }>
+  nominal_coverage: number; observed_coverage: number
+  interval_score: { outlook: number; recent_usage: number }
+  availability: { n: number; outlook_mae: number | null; recent_participation_mae: number | null }
+  role: { n: number; outlook_mae: number | null; hold_recent_share_mae: number | null }
+  publication_checks: Record<string, boolean>; range_gate_passed: boolean
+}
+
+export interface PlayerOutlookReport {
+  version: string; season: number; through_week: number; horizon: number[]
+  saved_at: string; observations_saved_at: string; history: { version: string }
+  status: string; confidence_scores_published: false; players: OutlookPlayer[]
+  validation: OutlookValidation[]; limitations: string[]
+  design: { method: string; publication_policy: string; cutoffs: number[] }
+  observation_age_hours: number; newer_week_possible: boolean; ownership_available: boolean
+  ownership_stale: boolean; ownership_captured_at: string | null
 }

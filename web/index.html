@@ -1,9 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply the saved choice before the page paints. New visitors start in light mode.
+      try {
+        if (localStorage.getItem('sweaty-plays-theme') === 'dark') {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      } catch {
+        // Light mode also works when browser storage is unavailable.
+      }
+    </script>
     <title>Patron Saints — Draft Board</title>
   </head>
   <body>

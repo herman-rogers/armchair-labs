@@ -1,117 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchRoster } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
-import {
-  OVERALL_VOR_TITLE,
-  POSITION_RANK_TITLE,
-  SEASON_EQUIVALENT_TITLE,
-  rankBasis,
-  rankBasisTitle,
-} from '../metricPresentation'
-import {
-  ESPN_RANK,
-  FLAGS_COLUMN,
-  IDENTITY,
-  PlayerTable,
-  number,
-  type PlayerColumn,
-} from './PlayerTable'
-
-const COLUMNS: PlayerColumn[] = [
-  ...IDENTITY,
-  ESPN_RANK,
-  {
-    key: 'adj_vor',
-    label: 'VOR',
-    title: 'Points per game above the replacement-level player at this position.',
-    render: (p) => <span className="strong">{number(p.adj_vor, 2)}</span>,
-  },
-  {
-    key: 'ppg',
-    label: 'PPG',
-    title: 'League-scored points per game.',
-    render: (p) => number(p.ppg),
-  },
-  {
-    key: 'floor',
-    label: 'Floor',
-    title: 'Historical 25th-percentile weekly score; descriptive, not a guaranteed floor.',
-    render: (p) => <span className="dim">{number(p.floor)}</span>,
-  },
-  {
-    key: 'volatility',
-    label: 'Vol',
-    title: 'Weekly standard deviation. Buy it when you need a ceiling, avoid it when favoured.',
-    render: (p) => <span className="dim">{number(p.volatility)}</span>,
-  },
-  FLAGS_COLUMN,
-  {
-    key: 'percent_started',
-    label: '%Start',
-    title: 'Share of ESPN leagues starting this player this week — the market’s read.',
-    render: (p) => <span className="dim">{number(p.percent_started, 0)}</span>,
-  },
-]
-
-const V2_COLUMNS: PlayerColumn[] = [
-  ...IDENTITY,
-  ESPN_RANK,
-  {
-    key: 'v2_overall_vor',
-    label: 'Overall VOR',
-    title: OVERALL_VOR_TITLE,
-    render: (p) => <span className="strong">{number(p.v2_overall_vor, 2)}</span>,
-  },
-  {
-    key: 'v2_position_rank',
-    label: 'Pos Rk',
-    title: POSITION_RANK_TITLE,
-    render: (p) => <span className="dim">{p.v2_position_rank ?? '—'}</span>,
-  },
-  {
-    key: 'v2_rank_value',
-    label: 'Rank basis',
-    title: 'The configured projection and raw value used for this player’s position rank.',
-    render: (p) => <span className="dim" title={rankBasisTitle(p)}>{rankBasis(p)}</span>,
-  },
-  {
-    key: 'forecast_active_ppg',
-    label: 'Proj PPG',
-    title: 'Production forecast per active game. Frozen Adaptive season totals do not identify a PPG/games decomposition.',
-    render: (p) => number(p.forecast_active_ppg ?? (p.metric_version === 'adaptive' ? null : p.fitted_ppg)),
-  },
-  {
-    key: 'season_equivalent_ppg',
-    label: 'Avail PPG',
-    title: SEASON_EQUIVALENT_TITLE,
-    render: (p) => <span className="dim">{number(p.season_equivalent_ppg)}</span>,
-  },
-  {
-    key: 'forecast_expected_games',
-    label: 'Exp G',
-    title: 'Fitted expected games underlying the season forecast.',
-    render: (p) => <span className="dim">{number(p.forecast_expected_games ?? (p.metric_version === 'adaptive' ? null : p.fitted_games))}</span>,
-  },
-  {
-    key: 'projected_floor',
-    label: 'Floor',
-    title: 'Projected 25th-percentile weekly score when active.',
-    render: (p) => <span className="dim">{number(p.projected_floor)}</span>,
-  },
-  {
-    key: 'ppg',
-    label: 'Actual PPG',
-    title: 'Historical PPG using participation-observed active games. V1 uses production rows.',
-    render: (p) => <span className="dim">{number(p.ppg)}</span>,
-  },
-  {
-    key: 'percent_started',
-    label: '%Start',
-    title: 'ESPN market usage; displayed but not used by V2.',
-    render: (p) => <span className="dim">{number(p.percent_started, 0)}</span>,
-  },
-  FLAGS_COLUMN,
-]
+import { IDENTITY, PlayerTable } from './PlayerTable'
+import { forecastColumns } from './ForecastColumns'
+import { RankingExplanation } from './PlayerDetails'
+import type { LeaguePlayer } from '../api/types'
 
 /** One team's roster, joined to the board, decisions first. */
 export function RosterPanel({
@@ -151,9 +44,11 @@ export function RosterPanel({
           )}
         </p>
       )}
+      <RankingExplanation version={version} />
       <PlayerTable
+        version={version}
         players={roster.data.players}
-        columns={version !== 'v1' ? V2_COLUMNS : COLUMNS}
+        columns={[...IDENTITY, ...forecastColumns<LeaguePlayer>(version)]}
         defaultSort="rank"
         emptyMessage="No skill players on this roster."
       />

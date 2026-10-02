@@ -18,7 +18,7 @@ export function OwnerBadge({ player }: { player: LeaguePlayer }) {
   if (player.is_mine) {
     return (
       <span className="badge mine" title="On your roster.">
-        Mine
+        {player.owner_team_name ? `${player.owner_team_name} · Mine` : 'Mine'}
       </span>
     )
   }

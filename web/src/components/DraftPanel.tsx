@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchDraft } from '../api/client'
 import type { DraftPickAnalysis, DraftTeamGrade, MetricVersion } from '../api/types'
 import { boardMetricLabel } from '../metricPresentation'
 import { DataTable, type Column } from './DataTable'
+import { useUrlState } from '../navigation'
 
 function signed(value: number | null) {
   if (value == null) return '—'
@@ -201,7 +202,9 @@ function pickColumns(metric: string): Column<DraftPickAnalysis>[] {
 /** The draft recap scored against the board: team grades, then every pick with exact best-available. */
 export function DraftPanel({ version }: { version: MetricVersion }) {
   const draft = useQuery({ queryKey: ['draft', version], queryFn: () => fetchDraft(version) })
-  const [teamId, setTeamId] = useState<number | 'all'>('all')
+  const [teamParam, setTeamParam] = useUrlState('team', 'all')
+  const teamId: number | 'all' = teamParam === 'all' ? 'all' : Number(teamParam)
+  const setTeamId = (value: number | 'all') => setTeamParam(String(value))
 
   const picks = useMemo(() => {
     const rows = draft.data?.picks ?? []

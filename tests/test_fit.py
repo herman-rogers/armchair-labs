@@ -360,3 +360,48 @@ def test_prefix_feature_pool_is_selected_inside_each_outer_training_window() -> 
     )
     assert "rich_good" in latest["coefficients"]
     assert len(latest["coefficients"]) <= 2
+
+
+def test_selector_missing_best_player_is_a_miss() -> None:
+    from patron.metrics.fit import _selector_fold_score
+
+    rows = [
+        {"actual": 100.0, "sparse": None},
+        {"actual": 10.0, "sparse": 10.0},
+        {"actual": 1.0, "sparse": 1.0},
+    ]
+    assert _selector_fold_score(rows, "sparse", "actual", 1) == pytest.approx((0.0, 0.1))
+
+
+def test_selector_compares_sources_on_shared_folds() -> None:
+    from patron.metrics.fit import _choose_adaptive_source
+
+    def fold(sparse: bool, good: bool) -> list[dict]:
+        return [
+            {
+                "position": "RB",
+                "actual": float(i),
+                "dense": float(i),
+                "sparse": float(i if good else -i) if sparse else None,
+            }
+            for i in range(3)
+        ]
+
+    spec = ModelSpec(
+        name="select",
+        kind="adaptive_select",
+        target="actual",
+        factors=("sparse", "dense"),
+        fallback="dense",
+        selection_top_k=(("RB", 1),),
+        apply_live=False,
+    )
+    history = {
+        2020: fold(False, True),
+        2021: fold(True, False),
+        2022: fold(True, True),
+        2023: fold(True, True),
+    }
+    source, score, folds = _choose_adaptive_source(history, 2023, "RB", spec, 2)
+    assert (source, score, folds) == ("dense", 1.0, 2)
+    assert _choose_adaptive_source(history, 2022, "RB", spec, 2) == ("dense", None, 0)

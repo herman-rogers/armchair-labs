@@ -1,8 +1,15 @@
-import { useMemo, useState } from 'react'
+import { ModelWeights } from './ModelWeights'
+import { IntervalCalibration } from './IntervalCalibration'
+import { ResearchExplorer } from './ResearchExplorer'
+import { SignalEvidenceTable } from './SignalEvidenceTable'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchMetricReport } from '../api/client'
-import type { MetricAssessment, MetricBacktestResult } from '../api/types'
+import { fetchMetricReport, fetchResearchReport } from '../api/client'
+import type { MetricAssessment, MetricBacktestResult, ResearchDataset } from '../api/types'
 import { rankerLabel } from '../metricPresentation'
+import { researchModelLabel } from '../researchModels'
+import { useUrlFlag, useUrlState } from '../navigation'
+import { EVIDENCE_WINDOWS } from '../researchWindows'
 
 const ASSESSMENTS: Array<{ id: MetricAssessment | 'all'; label: string }> = [
   { id: 'all', label: 'All evidence' },
@@ -40,19 +47,28 @@ function seasonRange(seasons: number[]) {
   return `${seasons[0]}–${seasons[seasons.length - 1]}`
 }
 
-export function MetricReportView({ available }: { available: boolean }) {
+export function MetricReportView({ available, dataset, source }: { available: boolean; dataset?: string; source?: ResearchDataset }) {
   const report = useQuery({
-    queryKey: ['metric-report'],
-    queryFn: fetchMetricReport,
+    queryKey: ['metric-report', dataset ?? 'published'],
+    queryFn: () => dataset ? fetchResearchReport(dataset) : fetchMetricReport(),
     enabled: available,
   })
-  const [target, setTarget] = useState('actual_availability_value')
-  const [position, setPosition] = useState('ALL')
-  const [group, setGroup] = useState('All groups')
-  const [assessment, setAssessment] = useState<MetricAssessment | 'all'>('all')
-  const [window, setWindow] = useState('modern')
-  const [rankingTarget, setRankingTarget] = useState('actual_season_points')
-  const [fittedModel, setFittedModel] = useState('fitted_ppg')
+  // Params are prefixed `report_`: this report shares its page with other research panels.
+  const [target, setTarget] = useUrlState('report_outcome', 'actual_availability_value')
+  const [position, setPosition] = useUrlState('report_position', 'ALL')
+  const [group, setGroup] = useUrlState('report_family', 'All groups')
+  const [assessmentParam, setAssessmentParam] = useUrlState('report_assessment', 'all')
+  const assessment = assessmentParam as MetricAssessment | 'all'
+  const setAssessment = (value: MetricAssessment | 'all') => setAssessmentParam(value)
+  const [requestedWindow, setWindow] = useUrlState('report_window', 'modern')
+  const [showAllWindows, setShowAllWindows] = useUrlFlag('report_all_windows')
+  const [rankingTarget, setRankingTarget] = useUrlState('report_ranking', 'actual_season_points')
+  const [signalSearch, setSignalSearch] = useUrlState('report_q', '', { replace: true })
+  const visibleWindows = useMemo(() => (report.data?.configuration.analysis_windows ?? [])
+    .filter(entry => showAllWindows || !EVIDENCE_WINDOWS[entry.key]?.advanced), [report.data, showAllWindows])
+  const selectedWindow = useMemo(() => visibleWindows.find(entry => entry.key === requestedWindow)
+    ?? visibleWindows.find(entry => entry.key === 'modern') ?? visibleWindows[0], [visibleWindows, requestedWindow])
+  const window = selectedWindow?.key ?? ''
 
   const groups = useMemo(
     () => ['All groups', ...new Set(report.data?.metrics.map((metric) => metric.group) ?? [])],
@@ -71,8 +87,9 @@ export function MetricReportView({ available }: { available: boolean }) {
     () =>
       evidenceRows
         .filter((row) => assessment === 'all' || row.assessment === assessment)
+        .filter(row => row.label.toLowerCase().includes(signalSearch.trim().toLowerCase()))
         .sort((left, right) => evidenceScore(right) - evidenceScore(left)),
-    [assessment, evidenceRows],
+    [assessment, evidenceRows, signalSearch],
   )
   const modelRows = useMemo(
     () =>
@@ -109,11 +126,13 @@ export function MetricReportView({ available }: { available: boolean }) {
   }
 
   const data = report.data
+  const inWindow = (season: number) => !selectedWindow || (season >= selectedWindow.start && season <= selectedWindow.end)
   return (
     <section className="metric-report">
       <div className="report-hero">
         <div>
-          <h2>{data.title}</h2>
+          <span className="eyebrow">Saved historical evidence</span>
+          <h2>Research & evidence</h2>
           <p>
             Rolling forecasts for {seasonRange(data.data_summary.completed_forecasts)} using{' '}
             {data.configuration.history_seasons} trailing seasons.{' '}
@@ -127,51 +146,95 @@ export function MetricReportView({ available }: { available: boolean }) {
       </div>
 
       <div className="controls report-controls report-window-control">
-        <label>
+        <label className="research-wide-control">
           Evidence window
-          <select value={window} onChange={(event) => setWindow(event.target.value)}>
-            {data.configuration.analysis_windows.map((entry) => (
+          <select aria-label="Evidence window" value={window} onChange={(event) => setWindow(event.target.value)}>
+            {!visibleWindows.length && <option value="">No standard windows · choose advanced</option>}
+            {visibleWindows.map((entry) => (
               <option key={entry.key} value={entry.key}>
-                {entry.label} · {entry.start}–{entry.end}
+                {EVIDENCE_WINDOWS[entry.key]?.label ?? entry.label} · {entry.start}–{entry.end}
               </option>
             ))}
           </select>
         </label>
+        <label>Window list
+          <select aria-label="Evidence window list" value={showAllWindows ? 'all' : 'standard'}
+            onChange={event => setShowAllWindows(event.target.value === 'all')}>
+            <option value="standard">Primary comparisons</option>
+            <option value="all">All windows (advanced)</option>
+          </select>
+        </label>
       </div>
+      <p className="legend">These are overlapping date windows of the selected dataset—not different dataset versions or quality grades. Changing a window filters saved evaluations; it does not rebuild forecasts or retrain the models.</p>
+      {selectedWindow && <p className="legend">{selectedWindow.start}–{selectedWindow.end}: {EVIDENCE_WINDOWS[selectedWindow.key]?.purpose}
+        {' '}{data.data_summary.completed_forecasts.filter(inWindow).length} completed forecast seasons in this window; individual models may cover fewer.</p>}
+      <details className="analysis-details">
+        <summary>Dataset quality & what to keep</summary>
+        <p>{source?.accepted
+          ? `${source.checks_passed ?? 'Recorded'} integrity checks passed for ${source.id}. Accepted for research, not promoted to production.`
+          : 'This report does not have a verified repair-acceptance record here. Use legacy evidence as a reference, not proof that the repaired models work.'}
+          {' '}An integrity pass checks recorded defects and provenance; it does not certify complete historical context, publication-time data availability, or predictive value.</p>
+        <div className="table-wrap"><table>
+          <thead><tr><th className="left">Keep / use</th><th className="left">Purpose and limits</th></tr></thead>
+          <tbody>
+            <tr><td className="left">Accepted repaired history · primary research</td><td className="left">Prefer the audited rebuild over pre-repair inputs. Preserve its source snapshots, manifests, acceptance record, and dependent studies.</td></tr>
+            <tr><td className="left">V1 and frozen forecasts · protected references</td><td className="left">Keep to reproduce the current draft and original forecasts. Older does not make these disposable.</td></tr>
+            <tr><td className="left">Legacy and superseded runs · archive</td><td className="left">Use for regression checks and provenance, not current evidence. Archive failed runs separately; review dependencies before removing any files.</td></tr>
+            <tr><td className="left">College → NFL and in-season outlook · complementary</td><td className="left">Different populations and forecast horizons, not replacements for historical season forecasts. The separate college study is not incorporated into saved Next-gen rankings.</td></tr>
+          </tbody>
+        </table></div>
+        <p>Judge quality by identity and scoring checks, dated source evidence, observed versus inferred context, missing-data coverage, and held-out performance against a simple baseline. Newer or larger alone is not better.</p>
+        <div className="table-wrap"><table>
+          <thead><tr><th className="left">Evaluation window</th><th className="left">Why retain it</th></tr></thead>
+          <tbody>{data.configuration.analysis_windows.map(entry => <tr key={entry.key}>
+            <td className="left">{EVIDENCE_WINDOWS[entry.key]?.label ?? entry.label} · {entry.start}–{entry.end}</td>
+            <td className="left">{EVIDENCE_WINDOWS[entry.key]?.purpose ?? 'Saved evaluation slice; inspect source coverage before comparing.'}</td>
+          </tr>)}</tbody>
+        </table></div>
+        <p>Advanced options only declutter the interface. No historical data, report, or model output is deleted.</p>
+      </details>
 
-      <details>
+      <nav className="research-nav" aria-label="Research sections">
+        <a href="#research-comparisons">Model comparisons</a><a href="#research-coverage">Coverage</a><a href="#research-weights">Model weights</a><a href="#research-signals">Signal evidence</a><a href="#research-calibration">Forecast error</a>
+      </nav>
+      <div id="research-comparisons"><ResearchExplorer report={data} window={window} /></div>
+      <details id="research-coverage" className="analysis-details">
         <summary>Production coverage and comparison populations</summary>
         <p>{data.evaluation_contract ?? 'Legacy evaluation: player pools differ. Regenerate evidence before using these results for model selection.'}</p>
         <p>Automatic production policy, including market fallbacks; historical manual overrides are excluded.</p>
-        <table>
+        <div className="table-wrap"><table>
           <thead><tr><th>Season</th><th>Complete-pool hit rate</th><th>Coverage</th><th>Market fallbacks</th></tr></thead>
-          <tbody>{data.deployment_results?.map((row) => <tr key={row.forecast_season}>
+          <tbody>{data.deployment_results?.filter(row => inWindow(row.forecast_season)).map((row) => <tr key={row.forecast_season}>
             <td>{row.forecast_season}</td><td>{(100 * row.hit_rate).toFixed(1)}%</td>
             <td>{(100 * row.coverage).toFixed(1)}%</td><td>{row.market_fallback_n}</td>
           </tr>)}</tbody>
-        </table>
+        </table></div>
+        {!data.deployment_results?.filter(row => inWindow(row.forecast_season)).length && <p>No deployment coverage was saved for this window.</p>}
         <p>Ranking quality against overall ECR on common players only; coverage is reported against the retained draft pool.</p>
-        <table>
+        <div className="table-wrap"><table>
           <thead><tr><th>Season</th><th>Common players</th><th>Coverage</th><th>Hit-rate lift vs ECR</th></tr></thead>
-          <tbody>{data.common_pool_results?.filter((row) => row.ranker === 'fitted_season_points').sort((a, b) => a.forecast_season - b.forecast_season).map((row) => <tr key={row.forecast_season}>
+          <tbody>{data.common_pool_results?.filter((row) => row.ranker === 'fitted_season_points' && inWindow(row.forecast_season)).sort((a, b) => a.forecast_season - b.forecast_season).map((row) => <tr key={row.forecast_season}>
             <td>{row.forecast_season}</td><td>{row.common_n}</td><td>{(100 * row.coverage).toFixed(1)}%</td>
             <td>{(100 * row.hit_rate_lift).toFixed(1)} pp</td>
           </tr>)}</tbody>
-        </table>
+        </table></div>
+        {!data.common_pool_results?.filter(row => inWindow(row.forecast_season)).length && <p>No common-player comparison was saved for this window.</p>}
       </details>
+      <details className="analysis-details"><summary>Full ranking results by position</summary>
       <div className="ranking-verdict">
         <div className="ranking-heading">
           <div>
             <h3>Do projection rankers beat naive history?</h3>
             <p className="legend tight">
-              Complete-pool results keep the actual outcome universe fixed and count missing forecasts as coverage failures. “Beats” requires a
-              positive pooled hit-rate lift and more head-to-head fold wins than losses
-              against the best baseline available on the same seasons. This is diagnostic evidence, not a model promotion. Pairwise common-player results, market-fallback deployment coverage, and interval calibration are retained in the report artifact.
+              {data.evaluation_contract
+                ? 'Missing forecasts count as coverage failures against a fixed outcome universe.'
+                : 'Legacy report: candidate player pools differ, so the reported verdict is not a fair model-selection test.'}
+              {' '}Reported “beats” requires positive hit-rate lift and more fold wins than losses against the best available baseline. These are diagnostics, not automatic promotion decisions.
             </p>
           </div>
           <label>
             Ranking outcome
-            <select value={rankingTarget} onChange={(event) => setRankingTarget(event.target.value)}>
+            <select aria-label="Ranking outcome" value={rankingTarget} onChange={(event) => setRankingTarget(event.target.value)}>
               {data.configuration.ranking.targets.map((entry) => (
                 <option key={entry} value={entry}>{rankerLabel(entry)}</option>
               ))}
@@ -199,7 +262,7 @@ export function MetricReportView({ available }: { available: boolean }) {
               {rankingRows.map((row) => (
                 <tr key={`${row.window}-${row.target}-${row.position}-${row.ranker}`}>
                   <td className="strong">{row.position}</td>
-                  <td className="left name">{rankerLabel(row.ranker)}</td>
+                  <td className="left name">{researchModelLabel(row.ranker)}</td>
                   <td>
                     <span
                       className={`ranking-role ${row.role}`}
@@ -239,79 +302,19 @@ export function MetricReportView({ available }: { available: boolean }) {
         </div>
       </div>
 
-      {(data.fitted_model_summary?.length ?? 0) > 0 && (
-        <div className="ranking-verdict">
-          <div className="ranking-heading">
-            <div>
-              <h3>Learned weights (walk-forward fitted rankers)</h3>
-              <p className="legend tight">
-                Standardized ridge coefficients, refitted each season on every earlier completed
-                fold with the ridge strength chosen by nested walk-forward validation. The small
-                number is the coefficient's spread across refits — a weight that swings is not
-                evidence.
-              </p>
-            </div>
-            <label>
-              Model
-              <select value={fittedModel} onChange={(event) => setFittedModel(event.target.value)}>
-                {[...new Set(data.fitted_model_summary.map((entry) => entry.model))].map((name) => (
-                  <option key={name} value={name}>{rankerLabel(name)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {(() => {
-            const entries = data.fitted_model_summary.filter((entry) => entry.model === fittedModel)
-            if (entries.length === 0) return null
-            const features = Object.keys(entries[0].coefficients)
-            return (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Pos</th>
-                      <th>Scope</th>
-                      <th>Train rows</th>
-                      <th>λ</th>
-                      <th>Refits</th>
-                      {features.map((feature) => (
-                        <th key={feature}>{rankerLabel(feature)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.map((entry) => (
-                      <tr key={`${entry.model}-${entry.position}`}>
-                        <td className="strong">{entry.position}</td>
-                        <td className="dim">{entry.scope}</td>
-                        <td>{entry.n_train}</td>
-                        <td className="dim">{entry.ridge_lambda ?? '—'}</td>
-                        <td>{entry.refits}</td>
-                        {features.map((feature) => (
-                          <td key={feature}>
-                            <span className="strong">{correlation(entry.coefficients[feature] ?? null)}</span>
-                            {entry.coefficient_sd_across_refits[feature] != null && (
-                              <span className="dim"> ±{entry.coefficient_sd_across_refits[feature].toFixed(2)}</span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          })()}
-        </div>
-      )}
+      </details>
+      {!!data.fitted_model_summary?.length && <ModelWeights entries={data.fitted_model_summary} />}
 
+      <section id="research-signals" className="analysis-section">
+      <span className="eyebrow">Signal research</span><h3>Which inputs add information?</h3>
       <div className="report-cards">
         {(['strong', 'useful', 'harmful', 'redundant', 'weak'] as MetricAssessment[]).map((key) => (
           <button
             type="button"
             className={`report-card ${key}`}
             key={key}
-            onClick={() => setAssessment(key)}
+            aria-pressed={assessment === key}
+            onClick={() => setAssessment(assessment === key ? 'all' : key)}
           >
             <span>{evidenceRows.filter((row) => row.assessment === key).length}</span>
             {key}
@@ -322,7 +325,7 @@ export function MetricReportView({ available }: { available: boolean }) {
       <div className="controls report-controls">
         <label>
           Outcome
-          <select value={target} onChange={(event) => setTarget(event.target.value)}>
+          <select aria-label="Signal outcome" value={target} onChange={(event) => setTarget(event.target.value)}>
             {data.targets.map((entry) => (
               <option key={entry.key} value={entry.key}>{entry.label}</option>
             ))}
@@ -330,7 +333,7 @@ export function MetricReportView({ available }: { available: boolean }) {
         </label>
         <label>
           Position
-          <select value={position} onChange={(event) => setPosition(event.target.value)}>
+          <select aria-label="Signal position" value={position} onChange={(event) => setPosition(event.target.value)}>
             {['ALL', 'QB', 'RB', 'WR', 'TE'].map((entry) => (
               <option key={entry} value={entry}>{entry}</option>
             ))}
@@ -338,7 +341,7 @@ export function MetricReportView({ available }: { available: boolean }) {
         </label>
         <label>
           Metric family
-          <select value={group} onChange={(event) => setGroup(event.target.value)}>
+          <select aria-label="Metric family" value={group} onChange={(event) => setGroup(event.target.value)}>
             {groups.map((entry) => <option key={entry}>{entry}</option>)}
           </select>
         </label>
@@ -355,6 +358,7 @@ export function MetricReportView({ available }: { available: boolean }) {
         </label>
       </div>
 
+      <input className="search" aria-label="Search signal evidence" placeholder="Search signals…" value={signalSearch} onChange={event => setSignalSearch(event.target.value)} />
       <p className="legend tight">
         Spearman measures next-season rank association. “Partial vs prior” measures what remains
         after controlling for the historical PPG prior. Consistency is the share of forecast years
@@ -362,63 +366,16 @@ export function MetricReportView({ available }: { available: boolean }) {
         the metric's configured expected direction.
       </p>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th className="left">Metric</th>
-              <th className="left">Family</th>
-              <th>Assessment</th>
-              <th>Spearman</th>
-              <th>Partial vs prior</th>
-              <th>Fold 2.5–97.5%</th>
-              <th>Consistency</th>
-              <th>Coverage</th>
-              <th>N</th>
-              <th>Year folds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const definition = data.metrics.find((metric) => metric.key === row.metric)
-              return (
-                <tr key={`${row.metric}-${row.target}-${row.position}`}>
-                  <td className="left">
-                    <span className="name" title={definition?.description}>{row.label}</span>
-                  </td>
-                  <td className="left dim">{row.group}</td>
-                  <td><span className={`metric-assessment ${row.assessment}`}>{row.assessment}</span></td>
-                  <td className="strong">{correlation(row.spearman)}</td>
-                  <td className="strong">{correlation(row.partial_spearman)}</td>
-                  <td className="dim">
-                    {row.spearman_ci_low == null
-                      ? '—'
-                      : `${correlation(row.spearman_ci_low)} to ${correlation(row.spearman_ci_high)}`}
-                  </td>
-                  <td>{percent(row.direction_consistency)}</td>
-                  <td>{percent(row.coverage)}</td>
-                  <td>{row.n}</td>
-                  <td className="folds">
-                    {row.fold_results.map((fold) => (
-                      <span key={fold.forecast_season} title={`n=${fold.n}`}>
-                        {fold.forecast_season}: {correlation(fold.spearman)}
-                      </span>
-                    ))}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <SignalEvidenceTable rows={rows} catalog={data.metrics} />
+      </section>
 
-      {rows.length === 0 && <div className="notice">No metrics match these filters.</div>}
-
-      <h3 className="section-head">Direct forecast calibration</h3>
+      <IntervalCalibration rows={data.uncertainty_calibration} position={position} start={selectedWindow?.start} end={selectedWindow?.end} />
+      <h3 id="research-calibration" className="section-head">Forecast error by outcome</h3>
       <p className="legend tight">
         Error measures apply only where a projection and outcome share the same units. Positive
         bias means the model over-projected the outcome; rank correlation measures ordering.
       </p>
+      <p className="legend tight">Scope: {position} · selected evidence window. Smaller MAE and RMSE indicate smaller errors.</p>
       <div className="table-wrap calibration-table">
         <table>
           <thead>
@@ -448,6 +405,7 @@ export function MetricReportView({ available }: { available: boolean }) {
         </table>
       </div>
 
+      {!modelRows.length && <p className="notice">No forecast-error results for this position and window. Choose a position in Signal evidence above.</p>}
       <details className="metric-catalog">
         <summary>Metric catalog ({data.metrics.length})</summary>
         <div className="catalog-grid">

@@ -23,6 +23,8 @@ from patron.config.league import LeagueConfig, get_league
 from patron.config.settings import CONFIG_DIR, Settings, get_settings
 from patron.data import nfl_transactions, nflverse
 from patron.data.derived import cached_frame
+from patron.data.historical_evidence import load_transaction_backfill
+from patron.metrics.availability import EVIDENCE_FILE, attach_known_absences, load_absences
 from patron.metrics.backtest import (
     MetricReportConfig,
     build_backtest_predictions,
@@ -62,6 +64,11 @@ from patron.metrics.fit import (
     production_config,
 )
 from patron.metrics.forecast import FORECAST_COLUMNS, attach_forecast
+from patron.metrics.positions import (
+    canonical_positions,
+    historical_positions,
+    repair_player_week_positions,
+)
 from patron.metrics.projection import METRIC_VERSION, build_projection_board
 from patron.metrics.prospective import load_verified_snapshot
 from patron.metrics.rich_weekly import (
@@ -69,6 +76,8 @@ from patron.metrics.rich_weekly import (
     build_rich_weekly_panel,
     build_weekly_route_panel,
 )
+from patron.metrics.roster_evidence import attach_roster_evidence, supplement_identity_names
+from patron.metrics.transaction_events import normalize_transaction_sources
 from patron.scoring.bonuses import BonusAudit, extract_touchdown_bonuses
 from patron.scoring.dst import build_dst_proxy
 from patron.scoring.kickers import aggregate_kicker_seasons, score_kicker_weeks
@@ -101,6 +110,7 @@ class MetricReportBuildResult:
 def load_bonuses(
     config: LeagueConfig,
     force: bool = False,
+    settings: Settings | None = None,
 ) -> tuple[pl.DataFrame, BonusAudit | None]:
     """Per-player, per-week big-play bonuses, cached as a derived artifact.
 
@@ -126,7 +136,7 @@ def load_bonuses(
             )
         return bonuses
 
-    frame = cached_frame("bonuses", config.seasons, build, force=force)
+    frame = cached_frame("bonuses", config.seasons, build, force=force, settings=settings)
     return frame, audit
 
 
@@ -490,6 +500,9 @@ def build_metric_report(
     settings: Settings | None = None,
     report_config: MetricReportConfig | None = None,
     force: bool = False,
+    *,
+    analyze: bool = True,
+    enrichment_dir: Path | None = None,
 ) -> MetricReportBuildResult:
     """Build historical v2 forecast folds and analyze the configured metric catalog."""
     config = config or get_league()
@@ -497,17 +510,65 @@ def build_metric_report(
     report_config = report_config or MetricReportConfig.from_config()
     settings.ensure_dirs()
 
+    def retain(name: str, frame: pl.DataFrame) -> None:
+        if enrichment_dir is not None:
+            enrichment_dir.mkdir(parents=True, exist_ok=True)
+            frame.write_parquet(enrichment_dir / f"{name}.parquet")
+
     history_config = config.model_copy(update={"seasons": list(report_config.input_seasons)})
-    weeks = nflverse.load_player_weeks(history_config.seasons)
-    bonuses, _ = load_bonuses(history_config, force=force)
-    player_seasons = build_player_seasons(weeks, bonuses, history_config)
+    roster_seasons = [season for season in history_config.seasons if season >= 2004]
+    roster_rows = canonical_positions(nflverse.load_weekly_rosters(roster_seasons))
+    positions = cached_frame(
+        "metric_report_position_history_v1",
+        roster_seasons,
+        lambda: historical_positions(roster_rows),
+        force=force,
+        settings=settings,
+    )
+    weeks = repair_player_week_positions(
+        nflverse.load_player_weeks(history_config.seasons),
+        positions,
+        overrides=history_config.position_overrides,
+    )
+    bonuses, _ = load_bonuses(history_config, force=force, settings=settings)
+    retain(
+        "nfl_player_weeks",
+        weeks.join(
+            bonuses, on=["player_id", "season", "week"], how="left", validate="1:1"
+        ).with_columns(
+            (pl.col("fantasy_points_ppr") + pl.col("bonus_pts").fill_null(0)).alias("league_points")
+        ),
+    )
+    # Eligibility defines the candidate pool, not which earned points survive.
+    # A player switching to LB/DB/LS can still earn offensive/return fantasy points.
+    # Aggregate all rows first, then attach the season's observed skill position.
+    outcome_seasons = build_player_seasons(
+        weeks,
+        bonuses,
+        history_config.model_copy(
+            update={
+                "board_positions": weeks["position"].drop_nulls().unique().to_list(),
+            }
+        ),
+    )
+    eligible_positions = (
+        weeks.filter(pl.col("position").is_in(history_config.board_positions))
+        .group_by("player_id", "season")
+        .agg(pl.col("position").last())
+    )
+    player_seasons = outcome_seasons.drop("position").join(
+        eligible_positions,
+        on=["player_id", "season"],
+        how="inner",
+        validate="1:1",
+    )
     team_weeks = nflverse.load_team_weeks(history_config.seasons)
     team_volume = build_team_volume(team_weeks)
     participation_seasons = [season for season in history_config.seasons if season >= 2016]
     projection_plays = nflverse.load_projection_plays(history_config.seasons)
     participation = nflverse.load_participation_flexible(participation_seasons)
     usage = cached_frame(
-        "metric_report_usage_v4",
+        "metric_report_usage_v5",
         history_config.seasons,
         lambda: build_player_usage(
             weeks,
@@ -564,6 +625,29 @@ def build_metric_report(
         (pl.col("season") >= 2016).alias("participation_data_available"),
     )
     player_seasons = normalize_ppg_for_active_games(player_seasons)
+    outcome_seasons = normalize_ppg_for_active_games(
+        outcome_seasons.join(
+            usage.select("player_id", "season", "active_games"),
+            on=["player_id", "season"],
+            how="left",
+        )
+    )
+
+    # The expected-opportunity feed has no historical model-publication vintages.
+    # In particular, its 2006-2020 training window overlaps early test folds.
+    # Keep the raw cache, but quarantine modeled xFP from this rebuilt experiment.
+    player_seasons = player_seasons.with_columns(
+        *(
+            pl.lit(None, dtype=pl.Float64).alias(name)
+            for name in (
+                "xfp_pg",
+                "xfp_total",
+                "expected_first_downs_pg",
+                "expected_first_downs_total",
+            )
+            if name in player_seasons.columns
+        )
+    )
 
     birth_frames: list[pl.DataFrame] = []
     for season in report_config.input_seasons:
@@ -579,7 +663,7 @@ def build_metric_report(
 
     depth_frames: list[pl.DataFrame] = []
     for season in report_config.forecast_seasons:
-        if season < report_config.depth_chart_start_season:
+        if season < max(2025, report_config.depth_chart_start_season):
             continue
         try:
             depth_frames.append(nflverse.load_depth_charts([season]))
@@ -592,9 +676,16 @@ def build_metric_report(
     # board. Dated transactions drive the canonical August cutoff roster fields;
     # historical Week 1 rosters remain separate sensitivity-only proxy columns.
     players = nflverse.load_players()
+    identity_crosswalk = nflverse.load_id_crosswalk()
+    transaction_players = supplement_identity_names(players, identity_crosswalk)
+    retain("nfl_players", transaction_players)
+    retain("nfl_identity_crosswalk", identity_crosswalk)
+    retain("nfl_player_seasons", player_seasons)
+    retain("nfl_team_seasons", team_volume)
+    retain("nfl_injuries", injury_rows)
     market_rankings = build_market_rankings(
         nflverse.load_fantasy_rankings(),
-        nflverse.load_id_crosswalk(),
+        identity_crosswalk,
         report_config.depth_chart_cutoff,
     )
     market_cutoffs: dict[int, date] = {}
@@ -635,42 +726,64 @@ def build_metric_report(
             settings=settings,
         )
         if official_transactions.height:
-            official_coverage = official_transactions.select("transaction_year", "to_team").unique()
             transactions = pl.concat(
                 [
-                    transactions.join(
-                        official_coverage,
-                        on=["transaction_year", "to_team"],
-                        how="anti",
-                    ),
-                    official_transactions,
+                    normalize_transaction_sources(transactions),
+                    normalize_transaction_sources(official_transactions),
                 ],
                 how="diagonal_relaxed",
             ).sort(["transaction_date", "to_team", "description"])
+    backfill = load_transaction_backfill(settings.data_dir)
+    if backfill is not None:
+        transactions = pl.concat([transactions, backfill], how="diagonal_relaxed").unique(
+            subset=["transaction_date", "source_team", "description", "category"]
+        )
+    combine_features = build_combine_features(nflverse.load_combine(), players)
+    retain("nfl_transactions", transactions)
+    rookie_features = build_rookie_features(
+        players,
+        combine_features,
+        report_config.forecast_seasons,
+        market_rankings=market_rankings,
+    )
+    candidate_frames = [
+        rookie_features.select("forecast_season", "player_id", "player_display_name", "position")
+    ]
+    if market_rankings.height:
+        candidate_frames.append(
+            market_rankings.select(
+                "forecast_season", "player_id", pl.col("market_position").alias("position")
+            ).join(
+                transaction_players.select(
+                    pl.col("gsis_id").alias("player_id"),
+                    pl.col("display_name").alias("player_display_name"),
+                ),
+                on="player_id",
+                how="left",
+                validate="m:1",
+            )
+        )
+    forecast_candidates = pl.concat(candidate_frames, how="diagonal_relaxed")
     transaction_features = build_transaction_features(
         transactions,
         player_seasons,
-        players,
+        transaction_players,
         report_config.forecast_seasons,
         report_config.depth_chart_cutoff,
         cutoff_by_season=market_cutoffs,
+        trusted_sources_only=True,
+        forecast_candidates=forecast_candidates,
     )
     snap_seasons = [season for season in history_config.seasons if season >= 2013]
-    snap_rows = nflverse.load_snap_counts(snap_seasons)
+    snap_rows = canonical_positions(nflverse.load_snap_counts(snap_seasons))
+    retain("nfl_snap_counts", snap_rows)
     snap_features = cached_frame(
-        "metric_report_snap_features_v1",
+        "metric_report_snap_features_v2",
         snap_seasons,
         lambda: build_snap_features(snap_rows, players),
         force=force,
         settings=settings,
     )
-    combine_features = build_combine_features(nflverse.load_combine(), players)
-    roster_seasons = [
-        season
-        for season in report_config.forecast_seasons
-        if season <= max(report_config.input_seasons)
-    ]
-    roster_rows = nflverse.load_weekly_rosters(roster_seasons)
     experimental_features = build_forecast_features(
         roster_rows,
         player_seasons,
@@ -680,7 +793,10 @@ def build_metric_report(
         snap_features=snap_features,
         player_background=build_player_background(players),
         contract_features=build_contract_features(
-            nflverse.load_contracts(), report_config.forecast_seasons
+            nflverse.load_contracts(),
+            report_config.forecast_seasons,
+            cutoff_by_season=market_cutoffs,
+            cutoff=report_config.depth_chart_cutoff,
         ),
         combine_features=combine_features,
         transaction_features=transaction_features,
@@ -695,16 +811,14 @@ def build_metric_report(
         depth_charts=depth_charts,
         market_rankings=market_rankings,
         experimental_features=experimental_features,
-        rookie_features=build_rookie_features(
-            players,
-            combine_features,
-            report_config.forecast_seasons,
-        ),
+        rookie_features=rookie_features,
         cutoff_by_season=market_cutoffs,
+        outcome_seasons=outcome_seasons,
     )
+    predictions = attach_roster_evidence(predictions, transaction_features, transaction_players)
     rich_source_seasons = [season for season in history_config.seasons if season >= 2013]
     rich_panel = cached_frame(
-        "metric_report_rich_weekly_panel_v1",
+        "metric_report_rich_weekly_panel_v3",
         history_config.seasons,
         lambda: build_rich_weekly_panel(
             weeks,
@@ -720,15 +834,23 @@ def build_metric_report(
         settings=settings,
     )
     rich_features = cached_frame(
-        "metric_report_rich_weekly_features_v1",
+        f"metric_report_rich_weekly_features_v4_h{report_config.history_seasons}",
         list(report_config.forecast_seasons),
         lambda: build_rich_weekly_features(
-            rich_panel,
+            rich_panel.with_columns(
+                pl.lit(None, dtype=pl.Float64).alias("xfp"),
+                pl.lit(None, dtype=pl.Float64).alias("expected_td"),
+                pl.lit(False).alias("xfp_data_available"),
+            ),
             predictions.select("forecast_season", "player_id"),
             history_seasons=report_config.history_seasons,
         ),
         force=force,
         settings=settings,
+    )
+    retain(
+        "nfl_weekly_usage",
+        rich_panel.drop("xfp", "expected_td", "xfp_data_available"),
     )
     predictions = predictions.join(
         rich_features,
@@ -736,6 +858,15 @@ def build_metric_report(
         how="left",
         validate="m:1",
     )
+    predictions = attach_known_absences(
+        predictions,
+        load_absences(settings.static_dir / EVIDENCE_FILE),
+        cutoff_by_season=market_cutoffs,
+        default_cutoff=report_config.depth_chart_cutoff,
+    )
+    retain("historical_inputs", predictions)
+    if not analyze:
+        return MetricReportBuildResult(report={}, predictions=predictions)
     report, predictions = _analyze_with_fit(predictions, report_config)
     return MetricReportBuildResult(report=report, predictions=predictions)
 

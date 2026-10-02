@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useUrlNumber } from '../navigation'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMatchups } from '../api/client'
 import type { MetricVersion } from '../api/types'
@@ -11,9 +12,16 @@ import { TeamCompare } from './TeamCompare'
  * Opens on the current week and on your own game, because that is the question being
  * asked nine times out of ten. Every other matchup is one click away, and any week is
  * one click away, which is what makes a schedule scan possible at all.
+ *
+ * A played week shows what actually happened — real starters, real bench, real points.
+ * A future week has no lineup to show and falls back to comparing fieldable strength;
+ * the legend says which one is on screen, because the two invite very different
+ * conclusions and look identical otherwise.
  */
 export function MatchupsPanel({ version }: { version: MetricVersion }) {
-  const [week, setWeek] = useState<number | null>(null)
+  // 0 means "the current week", which the API resolves.
+  const [selectedWeek, setWeek] = useUrlNumber('week', 0)
+  const week = selectedWeek > 0 ? selectedWeek : null
   const [expanded, setExpanded] = useState<number | null>(0)
 
   const matchups = useQuery({
@@ -38,7 +46,7 @@ export function MatchupsPanel({ version }: { version: MetricVersion }) {
             aria-selected={number === data.requested_week}
             className={number === data.current_week ? 'current' : undefined}
             onClick={() => {
-              setWeek(number)
+              setWeek(number === data.current_week ? 0 : number)
               setExpanded(0)
             }}
             title={number === data.current_week ? 'Current week' : `Week ${number}`}
@@ -50,9 +58,22 @@ export function MatchupsPanel({ version }: { version: MetricVersion }) {
 
       {data.matchups.length > 0 && (
         <p className="legend tight faint">
-          Scores below are best-lineup {boardMetricLabel(data.matchups[0].home.metric)},
-          not forecasts for the selected week. Week changes the scheduled opponents;
-          values do not include matchup, bye, or current injury effects.
+          {data.source === 'actual' ? (
+            <>
+              Week {data.requested_week} as it was played: the lineup each manager set,
+              scoring what it scored.{' '}
+              {data.requested_week === data.current_week &&
+                'This week is still in progress, so totals climb as games finish.'}
+            </>
+          ) : (
+            <>
+              Week {data.requested_week} has not been played, so there is no lineup to
+              show. Scores below are best-lineup{' '}
+              {boardMetricLabel(data.matchups[0].home.metric)}, not forecasts for the
+              selected week: they do not include matchup, bye, or current injury
+              effects.
+            </>
+          )}
         </p>
       )}
 
@@ -91,6 +112,7 @@ export function MatchupsPanel({ version }: { version: MetricVersion }) {
 
               {open && (
                 <TeamCompare
+                  version={version}
                   left={matchup.home}
                   right={matchup.away}
                   margin={matchup.margin}

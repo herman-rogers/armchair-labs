@@ -26,7 +26,8 @@ def test_parse_transaction_payload_extracts_date_team_and_description() -> None:
             "transaction_year": 2024,
             "category": "espn",
             "from_team": None,
-            "to_team": "NYG",
+            "source_team": "NYG",
+            "to_team": None,
             "player_name": None,
             "description": "Signed DB Adoree' Jackson. Released FB Jakob Johnson.",
             "source_url": "source",
@@ -51,4 +52,5 @@ def test_parse_official_transactions_uses_club_dates_and_cutoff() -> None:
     assert len(rows) == 1
     assert rows[0]["transaction_date"] == date(2021, 8, 27)
     assert rows[0]["category"] == "official"
-    assert rows[0]["to_team"] == "BAL"
+    assert rows[0]["source_team"] == "BAL"
+    assert rows[0]["to_team"] is None

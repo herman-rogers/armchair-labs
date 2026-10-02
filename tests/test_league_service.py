@@ -385,3 +385,14 @@ class TestVersionIsolation:
         service.get(version="v1", force=True)
 
         assert service.get(version="v2").snapshot.week == 7, "stale derived state was reused"
+
+
+def test_observations_need_no_legacy_board(service, monkeypatch):
+    monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+    service.board_path().unlink()
+    snapshot, stale, age = service.observations()
+    assert snapshot.week == 1
+    assert not stale
+    assert age >= 0
+    assert not service._board_cache
+    assert not service._states

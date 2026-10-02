@@ -98,7 +98,12 @@ def load_projection_plays(seasons: list[int]) -> pl.DataFrame:
     for season in seasons:
         pbp = nfl.load_pbp([season])
         require_columns(pbp.columns, PBP_USAGE_COLUMNS, f"nflverse projection pbp {season}")
-        frames.append(pbp.select(PBP_USAGE_COLUMNS))
+        frames.append(
+            pbp.select(
+                *PBP_USAGE_COLUMNS,
+                *(["play_type"] if "play_type" in pbp.columns else []),
+            )
+        )
     return pl.concat(frames, how="vertical_relaxed")
 
 

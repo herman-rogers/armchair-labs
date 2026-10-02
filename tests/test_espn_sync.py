@@ -12,13 +12,18 @@ import polars as pl
 import pytest
 
 from patron.espn.sync import (
+    DraftPick,
     LeagueSnapshot,
+    LineupEntry,
     PlayerState,
     TeamState,
     TransactionState,
+    WeekLineups,
+    _epoch_ms_to_iso,
     _fetch_draft_market,
     _number,
     _player_state,
+    _read_week_lineups,
     _text,
 )
 
@@ -262,35 +267,23 @@ class TestTimestamps:
     to read."""
 
     def test_epoch_milliseconds_become_iso(self) -> None:
-        from patron.espn.sync import _epoch_ms_to_iso
-
         assert _epoch_ms_to_iso(1787929226212) == "2026-08-28T15:00:26.212000+00:00"
 
     def test_a_numeric_string_is_accepted(self) -> None:
-        from patron.espn.sync import _epoch_ms_to_iso
-
         assert _epoch_ms_to_iso("1787929226212").startswith("2026-08-28")
 
     def test_seconds_are_not_mistaken_for_milliseconds(self) -> None:
         """Dividing a seconds value by 1000 would silently produce a date in 1970."""
-        from patron.espn.sync import _epoch_ms_to_iso
-
         assert _epoch_ms_to_iso(1787929226).startswith("2026-08-28")
 
     def test_none_stays_none(self) -> None:
-        from patron.espn.sync import _epoch_ms_to_iso
-
         assert _epoch_ms_to_iso(None) is None
 
     def test_an_already_formatted_string_passes_through(self) -> None:
-        from patron.espn.sync import _epoch_ms_to_iso
-
         assert _epoch_ms_to_iso("2026-08-28T15:00:00Z") == "2026-08-28T15:00:00Z"
 
 
 def test_snapshot_round_trips_the_draft_recap(tmp_path) -> None:
-    from patron.espn.sync import DraftPick, LeagueSnapshot
-
     snapshot = LeagueSnapshot(
         captured_at="2026-08-29T00:00:00+00:00",
         league_id=1,
@@ -304,3 +297,197 @@ def test_snapshot_round_trips_the_draft_recap(tmp_path) -> None:
     restored = LeagueSnapshot.read(path)
     assert restored.draft[0] == snapshot.draft[0]
     assert LeagueSnapshot.read(path).draft[0].overall == 1
+
+
+class FakeBoxPlayer:
+    def __init__(
+        self,
+        player_id: int,
+        name: str,
+        position: str,
+        slot: str,
+        points: float,
+        projected: float | None = None,
+        opponent: str | None = "SF",
+        on_bye: bool = False,
+    ) -> None:
+        self.playerId = player_id
+        self.name = name
+        self.position = position
+        self.slot_position = slot
+        self.points = points
+        self.projected_points = projected
+        self.pro_opponent = opponent
+        self.on_bye_week = on_bye
+
+
+class FakeBoxScore:
+    def __init__(self, home, away, home_score=0.0, away_score=0.0, projected=-1) -> None:
+        self.home_team = home
+        self.away_team = away
+        self.home_score = home_score
+        self.away_score = away_score
+        self.home_projected = projected
+        self.away_projected = projected
+        self.home_lineup: list[FakeBoxPlayer] = []
+        self.away_lineup: list[FakeBoxPlayer] = []
+
+
+class FakeLeague:
+    """Records which weeks were actually asked for."""
+
+    def __init__(
+        self,
+        per_week: dict[int, list[FakeBoxScore]],
+        fails: set[int] | None = None,
+        teams: list[FakeTeam] | None = None,
+    ):
+        self._per_week = per_week
+        self._fails = fails or set()
+        self.teams = teams or []
+        self.requested: list[int] = []
+
+    def box_scores(self, week: int, player_team_cache: dict | None = None):
+        self.requested.append(week)
+        if week in self._fails:
+            raise RuntimeError("ESPN said no")
+        return self._per_week.get(week, [])
+
+
+def week_lineups(week: int, home: int = 1, away: int = 2) -> WeekLineups:
+    return WeekLineups(
+        week=week,
+        home_team_id=home,
+        away_team_id=away,
+        home_score=100.0,
+        away_score=90.0,
+        home_lineup=[LineupEntry(1, "Starter", "QB", "QB", 20.0, 18.0, "SF", False)],
+        away_lineup=[LineupEntry(2, "Benched", "QB", "BE", 30.0, 19.0, "LAR", False)],
+    )
+
+
+class TestWeekLineups:
+    """Who actually started, as opposed to who should have.
+
+    The bug this guards: the matchup view built a best-available lineup from today's
+    roster for every week, so a player who spent week 2 on the bench appeared in that
+    week's starting lineup, and a player acquired since appeared in a week he had not
+    been rostered for.
+    """
+
+    def test_a_benched_player_is_not_a_starter(self) -> None:
+        box = FakeBoxScore(FakeTeam(1, "Home"), FakeTeam(2, "Away"), 101.5, 99.0)
+        box.home_lineup = [
+            FakeBoxPlayer(10, "Started", "QB", "QB", 12.0),
+            FakeBoxPlayer(11, "Benched", "QB", "BE", 31.0),
+        ]
+        weeks = _read_week_lineups(FakeLeague({1: [box]}), 1)
+
+        started = {entry.player_display_name for entry in weeks[0].home_lineup if entry.started}
+        assert started == {"Started"}, "the higher scorer was on the bench and stays there"
+
+    def test_settled_weeks_are_carried_forward_not_refetched(self) -> None:
+        """Each refetch is three more requests against an unofficial API for an answer
+        that cannot have changed."""
+        league = FakeLeague({3: [FakeBoxScore(FakeTeam(1, "H"), FakeTeam(2, "A"))]})
+        previous = [week_lineups(1), week_lineups(2)]
+        weeks = _read_week_lineups(league, 3, previous)
+
+        assert league.requested == [3], "only the week still being played is pulled again"
+        assert sorted({week.week for week in weeks}) == [1, 2, 3]
+
+    def test_the_current_week_is_always_refetched(self) -> None:
+        league = FakeLeague({2: [FakeBoxScore(FakeTeam(1, "H"), FakeTeam(2, "A"))]})
+        _read_week_lineups(league, 2, [week_lineups(1), week_lineups(2)])
+        assert league.requested == [2], "a week in progress is still being edited"
+
+    def test_every_matchup_survives_repeated_refreshes(self) -> None:
+        league = FakeLeague({3: []})
+        previous = [
+            week_lineups(week, home, away)
+            for week in (1, 2)
+            for home, away in ((1, 2), (3, 4), (5, 6))
+        ]
+
+        for _ in range(2):
+            previous = _read_week_lineups(league, 3, previous)
+            assert [(game.week, game.home_team_id, game.away_team_id) for game in previous] == [
+                (week, home, away) for week in (1, 2) for home, away in ((1, 2), (3, 4), (5, 6))
+            ]
+        assert league.requested == [3, 3], "complete historical weeks stay cached"
+
+    @pytest.mark.parametrize("missing_lineup", [False, True])
+    def test_incomplete_history_is_refetched(self, missing_lineup: bool) -> None:
+        teams = [FakeTeam(team_id, f"Team {team_id}") for team_id in range(1, 6)]
+        # The fifth team has a bye. Only actual head-to-heads need box scores.
+        for team, opponent in zip(
+            teams, [teams[1], teams[0], teams[3], teams[2], None], strict=True
+        ):
+            team.schedule = [opponent]
+        boxes = [FakeBoxScore(teams[0], teams[1]), FakeBoxScore(teams[2], teams[3])]
+        for box in boxes:
+            box.home_lineup = [FakeBoxPlayer(1, "Home starter", "QB", "QB", 20)]
+            box.away_lineup = [FakeBoxPlayer(2, "Away starter", "QB", "QB", 15)]
+        league = FakeLeague({1: boxes, 2: []}, teams=teams)
+        previous = [week_lineups(1, 3, 4)]
+        if missing_lineup:
+            incomplete = week_lineups(1, 1, 2)
+            incomplete.away_lineup = []
+            previous.append(incomplete)
+
+        repaired = _read_week_lineups(league, 2, previous)
+
+        assert league.requested == [1, 2]
+        assert {(game.home_team_id, game.away_team_id) for game in repaired} == {(1, 2), (3, 4)}
+        assert all(game.home_lineup and game.away_lineup for game in repaired)
+
+        league.requested.clear()
+        assert _read_week_lineups(league, 2, repaired) == repaired
+        assert league.requested == [2], "repaired history stays complete without another fetch"
+
+    def test_an_empty_cached_week_is_refetched(self) -> None:
+        """A week carried forward with no lineups is a failed fetch, not history."""
+        league = FakeLeague({1: [FakeBoxScore(FakeTeam(1, "H"), FakeTeam(2, "A"))], 2: []})
+        empty = WeekLineups(week=1, home_team_id=1, away_team_id=2, home_score=0, away_score=0)
+        _read_week_lineups(league, 2, [empty])
+        assert league.requested == [1, 2]
+
+    def test_a_bye_has_no_head_to_head(self) -> None:
+        league = FakeLeague({1: [FakeBoxScore(FakeTeam(1, "Home"), None)]})
+        assert _read_week_lineups(league, 1) == []
+
+    def test_one_unreadable_week_does_not_cost_the_others(self) -> None:
+        league = FakeLeague(
+            {1: [FakeBoxScore(FakeTeam(1, "H"), FakeTeam(2, "A"))]},
+            fails={2},
+        )
+        weeks = _read_week_lineups(league, 2)
+        assert [week.week for week in weeks] == [1]
+
+    def test_espn_s_not_published_projection_sentinel_becomes_none(self) -> None:
+        box = FakeBoxScore(FakeTeam(1, "H"), FakeTeam(2, "A"), projected=-1)
+        weeks = _read_week_lineups(FakeLeague({1: [box]}), 1)
+        assert weeks[0].home_projected is None, "-1 is a sentinel, not a forecast of -1"
+
+    def test_lineups_round_trip_through_disk(self, tmp_path: Path) -> None:
+        snapshot = LeagueSnapshot(
+            captured_at="2026-09-22T00:00:00+00:00",
+            league_id=1,
+            league_name="Sweaty Plays",
+            season=2026,
+            week=2,
+            my_team_id=3,
+            week_lineups=[week_lineups(1)],
+        )
+        restored = LeagueSnapshot.read(snapshot.write(tmp_path / "snap.json"))
+
+        assert restored.week_lineups[0].home_lineup[0].player_display_name == "Starter"
+        assert restored.week_lineups[0].away_lineup[0].started is False
+
+    def test_a_snapshot_written_before_lineups_existed_still_loads(self, tmp_path: Path) -> None:
+        path = tmp_path / "old.json"
+        path.write_text(
+            '{"captured_at": "2026-08-29T00:00:00+00:00", "league_id": 1, '
+            '"league_name": "Old", "season": 2026, "week": 1, "my_team_id": 3}'
+        )
+        assert LeagueSnapshot.read(path).week_lineups == []

@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "scope": "Current roster review plus the NFL daily injury roundup; external news supplies availability context only, never player rankings.",
+  "sources": [
+    {
+      "url": "https://www.nfl.com/news/giants-qb-jaxson-dart-season-ending-knee-surgery",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0040691",
+          "espn_id": 4689114,
+          "player_name": "Jaxson Dart",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "reported_expectation",
+          "summary": "NFL Network reports expected knee surgery ending the 2026 season.",
+          "body_part": "knee",
+          "event_on": "2026-09-21",
+          "season_ending_reported": true,
+          "affected_period": "remaining_2026_regular_season",
+          "earliest_affected_week": 3
+        }
+      ]
+    },
+    {
+      "url": "https://www.nfl.com/news/nfl-news-roundup-latest-league-updates-from-wednesday-sept-23",
+      "published_on": "2026-09-23",
+      "observations": []
+    },
+    {
+      "url": "https://www.giants.com/news/jaxson-dart-knee-injury-update-status-jameis-winston",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0040691",
+          "espn_id": 4689114,
+          "player_name": "Jaxson Dart",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "team_statement",
+          "summary": "Team article describes ongoing evaluation; it does not itself confirm season-ending surgery.",
+          "body_part": "knee"
+        }
+      ]
+    },
+    {
+      "url": "https://www.seahawks.com/news/seahawks-planning-on-sam-darnold-returning-to-practice-this-week",
+      "published_on": "2026-09-21",
+      "observations": [
+        {
+          "player_id": "00-0034869",
+          "espn_id": 3912547,
+          "player_name": "Sam Darnold",
+          "season": 2026,
+          "known_on": "2026-09-21",
+          "evidence_status": "team_statement",
+          "summary": "Team planned a practice return this week after his glute injury; Week 3 participation remains unconfirmed.",
+          "body_part": "glute"
+        }
+      ]
+    },
+    {
+      "url": "https://www.cbssports.com/fantasy/football/news/titans-tony-pollard-not-practicing-wednesday/",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0035261",
+          "espn_id": 3916148,
+          "player_name": "Tony Pollard",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "reported_practice_status",
+          "summary": "Reported Wednesday practice absence due to soreness; game status not determined.",
+          "body_part": null,
+          "practice_status": "DNP"
+        }
+      ]
+    },
+    {
+      "url": "https://www.fantasypros.com/nfl/news/609988/rico-dowdle-toe-boot-wednesday.php",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0036139",
+          "espn_id": 4038815,
+          "player_name": "Rico Dowdle",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "reported_observation",
+          "summary": "Reporter observed a walking boot Wednesday following the toe injury; no season-ending conclusion.",
+          "body_part": "toe"
+        }
+      ]
+    },
+    {
+      "url": "https://www.rotowire.com/football/headlines/dj-moore-injury-practicing-but-not-taking-contact-638821",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0034827",
+          "espn_id": 3915416,
+          "player_name": "DJ Moore",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "reported_practice_status",
+          "summary": "Reported participation in a non-contact jersey Wednesday after a shoulder injury; game availability not confirmed.",
+          "body_part": "shoulder",
+          "practice_status": "non_contact_observed"
+        }
+      ]
+    },
+    {
+      "url": "https://www.nfl.com/news/dolphins-rb-devon-achane-miss-2026-season-acl-tear",
+      "published_on": "2026-09-28",
+      "observations": [
+        {
+          "player_id": "00-0039040",
+          "espn_id": 4429160,
+          "player_name": "De'Von Achane",
+          "season": 2026,
+          "known_on": "2026-09-28",
+          "evidence_status": "reported_expectation",
+          "summary": "Achane is out for the remainder of 2026 following an ACL tear.",
+          "body_part": "knee",
+          "event_on": "2026-09-27",
+          "season_ending_reported": true,
+          "affected_period": "remaining_2026_regular_season",
+          "earliest_affected_week": 4
+        }
+      ]
+    }
+  ]
+}

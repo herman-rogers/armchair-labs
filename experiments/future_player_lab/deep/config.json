@@ -1,0 +1,54 @@
+{
+  "gold_root": "data/gold/releases/canonical_targets_20260923_r3",
+  "gold_manifest_sha256": "34f4d34388fa248434014ce76583001178a5cd5c0a87358ea708c2e9d6125dfa",
+  "seed": 20260925,
+  "positions": [
+    "QB",
+    "RB",
+    "WR",
+    "TE"
+  ],
+  "horizons": [
+    "season",
+    "next_week",
+    "next_four",
+    "remaining"
+  ],
+  "origins": [
+    2
+  ],
+  "evaluation_years": [
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "inner_seasons": 5,
+  "history_windows": [
+    4,
+    16,
+    48,
+    0
+  ],
+  "sequence_length": 48,
+  "bootstrap_draws": 2000,
+  "interval_alpha": 0.2,
+  "workers": 6,
+  "threads_per_worker": 1,
+  "warmup_start": 2013,
+  "ensemble_start": 2016,
+  "tree_checkpoints": [
+    40,
+    120,
+    360
+  ],
+  "inventory_root": "data/research/individual_stats_20260923_r4",
+  "published_root": "data/research/nextgen_qb_variations_20260924_r2",
+  "pinned_manifests": {
+    "data/research/individual_stats_20260923_r4/manifest.json": "1ff887ba5adb727d1c5313be9478eaed617f8f8813e7f678403b57cb57e2d148",
+    "data/research/nextgen_qb_variations_20260924_r2/manifest.json": "b4827f3c639c29ab39e7613205bc3416094572160a1187cce29b9bc498587aeb"
+  }
+}

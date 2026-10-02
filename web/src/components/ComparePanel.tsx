@@ -76,6 +76,8 @@ export function ComparePanel({
           left={comparison.data.left}
           right={comparison.data.right}
           margin={comparison.data.margin}
+          version={version}
+          context="rosters"
         />
       )}
     </section>

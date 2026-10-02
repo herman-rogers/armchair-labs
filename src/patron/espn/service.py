@@ -196,22 +196,24 @@ class LeagueService:
         return state
 
     def get(self, version: str = "v1", force: bool = False) -> LeagueState:
-        """Current league state, refreshing it if stale.
+        """Archived model state, using the shared snapshot refresh lifecycle."""
+        self._refresh(force)
+        return self._derive(version)
 
-        Args:
-            version: Metric generation whose board to join against. The snapshot is
-                shared across versions; only the join is redone.
-            force: Refresh regardless of age.
+    def observations(self, *, force: bool = False) -> tuple[sync.LeagueSnapshot, bool, float]:
+        """Current league observations without reading or calculating any model board."""
+        self._refresh(force=force)
+        assert self._snapshot is not None
+        return self._snapshot, self._stale, time.monotonic() - self._fetched_at
 
-        Raises:
-            NotAuthenticatedError: if no credentials are stored and nothing is cached.
-        """
+    def _refresh(self, force: bool = False) -> None:
+        """Refresh the common snapshot; consumers choose their own derived data."""
         if self._snapshot is None:
             self._restore_from_disk()
 
         age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
         if self._snapshot is not None and not force and age is not None and age < self._ttl:
-            return self._derive(version)
+            return
 
         # Recorded before queueing on the lock. A refresh that completed after this
         # point is newer than the request, and satisfies it.
@@ -223,7 +225,7 @@ class LeagueService:
             # what we have beats piling a second request onto ESPN.
             if self._snapshot is not None:
                 logger.warning("refresh still in flight; serving the cached snapshot")
-                return self._derive(version)
+                return
             raise TimeoutError("Timed out waiting for the in-flight ESPN refresh.")
 
         try:
@@ -236,10 +238,10 @@ class LeagueService:
             # button would hammer an unofficial, free API.
             if self._snapshot is not None and self._fetched_at >= requested_at:
                 logger.debug("a concurrent refresh already satisfied this request")
-                return self._derive(version)
+                return
             age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
             if self._snapshot is not None and not force and age is not None and age < self._ttl:
-                return self._derive(version)
+                return
 
             try:
                 snapshot = sync.fetch_snapshot(
@@ -266,7 +268,7 @@ class LeagueService:
                 for state in self._states.values():
                     state.stale = True
 
-            return self._derive(version)
+            return
         finally:
             self._lock.release()
 

@@ -484,17 +484,27 @@ def _read_week_lineups(
     best-lineup solver makes it wrong in a way that looks plausible, quietly promoting
     a benched player into a starting slot. This is the record that settles it.
 
-    Weeks already captured are reused rather than refetched. A played week is settled
-    history, and each refetch is three more requests against an unofficial API for an
+    Complete weeks already captured are reused rather than refetched. A played week
+    is settled history, and each refetch is three more requests against an unofficial API for an
     answer that cannot have changed. Only the current week — still scoring, still being
     edited — is always pulled fresh, so the ongoing cost of this is one week per poll
     rather than one per week of the season.
     """
-    settled = {
-        week.week: week
-        for week in (previous or [])
-        if week.week < current_week and week.home_lineup and week.away_lineup
-    }
+    settled: dict[int, list[WeekLineups]] = {}
+    for game in previous or []:
+        if game.week < current_week:
+            settled.setdefault(game.week, []).append(game)
+
+    # Older snapshots accidentally kept just the last matchup in each week. Use
+    # the schedule to detect those incomplete weeks and fetch their missing games.
+    scheduled: dict[int, set[frozenset[int]]] = {}
+    for team in getattr(league, "teams", []):
+        for entry in _read_schedule(team):
+            if entry.opponent_team_id <= 0 or entry.opponent_team_id == team.team_id:
+                continue
+            scheduled.setdefault(entry.week, set()).add(
+                frozenset({team.team_id, entry.opponent_team_id})
+            )
 
     weeks: list[WeekLineups] = []
     # Shared across weeks so a player on bye resolves to the pro team he was on at the
@@ -502,9 +512,14 @@ def _read_week_lineups(
     player_team_cache: dict[int, int] = {}
 
     for week in range(1, max(current_week, 0) + 1):
-        cached = settled.get(week)
-        if cached is not None:
-            weeks.append(cached)
+        cached = settled.get(week, [])
+        cached_pairs = {frozenset({game.home_team_id, game.away_team_id}) for game in cached}
+        if (
+            cached
+            and all(game.home_lineup and game.away_lineup for game in cached)
+            and (week not in scheduled or cached_pairs == scheduled[week])
+        ):
+            weeks.extend(cached)
             continue
         try:
             box_scores = league.box_scores(week, player_team_cache=player_team_cache)

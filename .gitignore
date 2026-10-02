@@ -1,23 +1,55 @@
 # secrets
 .env
+.env.*
+!.env.example
+.secrets/
+service-account*.json
 
 # python
 .venv/
+.notebook-venv/
+.packages/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.ipynb_checkpoints/
+__marimo__/
+
+# local research runs and scratch work
+/experiments/**/runs/
+/experiments/**/.test-tmp/
 
 # generated data — never committed
 data/cache/
 data/outputs/
 data/.runtime/
+data/raw/
+data/enriched/
+data/gold/
+data/serving/
+data/current.json
+data/catalog_history/
+data/research/
+# generated backfill; retain its reference manifest and collection code in Git
+data/static/historical_transaction_backfill.parquet
 
 # node
-web/node_modules/
+node_modules/
 web/dist/
+*.tsbuildinfo
+
+# local infrastructure state (deployment is deferred)
+.terraform/
+*.tfstate
+*.tfstate.*
 
 # macos
 .DS_Store

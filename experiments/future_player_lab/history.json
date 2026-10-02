@@ -1,0 +1,61 @@
+{
+  "gold_root": "data/gold/releases/canonical_targets_20260923_r3",
+  "gold_manifest_sha256": "34f4d34388fa248434014ce76583001178a5cd5c0a87358ea708c2e9d6125dfa",
+  "seed": 20260924,
+  "positions": [
+    "QB",
+    "RB",
+    "WR",
+    "TE"
+  ],
+  "horizons": [
+    "season"
+  ],
+  "origins": [
+    4,
+    8,
+    12
+  ],
+  "evaluation_years": [
+    2009,
+    2010,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "inner_seasons": 3,
+  "history_windows": [
+    4,
+    16,
+    48,
+    0
+  ],
+  "sequence_length": 24,
+  "trials_per_family": 2,
+  "families": [
+    "ridge",
+    "extra",
+    "kernel",
+    "mlp",
+    "pls",
+    "interactions",
+    "neural_tree",
+    "hurdle"
+  ],
+  "bootstrap_draws": 2000,
+  "interval_alpha": 0.2,
+  "workers": 2,
+  "threads_per_worker": 1
+}

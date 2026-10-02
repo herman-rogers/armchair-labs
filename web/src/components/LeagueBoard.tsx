@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchOpponents, fetchTransactions } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
-import { boardMetricLabel } from '../metricPresentation'
+import { boardMetricLabel, SYSTEM_LABELS } from '../metricPresentation'
 import { ComparePanel } from './ComparePanel'
 import { RosterPanel } from './RosterPanel'
+import { useUrlFlag, useUrlParams, useUrlState } from '../navigation'
 
 type SortKey =
   | 'team_rank'
   | 'ranking_total'
-  | 'risk_adjusted_total'
+  | 'availability_floor_points'
   | 'wins'
   | 'expected_weekly_points'
   | 'weekly_floor'
@@ -23,7 +24,7 @@ type WorkspaceView = 'compare' | 'roster'
 const SORT_LABELS: Record<SortKey, string> = {
   team_rank: 'Power',
   ranking_total: 'Overall VOR',
-  risk_adjusted_total: 'Scenario VOR',
+  availability_floor_points: 'Availability downside',
   wins: 'Record',
   expected_weekly_points: 'Expected',
   weekly_floor: 'Floor',
@@ -89,13 +90,22 @@ export function LeagueBoard({
     (team) => team.team_id !== myTeam.team_id,
   ) ?? myTeam
 
-  const [pair, setPair] = useState({ left: myTeam.team_id, right: firstRival.team_id })
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('compare')
-  const [rosterTeamId, setRosterTeamId] = useState(myTeam.team_id)
-  const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({
-    key: 'team_rank',
-    direction: 'asc',
-  })
+  // Team choices and the board sort live in the URL (`left`, `right`, `roster`, `sort`).
+  const [params, update] = useUrlParams()
+  const [showSimulation, setShowSimulation] = useUrlFlag('simulation', { resets: ['sort'] })
+  const [workspaceParam, setWorkspaceView] = useUrlState('workspace', 'compare')
+  const workspaceView: WorkspaceView = workspaceParam === 'roster' ? 'roster' : 'compare'
+  const teamParam = (key: string, fallback: number) => {
+    const id = Number(params.get(key))
+    return teams.some((team) => team.team_id === id) ? id : fallback
+  }
+  const pair = { left: teamParam('left', myTeam.team_id), right: teamParam('right', firstRival.team_id) }
+  const rosterTeamId = teamParam('roster', myTeam.team_id)
+  const sortToken = params.get('sort') ?? 'team_rank'
+  const sortKey = sortToken.replace(/^-/, '')
+  const sort = useMemo((): { key: SortKey; direction: 'asc' | 'desc' } => sortKey in SORT_LABELS
+    ? { key: sortKey as SortKey, direction: sortToken.startsWith('-') ? 'desc' : 'asc' }
+    : { key: 'team_rank', direction: 'asc' }, [sortKey, sortToken])
 
   const opponents = useQuery({
     queryKey: ['opponents', version],
@@ -117,7 +127,7 @@ export function LeagueBoard({
   const rankedTeams = useMemo(() => {
     const value = (team: LeagueTeam): number => {
       if (sort.key === 'faab_remaining') return team.faab_remaining ?? -1
-      return team[sort.key]
+      return team[sort.key] ?? -Infinity
     }
     return teams.slice().sort((a, b) => {
       const difference = value(a) - value(b)
@@ -142,30 +152,29 @@ export function LeagueBoard({
   }, [hasDivisions, rankedTeams])
 
   const changeSort = (key: SortKey) => {
-    setSort((current) =>
-      current.key === key
-        ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
-        : { key, direction: key === 'team_rank' || key === 'weekly_risk' ? 'asc' : 'desc' },
-    )
+    const direction = sort.key === key
+      ? (sort.direction === 'asc' ? 'desc' : 'asc')
+      : key === 'team_rank' || key === 'weekly_risk' ? 'asc' : 'desc'
+    const token = direction === 'desc' ? `-${key}` : key
+    update({ sort: token === 'team_rank' ? null : token })
   }
 
   const selectTeam = (team: LeagueTeam) => {
-    setRosterTeamId(team.team_id)
-    if (team.team_id !== pair.left) setPair((current) => ({ ...current, right: team.team_id }))
+    update({ roster: team.team_id, ...(team.team_id !== pair.left ? { right: team.team_id } : {}) })
   }
 
   return (
     <section className="league-board">
       <div className="league-intro">
         <div>
-          <span className="eyebrow">League command center</span>
-          <h2>See the room. Find the edge.</h2>
+          <span className="eyebrow">League overview</span>
+          <h2>League strength and roster analysis</h2>
           <p>
             Power ranks, lineup outcomes, roster depth, and head-to-head comparisons in
             one view. Select any team below to bring it into the workspace.
           </p>
         </div>
-        <span className="model-badge">{version.toUpperCase()} model</span>
+        <span className="model-badge">{SYSTEM_LABELS[version]}</span>
       </div>
 
       <div className="board-kpis" aria-label={`${myTeam.team_name} summary`}>
@@ -177,7 +186,7 @@ export function LeagueBoard({
           </small>
         </div>
         <div className="board-kpi">
-          <span>Expected lineup</span>
+          <span>{version === 'adaptive' ? 'V2 simulated lineup' : 'Simulated lineup'}</span>
           <strong>{myTeam.expected_weekly_points.toFixed(1)}</strong>
           <small>skill points / week</small>
         </div>
@@ -205,6 +214,12 @@ export function LeagueBoard({
         <span className="count">{teams.length} teams · K/DST excluded</span>
       </div>
 
+      <div className="analysis-toolbar">
+        <p>{version === 'adaptive' ? 'Power and lineup comparisons use frozen Adaptive ranking value. Points, floor, risk, and coverage use a separate V2 simulation.'
+          : version === 'v1' ? 'Power uses the draft reference. Simulation estimates use historical weekly production.'
+            : 'Power uses production season value. Simulations use the same fitted PPG and games estimates.'} Simulation probabilities and weekly risk are uncalibrated.</p>
+        <button type="button" className="chip" aria-pressed={showSimulation} onClick={() => setShowSimulation(!showSimulation)}>{showSimulation ? 'Hide' : 'Show'} simulation breakdown</button>
+      </div>
       {divisionGroups.map((group) => (
         <div className="table-wrap power-table-wrap" key={group.label ?? 'league'}>
           {group.label && <h4 className="division-head">{group.label}</h4>}
@@ -214,13 +229,13 @@ export function LeagueBoard({
                 <th className="left sticky-team">Team</th>
                 <MetricHeader metric="team_rank" active={sort.key === 'team_rank'} direction={sort.direction} onSort={changeSort} title={`League-wide power rank: best legal full-strength lineup on ${boardMetricLabel(myTeam.ranking_metric)}`} />
                 <MetricHeader metric="ranking_total" active={sort.key === 'ranking_total'} direction={sort.direction} onSort={changeSort} title={`Best legal full-strength lineup summed on ${boardMetricLabel(myTeam.ranking_metric)}: per-game points above a replacement lineup`} />
-                <MetricHeader metric="risk_adjusted_total" active={sort.key === 'risk_adjusted_total'} direction={sort.direction} onSort={changeSort} title="Experimental, uncalibrated scenario statistic: availability is applied to already availability-adjusted VOR. Do not interpret as a calibrated risk rank." />
+                {showSimulation && <MetricHeader metric="availability_floor_points" active={sort.key === 'availability_floor_points'} direction={sort.direction} onSort={changeSort} title="25th percentile of expected lineup points across availability scenarios. Availability is applied once to active-game scoring; this excludes ordinary scoring variance and is not a calibrated weekly floor." />}
                 <MetricHeader metric="wins" active={sort.key === 'wins'} direction={sort.direction} onSort={changeSort} title="Current ESPN record" />
                 <MetricHeader metric="expected_weekly_points" active={sort.key === 'expected_weekly_points'} direction={sort.direction} onSort={changeSort} title="Availability-aware points from the best legal active lineup" />
-                <MetricHeader metric="weekly_floor" active={sort.key === 'weekly_floor'} direction={sort.direction} onSort={changeSort} title="Approximate 25th-percentile weekly lineup score" />
-                <MetricHeader metric="weekly_risk" active={sort.key === 'weekly_risk'} direction={sort.direction} onSort={changeSort} title="Standard deviation of weekly lineup points; lower is steadier" />
-                <MetricHeader metric="lineup_coverage" active={sort.key === 'lineup_coverage'} direction={sort.direction} onSort={changeSort} title="Chance the roster can fill every skill-position starting slot" />
-                <MetricHeader metric="bench_rescue_points" active={sort.key === 'bench_rescue_points'} direction={sort.direction} onSort={changeSort} title="Expected weekly points outside the full-strength lineup" />
+                {showSimulation && <MetricHeader metric="weekly_floor" active={sort.key === 'weekly_floor'} direction={sort.direction} onSort={changeSort} title="Approximate 25th-percentile weekly lineup score" />}
+                {showSimulation && <MetricHeader metric="weekly_risk" active={sort.key === 'weekly_risk'} direction={sort.direction} onSort={changeSort} title="Standard deviation of weekly lineup points; lower is steadier" />}
+                {showSimulation && <MetricHeader metric="lineup_coverage" active={sort.key === 'lineup_coverage'} direction={sort.direction} onSort={changeSort} title="Chance the roster can fill every skill-position starting slot" />}
+                {showSimulation && <MetricHeader metric="bench_rescue_points" active={sort.key === 'bench_rescue_points'} direction={sort.direction} onSort={changeSort} title="Expected weekly points outside the full-strength lineup" />}
                 <th className="left">Thin at</th>
                 <MetricHeader metric="faab_remaining" active={sort.key === 'faab_remaining'} direction={sort.direction} onSort={changeSort} title="Remaining free-agent budget" />
               </tr>
@@ -245,13 +260,13 @@ export function LeagueBoard({
                     </td>
                     <td><span className="power-rank">#{team.team_rank}</span></td>
                     <td className="metric-emphasis" title={`${boardMetricLabel(team.ranking_metric)}`}>{team.ranking_total.toFixed(1)}</td>
-                    <td title={`expected ${team.expected_lineup_vor.toFixed(1)} ± ${team.lineup_vor_risk.toFixed(1)} lineup VOR across availability scenarios`}>{team.risk_adjusted_total.toFixed(1)}</td>
+                    {showSimulation && <td title={`Availability-only spread: ${team.availability_spread_points?.toFixed(1) ?? 'unknown'} points. Board VOR is not resampled.`}>{team.availability_floor_points?.toFixed(1) ?? '—'}</td>}
                     <td><span className="record">{team.wins}–{team.losses}</span></td>
                     <td>{team.expected_weekly_points.toFixed(1)}</td>
-                    <td>{team.weekly_floor.toFixed(1)}</td>
-                    <td>±{team.weekly_risk.toFixed(1)}</td>
-                    <td>{Math.round(team.lineup_coverage * 100)}%</td>
-                    <td>+{team.bench_rescue_points.toFixed(1)}</td>
+                    {showSimulation && <td>{team.weekly_floor.toFixed(1)}</td>}
+                    {showSimulation && <td>±{team.weekly_risk.toFixed(1)}</td>}
+                    {showSimulation && <td>{Math.round(team.lineup_coverage * 100)}%</td>}
+                    {showSimulation && <td>+{team.bench_rescue_points.toFixed(1)}</td>}
                     <td className="left">
                       <span className="thin-list">
                         {thin.length > 0 ? thin.map((entry) => (
@@ -288,16 +303,13 @@ export function LeagueBoard({
             left={pair.left}
             right={pair.right}
             version={version}
-            onChange={(side, teamId) => {
-              setPair((current) => ({ ...current, [side]: teamId }))
-              setRosterTeamId(teamId)
-            }}
+            onChange={(side, teamId) => update({ [side]: teamId, roster: teamId })}
           />
         ) : (
           <div>
             <div className="roster-choice" aria-label="Roster to inspect">
               {[leftTeam, rightTeam].filter((team, index, values) => values.findIndex((candidate) => candidate.team_id === team.team_id) === index).map((team) => (
-                <button key={team.team_id} type="button" className="chip" aria-pressed={rosterTeam.team_id === team.team_id} onClick={() => setRosterTeamId(team.team_id)}>
+                <button key={team.team_id} type="button" className="chip" aria-pressed={rosterTeam.team_id === team.team_id} onClick={() => update({ roster: team.team_id })}>
                   {team.team_name}{team.is_mine ? ' · You' : ''}
                 </button>
               ))}

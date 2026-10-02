@@ -1,5 +1,6 @@
-import type { LeaguePlayer } from '../api/types'
+import type { LeaguePlayer, MetricVersion } from '../api/types'
 import { DataTable, type Column } from './DataTable'
+import { PlayerDetails } from './PlayerDetails'
 import { Flags } from './Flags'
 import { InjuryBadge, MovedBadge, OwnerBadge } from './Availability'
 
@@ -63,7 +64,7 @@ export const IDENTITY: PlayerColumn[] = [
 
 export const OWNERSHIP: PlayerColumn = {
   key: 'availability',
-  label: 'Status',
+  label: 'Roster',
   title: 'Who owns this player in your league right now.',
   align: 'left',
   initial: 'asc',
@@ -104,14 +105,19 @@ export function PlayerTable({
   columns,
   defaultSort,
   emptyMessage = 'Nothing to show.',
+  version,
 }: {
   players: LeaguePlayer[]
   columns: PlayerColumn[]
   defaultSort: keyof LeaguePlayer
   emptyMessage?: string
+  version: MetricVersion
 }) {
   return (
     <DataTable
+      key={version}
+      rowLabel={player => player.player_display_name}
+      renderDetails={player => <PlayerDetails player={player} version={version} />}
       rows={players}
       columns={columns}
       defaultSort={defaultSort}

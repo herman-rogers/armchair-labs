@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { forecastColumns } from './ForecastColumns'
+import type { LeaguePlayer } from '../api/types'
 import { useQuery } from '@tanstack/react-query'
 import { fetchUnrankable, fetchWire } from '../api/client'
 import type { MetricVersion } from '../api/types'
 import { SEASON_EQUIVALENT_TITLE } from '../metricPresentation'
 import { Freshness } from './Freshness'
+import { useUrlFlag, useUrlState } from '../navigation'
 import {
   FLAGS_COLUMN,
   IDENTITY,
@@ -38,59 +40,6 @@ const COLUMNS: PlayerColumn[] = [
   ROSTERED_PERCENT,
 ]
 
-const V2_COLUMNS: PlayerColumn[] = [
-  ...IDENTITY,
-  {
-    key: 'wire_vor',
-    label: 'Wire VOR',
-    title: 'Season-equivalent projected PPG above the best freely available player in the current free-agent pool.',
-    render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
-  },
-  {
-    key: 'season_equivalent_ppg',
-    label: 'Avail PPG',
-    title: SEASON_EQUIVALENT_TITLE,
-    render: (p) => number(p.season_equivalent_ppg),
-  },
-  {
-    key: 'lineup_improvement',
-    label: 'Lineup gain',
-    title: 'Preseason season-equivalent lineup gain from adding this player before choosing a drop.',
-    render: (p) => number(p.lineup_improvement),
-  },
-  {
-    key: 'forecast_active_ppg',
-    label: 'Active PPG',
-    title: 'Fitted points per active game. Adaptive season totals have no identified active-game decomposition.',
-    render: (p) => <span className="dim">{number(p.forecast_active_ppg ?? (p.metric_version === 'adaptive' ? null : p.fitted_ppg))}</span>,
-  },
-  {
-    key: 'forecast_expected_games',
-    label: 'Exp G',
-    title: 'Fitted expected games underlying the season forecast.',
-    render: (p) => <span className="dim">{number(p.forecast_expected_games ?? (p.metric_version === 'adaptive' ? null : p.fitted_games))}</span>,
-  },
-  {
-    key: 'projected_targets_pg',
-    label: 'Tgt/G',
-    title: 'Projected targets per game.',
-    render: (p) => <span className="dim">{number(p.projected_targets_pg)}</span>,
-  },
-  {
-    key: 'projected_carries_pg',
-    label: 'Car/G',
-    title: 'Projected carries per game.',
-    render: (p) => <span className="dim">{number(p.projected_carries_pg)}</span>,
-  },
-  {
-    key: 'ppg',
-    label: 'Actual PPG',
-    title: 'Most recent season’s PPG, shown as baseline evidence.',
-    render: (p) => <span className="dim">{number(p.ppg)}</span>,
-  },
-  ROSTERED_PERCENT,
-]
-
 /**
  * The ranked wire.
  *
@@ -99,8 +48,9 @@ const V2_COLUMNS: PlayerColumn[] = [
  * players currently unowned. Using the preseason pool would misstate pickup value.
  */
 export function WirePanel({ version }: { version: MetricVersion }) {
-  const [healthyOnly, setHealthyOnly] = useState(false)
-  const [position, setPosition] = useState<string | null>(null)
+  const [healthyOnly, setHealthyOnly] = useUrlFlag('healthy')
+  const [positionParam, setPosition] = useUrlState('position', '')
+  const position = positionParam || null
 
   const wire = useQuery({
     queryKey: ['wire', version, healthyOnly],
@@ -129,7 +79,7 @@ export function WirePanel({ version }: { version: MetricVersion }) {
             type="button"
             className="chip"
             aria-pressed={position === pos}
-            onClick={() => setPosition((current) => (current === pos ? null : pos))}
+            onClick={() => setPosition(position === pos ? '' : pos)}
           >
             {pos}
           </button>
@@ -139,7 +89,7 @@ export function WirePanel({ version }: { version: MetricVersion }) {
           type="button"
           className="chip"
           aria-pressed={healthyOnly}
-          onClick={() => setHealthyOnly((v) => !v)}
+          onClick={() => setHealthyOnly(!healthyOnly)}
           title="Hide ESPN OUT, IR, and suspension tags. This does not account for byes. Off by default because a stash can still be useful."
         >
           Hide OUT/IR/SUSP
@@ -160,8 +110,15 @@ export function WirePanel({ version }: { version: MetricVersion }) {
       </p>
 
       <PlayerTable
+        version={version}
         players={players}
-        columns={version !== 'v1' ? V2_COLUMNS : COLUMNS}
+        columns={version === 'v1' ? COLUMNS : [
+          ...IDENTITY,
+          { key: 'wire_vor', label: 'Wire VOR', title: 'Season-equivalent PPG above the best free agent at this position.', render: p => <b>{number(p.wire_vor, 2)}</b> },
+          { key: 'lineup_improvement', label: 'Lineup gain', title: 'Preseason season-equivalent improvement to your best legal lineup before choosing a drop.', render: p => number(p.lineup_improvement) },
+          { key: 'season_equivalent_ppg', label: 'Season PPG', title: SEASON_EQUIVALENT_TITLE, render: p => number(p.season_equivalent_ppg) },
+          ...forecastColumns<LeaguePlayer>(version).filter(column => !['v2_overall_vor', 'v2_position_rank'].includes(column.key)),
+        ]}
         defaultSort="wire_vor"
         emptyMessage="No ranked free agents at this position."
       />

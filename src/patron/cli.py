@@ -243,9 +243,12 @@ def feature_discovery(
     else:
         temporal = pl.read_parquet(temporal_path)
     retained = pl.read_parquet(predictions_path)
-    rich_path = settings.derived_cache_dir / "feature_discovery_rich_weekly_v1.parquet"
+    rich_path = (
+        settings.derived_cache_dir
+        / f"feature_discovery_rich_weekly_v2_h{report_config.history_seasons}.parquet"
+    )
     if force_rich or not rich_path.exists():
-        panel_path = settings.derived_cache_dir / "feature_discovery_rich_panel_v1.parquet"
+        panel_path = settings.derived_cache_dir / "feature_discovery_rich_panel_v2.parquet"
         if force_rich or not panel_path.exists():
             input_seasons = list(report_config.input_seasons)
             final_input = max(input_seasons)

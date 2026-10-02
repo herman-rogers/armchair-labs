@@ -39,13 +39,15 @@ import numpy as np
 import polars as pl
 from scipy.stats import rankdata
 
+from patron.metrics.availability import constrain_games
+
 logger = logging.getLogger(__name__)
 
 FITTED_PPG = "fitted_ppg"
 FITTED_SEASON_POINTS = "fitted_season_points"
 ACTUAL_PLAYED = "actual_played"
 ARTIFACT_SCHEMA_VERSION = 3
-MODEL_VERSION = "ridge-walk-forward-2"
+MODEL_VERSION = "ridge-walk-forward-3"
 
 _CORE_FEATURES = (
     "historical_ppg_prior",
@@ -331,6 +333,17 @@ class RidgeModel:
         )
 
 
+def _predict(model: RidgeModel, row: dict[str, Any], spec: ModelSpec) -> float:
+    value = model.predict(row)
+    if spec.target == "actual_games":
+        return constrain_games(value, row)
+    if spec.target in {"actual_season_points", ACTUAL_PLAYED} and row.get(
+        "known_available_games_cap"
+    ) == 0:
+        return 0.0
+    return value
+
+
 def _has_required(row: dict[str, Any], spec: ModelSpec) -> bool:
     rookie = (_number(row.get("rookie_indicator")) or 0) > 0
     returning = (_number(row.get("returning_indicator")) or 0) > 0
@@ -463,7 +476,7 @@ def _select_lambda(
         if model is None:
             continue
         errors = [
-            abs(model.predict(row) - y)
+            abs(_predict(model, row, spec) - y)
             for row in check_rows
             if (y := _training_target(row, spec)) is not None
         ]
@@ -491,9 +504,9 @@ def _selector_fold_score(
 ) -> tuple[float, float] | None:
     """Top-k hit rate and NDCG for one past position-season.
 
-    This intentionally mirrors the report's two primary ranking measures while
-    remaining local to the fitter (and therefore avoiding a fit/backtest import
-    cycle).  The selector never sees the season it is choosing for.
+    The ideal ranking uses every observed outcome, including players the source
+    cannot score. Missing predictions therefore cannot erase actual winners.
+    The selector never sees the season it is choosing for.
     """
     scored = [
         (predicted, actual, index)
@@ -504,7 +517,15 @@ def _selector_fold_score(
     if k <= 0 or len(scored) < k:
         return None
     by_source = sorted(scored, key=lambda item: item[0], reverse=True)
-    by_actual = sorted(scored, key=lambda item: item[1], reverse=True)
+    by_actual = sorted(
+        [
+            (0.0, actual, index)
+            for index, row in enumerate(rows)
+            if (actual := _number(row.get(target))) is not None
+        ],
+        key=lambda item: item[1],
+        reverse=True,
+    )
     actual_top = {item[2] for item in by_actual[:k]}
     hit_rate = sum(item[2] in actual_top for item in by_source[:k]) / k
     discounts = [1.0 / math.log2(index + 2) for index in range(k)]
@@ -534,17 +555,22 @@ def _choose_adaptive_source(
     best_key = (-math.inf, -math.inf, -math.inf)
     best_score: float | None = None
     best_folds = 0
+    # Compare identical historical folds. A late or sparse source cannot win by
+    # skipping difficult seasons that count against its competitors.
+    shared_scores: list[dict[str, tuple[float, float]]] = []
+    for prior in sorted(completed_by_season):
+        if prior >= season:
+            continue
+        rows = [row for row in completed_by_season[prior] if str(row.get("position")) == position]
+        scores = {
+            source: score
+            for source in spec.factors
+            if (score := _selector_fold_score(rows, source, spec.target, top_k)) is not None
+        }
+        if len(scores) == len(spec.factors):
+            shared_scores.append(scores)
     for order, source in enumerate(spec.factors):
-        fold_scores = []
-        for prior in sorted(completed_by_season):
-            if prior >= season:
-                continue
-            rows = [
-                row for row in completed_by_season[prior] if str(row.get("position")) == position
-            ]
-            score = _selector_fold_score(rows, source, spec.target, top_k)
-            if score is not None:
-                fold_scores.append(score)
+        fold_scores = [scores[source] for scores in shared_scores]
         if len(fold_scores) < min_folds:
             continue
         mean_hit = sum(score[0] for score in fold_scores) / len(fold_scores)
@@ -750,7 +776,7 @@ def fit_walk_forward(
                     continue
                 model = by_position.get(str(row.get("position")), pooled)
                 if model is not None and _has_required(row, spec):
-                    fitted[index] = model.predict(row)
+                    fitted[index] = _predict(model, row, spec)
         outputs[spec.name] = fitted
         available_columns.add(spec.name)
         for index, row in enumerate(records):
@@ -905,6 +931,18 @@ def apply_fitted_models(
                 row[spec.name] = value
             continue
         if spec.kind == "product":
+            if spec.apply_live and all(factor in frame.columns for factor in spec.factors):
+                values = []
+                for row in rows:
+                    factors = [_number(row.get(factor)) for factor in spec.factors]
+                    value = (
+                        math.prod(float(factor) for factor in factors if factor is not None)
+                        if all(factor is not None for factor in factors)
+                        else None
+                    )
+                    values.append(value)
+                    row[spec.name] = value
+                frame = frame.with_columns(pl.Series(spec.name, values, dtype=pl.Float64))
             continue
         if not spec.apply_live:
             frame = frame.with_columns(pl.lit(None, dtype=pl.Float64).alias(spec.name))
@@ -912,7 +950,7 @@ def apply_fitted_models(
         by_position = models.get(spec.name, {})
         model_values: list[float | None] = [
             (
-                model.predict(row)
+                _predict(model, row, spec)
                 if (model := by_position.get(str(row.get("position")))) and _has_required(row, spec)
                 else None
             )
@@ -970,6 +1008,7 @@ def production_definitions_digest() -> str:
         root / "config/projections.yaml",
         root / "metrics/projection.py",
         root / "metrics/enrichment.py",
+        root / "metrics/availability.py",
         *sorted((root / "scoring").glob("*.py")),
     ]
     payload = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}

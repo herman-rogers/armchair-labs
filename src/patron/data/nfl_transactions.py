@@ -145,7 +145,8 @@ def parse_transaction_payload(
                 "transaction_year": year,
                 "category": "espn",
                 "from_team": None,
-                "to_team": _team(item.get("team")),
+                "source_team": _team(item.get("team")),
+                "to_team": None,
                 "player_name": None,
                 "description": str(item.get("description") or ""),
                 "source_url": source_url,
@@ -160,6 +161,7 @@ def _empty() -> pl.DataFrame:
             "transaction_date": pl.Date,
             "transaction_year": pl.Int32,
             "category": pl.String,
+            "source_team": pl.String,
             "from_team": pl.String,
             "to_team": pl.String,
             "player_name": pl.String,
@@ -206,8 +208,8 @@ def load_transactions(
         return _empty()
     return (
         pl.DataFrame(records, schema=_empty().schema, orient="row")
-        .unique(subset=["transaction_date", "to_team", "description"], keep="first")
-        .sort(["transaction_date", "to_team", "description"])
+        .unique(subset=["transaction_date", "source_team", "description"], keep="first")
+        .sort(["transaction_date", "source_team", "description"])
     )
 
 
@@ -231,7 +233,8 @@ def parse_official_transactions(
                 "transaction_year": year,
                 "category": "official",
                 "from_team": None,
-                "to_team": team,
+                "source_team": team,
+                "to_team": None,
                 "player_name": None,
                 "description": description,
                 "source_url": source_url,
@@ -280,6 +283,6 @@ def load_official_transactions(
         return _empty()
     return (
         pl.DataFrame(records, schema=_empty().schema, orient="row")
-        .unique(subset=["transaction_date", "to_team", "description"], keep="first")
-        .sort(["transaction_date", "to_team", "description"])
+        .unique(subset=["transaction_date", "source_team", "description"], keep="first")
+        .sort(["transaction_date", "source_team", "description"])
     )

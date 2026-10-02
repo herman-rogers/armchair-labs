@@ -35,6 +35,9 @@ def test_board_version_selects_the_matching_artifact(tmp_path, monkeypatch) -> N
     assert api_module.board(version="adaptive", **query)["players"] == adaptive
 
     status = api_module.status()
+    for metadata in status["metric_versions"].values():
+        assert metadata.pop("built_at") is not None
+        assert metadata.pop("forecast_as_of") == []
     assert status["metric_versions"] == {
         "v1": {
             "available": True,
@@ -66,3 +69,23 @@ def test_metric_report_reads_generated_artifact(tmp_path, monkeypatch) -> None:
 
     assert api_module.metric_report() == report
     assert api_module.status()["metric_report"]["available"] is True
+
+
+def test_status_reports_each_forecast_cutoff_and_artifact_date(tmp_path, monkeypatch) -> None:
+    import os
+    from datetime import UTC, datetime
+
+    for version, as_of, timestamp in [
+        ("v2", "2026-08-31", 1000000),
+        ("adaptive", "2026-08-15", 2000000),
+    ]:
+        path = tmp_path / f"board_{version}.json"
+        path.write_text(json.dumps([{"forecast_as_of": as_of}, {"forecast_as_of": as_of}]))
+        os.utime(path, (timestamp, timestamp))
+    monkeypatch.setattr(api_module, "get_settings", lambda: SimpleNamespace(outputs_dir=tmp_path))
+    versions = api_module.status()["metric_versions"]
+    assert versions["v2"]["forecast_as_of"] == ["2026-08-31"]
+    assert versions["adaptive"]["forecast_as_of"] == ["2026-08-15"]
+    assert versions["v2"]["built_at"] == datetime.fromtimestamp(1000000, UTC).isoformat()
+    assert versions["v1"]["built_at"] is None
+    assert versions["v1"]["forecast_as_of"] == []

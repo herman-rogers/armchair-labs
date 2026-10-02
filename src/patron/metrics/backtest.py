@@ -21,6 +21,7 @@ from patron.board.builder import build_board
 from patron.board.overrides import OverrideSet
 from patron.config.league import LeagueConfig
 from patron.config.settings import load_metric_report_config
+from patron.metrics.availability import coverage_audit
 from patron.metrics.enrichment import depth_chart_as_of
 from patron.metrics.fit import FitConfig, summarize_fitted_models
 from patron.metrics.projection import METRIC_VERSION, ProjectionAssumptions, build_projection_board
@@ -224,6 +225,42 @@ def _depth_chart_before(
     return depth_chart_as_of(depth_charts, forecast_season, cutoff)
 
 
+def candidate_outcomes(
+    actual: pl.DataFrame,
+    candidates: pl.DataFrame,
+    levels: dict[str, float],
+    season_games: int,
+) -> pl.DataFrame:
+    """Score all earned points by ID at the candidate's forecast position.
+
+    Later NFL position changes must neither erase a target nor change the position
+    used to evaluate that draft decision. Eligibility and outcomes are independent.
+    """
+    return (
+        candidates.select("player_id", "position")
+        .join(
+            actual.select("player_id", "ppg", "ppg_denominator_games", "season_pts"),
+            on="player_id",
+            how="inner",
+            validate="1:1",
+        )
+        .pipe(add_vor, levels)
+        .select(
+            "player_id",
+            pl.col("ppg").alias("actual_ppg"),
+            pl.col("vor").alias("actual_vor"),
+            pl.col("ppg_denominator_games").alias("actual_games"),
+            pl.col("season_pts").alias("actual_season_points"),
+        )
+        .with_columns(
+            (
+                pl.col("actual_vor").clip(lower_bound=0)
+                * (pl.col("actual_games") / season_games).clip(0, 1)
+            ).alias("actual_availability_value")
+        )
+    )
+
+
 def build_backtest_predictions(
     player_seasons: pl.DataFrame,
     birth_dates: pl.DataFrame,
@@ -234,6 +271,7 @@ def build_backtest_predictions(
     experimental_features: pl.DataFrame | None = None,
     rookie_features: pl.DataFrame | None = None,
     cutoff_by_season: Mapping[int, date] | None = None,
+    outcome_seasons: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Create cutoff-safe forecast rows for returners and the distinct rookie pool."""
     folds: list[pl.DataFrame] = []
@@ -278,44 +316,6 @@ def build_backtest_predictions(
             ),
         )
 
-        actual = player_seasons.filter(pl.col("season") == forecast_season)
-        complete = actual.height > 0
-        if complete:
-            levels = replacement_levels(
-                actual,
-                baseline_ranks=league.vor_baseline_rank,
-                min_games=league.min_games_baseline,
-            )
-            actual = (
-                add_vor(actual, levels)
-                .select(
-                    "player_id",
-                    pl.col("ppg").alias("actual_ppg"),
-                    pl.col("vor").alias("actual_vor"),
-                    pl.col("ppg_denominator_games").alias("actual_games"),
-                    pl.col("season_pts").alias("actual_season_points"),
-                )
-                .with_columns(
-                    (
-                        pl.col("actual_vor").clip(lower_bound=0.0)
-                        * (pl.col("actual_games") / league.metrics.projection_season_games).clip(
-                            0.0, 1.0
-                        )
-                    ).alias("actual_availability_value")
-                )
-            )
-        else:
-            actual = pl.DataFrame(
-                schema={
-                    "player_id": pl.String,
-                    "actual_ppg": pl.Float64,
-                    "actual_vor": pl.Float64,
-                    "actual_games": pl.Float64,
-                    "actual_season_points": pl.Float64,
-                    "actual_availability_value": pl.Float64,
-                }
-            )
-
         candidates = projection.with_columns(
             pl.lit(1.0).alias("returning_indicator"),
             pl.lit("returner").alias("player_population"),
@@ -342,13 +342,41 @@ def build_backtest_predictions(
                 extras = extras.select("player_id", pl.col("market_position").alias("position"))
                 extras = extras.with_columns(pl.lit("market_only").alias("player_population"))
                 candidates = pl.concat([candidates, extras], how="diagonal_relaxed")
+        actual_pool = player_seasons.filter(pl.col("season") == forecast_season)
+        all_actual = (outcome_seasons if outcome_seasons is not None else player_seasons).filter(
+            pl.col("season") == forecast_season
+        )
+        complete = all_actual.height > 0
+        if complete:
+            levels = replacement_levels(
+                actual_pool,
+                baseline_ranks=league.vor_baseline_rank,
+                min_games=league.min_games_baseline,
+            )
+            actual = candidate_outcomes(
+                all_actual,
+                candidates,
+                levels,
+                league.metrics.projection_season_games,
+            )
+        else:
+            actual = pl.DataFrame(
+                schema={
+                    "player_id": pl.String,
+                    "actual_ppg": pl.Float64,
+                    "actual_vor": pl.Float64,
+                    "actual_games": pl.Float64,
+                    "actual_season_points": pl.Float64,
+                    "actual_availability_value": pl.Float64,
+                }
+            )
         fold = (
             candidates.join(actual, on="player_id", how="left")
             .with_columns(
                 pl.lit(forecast_season).cast(pl.Int32).alias("forecast_season"),
                 pl.lit(source_season).cast(pl.Int32).alias("source_season"),
                 pl.lit(complete).alias("outcome_complete"),
-                pl.lit(2).alias("draft_pool_version"),
+                pl.lit(3 if outcome_seasons is not None else 2).alias("draft_pool_version"),
                 pl.col("actual_ppg").is_not_null().alias("actual_matched"),
             )
             .with_columns(
@@ -1576,8 +1604,9 @@ def build_metric_report(
             )
         cutoff_availability = {
             "source": (
-                "official NFL club transaction archives for 31 teams in market-era folds; "
-                "dated ESPN fallback for Dallas and pre-market seasons"
+                "dated transaction reconstruction; consult historical_rebuild.policies "
+                "for accepted sources; inferred and unresolved states are not observed "
+                "active status"
             ),
             "information_cutoffs": {
                 str(row["forecast_season"]): str(row["forecast_cutoff_date"])
@@ -1629,6 +1658,9 @@ def build_metric_report(
             "population_counts": population_counts,
             "assessment_counts": assessments,
             "cutoff_availability": cutoff_availability,
+            "absence_evidence_coverage": coverage_audit(predictions)[0]
+            if "availability_evidence_status" in predictions.columns
+            else None,
             "limitations": [
                 "Rookies use a distinct NFL-draft-capital model; age, college context, "
                 "and combine fields remain measured hypotheses after failing to improve "
@@ -1639,22 +1671,20 @@ def build_metric_report(
                 "Market folds use the archived ECR snapshot date as their information "
                 "cutoff for transactions and depth charts; current manual overrides are "
                 "disabled.",
-                "Depth charts from 2004–2024 use the published Week 1 ranking as an "
-                "August 31 proxy because those files have no publication timestamp. The "
-                "proxy is therefore unavailable to market folds whose ECR snapshot is "
-                "earlier than August 31.",
-                "Cutoff roster state is reconstructed conservatively from the prior-season "
-                "team and matched dated transactions; unmatched retirements or unsigned "
-                "players can therefore remain active.",
-                "Official club transaction archives cover 31 teams in 2020–2026; Dallas "
-                "and older seasons retain the ESPN historical fallback. The fallback has "
-                "known date errors and is not treated as equivalent provenance.",
+                "Legacy Week 1 depth charts lack publication timestamps; an August 31 "
+                "proxy is not verified draft-time evidence. Consult the version policy "
+                "for whether these proxies are excluded.",
+                "Unobserved cutoff states are not confirmed active. Inspect observed, "
+                "inferred, and unresolved evidence before using roster context.",
+                "Official club and ESPN transaction archives differ in dating and coverage. "
+                "Consult the version policy for accepted sources; fallback records do not "
+                "have equivalent provenance.",
                 "The public historical feed has dated IR/PUP/NFI/suspension transactions "
                 "but not a complete dated preseason practice/recovery archive. A separate "
                 "market-conditioned games challenger uses same-snapshot ECR as that missing "
                 "news carrier and is not described as independent model alpha.",
-                "Injury, route-participation, and depth-chart metrics enter only after a "
-                "complete history exists for their source.",
+                "Source coverage varies by era and player. Missing feed observations "
+                "must not be interpreted as evidence of zero usage.",
                 "Partial rank correlation controls for the historical PPG prior, but does "
                 "not prove causation.",
                 "Correlation ranges are empirical 2.5th–97.5th percentile ranges across "

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "seed": 20260924,
+  "input_sha256": {
+    "data/research/individual_stats_20260923_r4/manifest.json": "1ff887ba5adb727d1c5313be9478eaed617f8f8813e7f678403b57cb57e2d148",
+    "data/research/individual_stats_20260923_r4/features.parquet": "46e5beb5b1e3338e510778fc0e9919f3af31a575efd27510604564c8e3bbc788",
+    "data/research/individual_stats_20260923_r4/registry.json": "e9c730119aa20a8913a33681d96f151334d9eb522c61c21c1c17ddb75c19ac01",
+    "data/research/individual_stats_20260923_r4/specs.json": "396e0824eeb767914a1d6908f4ee811f49174a5351e692d4c46391bd6965e297",
+    "data/gold/releases/canonical_targets_20260923_r3/manifest.json": "34f4d34388fa248434014ce76583001178a5cd5c0a87358ea708c2e9d6125dfa",
+    "data/gold/releases/canonical_targets_20260923_r3/tables/nfl_player_weeks.parquet": "6b80e095f49d76ae6fb6eaaa6f7f1cf3d04adb0940304d52bec13a4b052bdb93",
+    "experiments/player_signals_lab/safety.py": "53d947307a796fb278f2d9a4bd9a3250ec03640d06089f0d69bab715ce69d493"
+  },
+  "inventory_root": "data/research/individual_stats_20260923_r4",
+  "gold_root": "data/gold/releases/canonical_targets_20260923_r3",
+  "evaluation_start": 2008,
+  "evaluation_end": 2025,
+  "inner_seasons": 3,
+  "warmup_start": 2005,
+  "positions": [
+    "QB",
+    "RB",
+    "WR",
+    "TE"
+  ],
+  "bootstrap_draws": 4000
+}

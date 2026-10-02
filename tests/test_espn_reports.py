@@ -324,9 +324,7 @@ class TestTeamStrengths:
         assert strengths[1]["team_rank"] == 1
         assert strengths[2]["team_rank"] == 2
 
-    def test_risk_adjusted_vor_penalises_fragile_stars(self) -> None:
-        """Two rosters with equal full-strength lineup VOR: the one whose star is
-        fragile has lower risk-adjusted VOR."""
+    def test_risk_uses_points_once_and_never_resamples_availability_adjusted_vor(self) -> None:
         board = pl.DataFrame(
             {
                 ESPN_ID: [1, 2, 3, 4],
@@ -351,9 +349,17 @@ class TestTeamStrengths:
         strengths = team_strengths(board, espn, [1, 2])
         fragile, steady = strengths[1], strengths[2]
         assert fragile["ranking_total"] == steady["ranking_total"] == 8.0
-        assert fragile["risk_adjusted_total"] < steady["risk_adjusted_total"]
-        assert steady["lineup_vor_risk"] == 0.0
-        assert fragile["expected_lineup_vor"] == pytest.approx(3.0, abs=0.3)
+        assert fragile["risk_adjusted_total"] is steady["risk_adjusted_total"] is None
+        assert fragile["expected_lineup_vor"] is None
+        assert fragile["lineup_vor_risk"] is None
+        assert fragile["expected_weekly_points"] == pytest.approx(12.5, abs=0.3)
+        assert fragile["availability_floor_points"] == 5.0
+        assert fragile["availability_spread_points"] == pytest.approx(7.5, abs=0.2)
+        assert steady["availability_floor_points"] == 20.0
+        assert steady["availability_spread_points"] == 0.0
+        changed = team_strengths(board.with_columns(pl.col("v2_overall_vor") * 10), espn, [1, 2])
+        for key in ("expected_weekly_points", "availability_floor_points", "weekly_risk"):
+            assert changed[1][key] == fragile[key]
 
     def test_availability_uses_the_bench_and_adds_weekly_risk(self) -> None:
         board = pl.DataFrame(
@@ -438,7 +444,10 @@ class TestTeamStrengths:
         team = team_strengths(board, espn, [1])[1]
 
         assert team["fallback_players"] == 1
-        assert team["expected_weekly_points"] == pytest.approx(14.1, abs=0.2)
+        # 255 is already a season total: 255/17, not 255/17 × availability.
+        assert team["expected_weekly_points"] == pytest.approx(15.0, abs=0.2)
+        less_available = team_strengths(board, espn, [1], fallback_availability=0.5)[1]
+        assert less_available["expected_weekly_points"] == pytest.approx(15.0, abs=0.3)
 
 
 class TestUnrankable:

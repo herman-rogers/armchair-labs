@@ -120,9 +120,11 @@ def test_contract_features_reconstruct_historical_active_term_without_current_st
 
     rows = build_contract_features(contracts, [2022, 2025]).sort("forecast_season")
 
-    assert rows["contract_apy_cap_pct"].to_list() == [0.02, 0.05]
-    assert rows["contract_years_remaining"].to_list() == [2.0, 2.0]
-    assert rows["contract_guaranteed_log"][0] == pytest.approx(math.log1p(4.0))
+    assert rows["contract_apy_cap_pct_proxy"].to_list() == [0.02, 0.05]
+    assert rows["contract_years_remaining_proxy"].to_list() == [2.0, 2.0]
+    assert rows["contract_guaranteed_log_proxy"][0] == pytest.approx(math.log1p(4.0))
+    assert rows["contract_years_remaining"].null_count() == 2
+    assert rows["contract_apy_cap_pct"].null_count() == 2
 
 
 def test_forecast_features_capture_roster_move_and_vacated_role() -> None:
@@ -336,7 +338,7 @@ def test_market_snapshot_date_controls_transactions_and_preserves_reserve_kind()
     assert by_id["known"]["forecast_cutoff_date"] == date(2021, 8, 27)
     assert by_id["known"]["cutoff_availability_class"] == "pup_nfi"
     assert by_id["known"]["cutoff_pup_nfi"] == 1.0
-    assert by_id["too-late"]["cutoff_availability_class"] == "active"
+    assert by_id["too-late"]["cutoff_availability_class"] == "unknown"
     assert by_id["too-late"]["cutoff_transaction_matched"] == 0.0
 
 
@@ -377,3 +379,78 @@ def test_team_level_transaction_prose_matches_each_player_clause() -> None:
     assert by_id["signed"]["cutoff_preseason_rostered"] == 1.0
     assert by_id["released"]["cutoff_preseason_team"] is None
     assert by_id["released"]["cutoff_preseason_rostered"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Signed CB Michael Jackson.",
+        "Signed OL Jackson Dennis.",
+        "Released QB Lamar Jacksonson.",
+        "Signed QB L. Jackson.",
+    ],
+)
+def test_transaction_prose_does_not_match_partial_names(description: str) -> None:
+    players = pl.DataFrame(
+        {
+            "gsis_id": ["lamar"],
+            "display_name": ["Lamar Jackson"],
+            "short_name": ["L.Jackson"],
+        }
+    )
+    seasons = pl.DataFrame(
+        {
+            "season": [2019],
+            "player_id": ["lamar"],
+            "player_display_name": ["Lamar Jackson"],
+            "position": ["QB"],
+            "team": ["BAL"],
+        }
+    )
+    events = pl.DataFrame(
+        {
+            "transaction_date": [date(2020, 8, 1)],
+            "transaction_year": [2020],
+            "category": ["espn"],
+            "from_team": [None],
+            "to_team": ["NE"],
+            "player_name": [None],
+            "description": [description],
+        }
+    )
+    row = build_transaction_features(events, seasons, players, [2020], "08-31").row(0, named=True)
+    assert row["cutoff_preseason_team"] == "BAL"
+    assert row["cutoff_transaction_matched"] == 0.0
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_transaction_namesake_outside_fold_still_requires_team_match(named: bool) -> None:
+    players = pl.DataFrame(
+        {
+            "gsis_id": ["qb", "cb"],
+            "display_name": ["Lamar Jackson", "Lamar Jackson"],
+        }
+    )
+    seasons = pl.DataFrame(
+        {
+            "season": [2019],
+            "player_id": ["qb"],
+            "player_display_name": ["Lamar Jackson"],
+            "position": ["QB"],
+            "team": ["BAL"],
+        }
+    )
+    events = pl.DataFrame(
+        {
+            "transaction_date": [date(2020, 8, 1)],
+            "transaction_year": [2020],
+            "category": ["espn"],
+            "from_team": [None],
+            "to_team": ["NYJ"],
+            "player_name": ["Lamar Jackson" if named else None],
+            "description": ["Signed CB Lamar Jackson."],
+        }
+    )
+    row = build_transaction_features(events, seasons, players, [2020], "08-31").row(0, named=True)
+    assert row["cutoff_preseason_team"] == "BAL"
+    assert row["cutoff_transaction_matched"] == 0.0

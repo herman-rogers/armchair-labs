@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import statistics
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -330,7 +331,7 @@ def team_strengths(
     season_games: int = 17,
     fallback_availability: float = 0.94,
     columns: RosterProjectionColumns | None = None,
-) -> dict[int, dict[str, int | float | str]]:
+) -> dict[int, dict[str, int | float | str | None]]:
     """Rank rosters on the canonical board metric and simulate weekly production.
 
     Each scenario independently samples player availability, optimizes the legal lineup
@@ -354,9 +355,11 @@ def team_strengths(
                 "team_rank": rank,
                 "team_score": 5.0,
                 "ranking_total": 0.0,
-                "expected_lineup_vor": 0.0,
-                "lineup_vor_risk": 0.0,
-                "risk_adjusted_total": 0.0,
+                "expected_lineup_vor": None,
+                "lineup_vor_risk": None,
+                "risk_adjusted_total": None,
+                "availability_floor_points": 0.0,
+                "availability_spread_points": 0.0,
                 "ranking_metric": "unavailable",
                 "scored_players": 0,
                 "fallback_players": 0,
@@ -450,7 +453,14 @@ def team_strengths(
             projected_points = row.get("projected_points")
             if not isinstance(projected_points, int | float) or not math.isfinite(projected_points):
                 continue
-            mean = max(float(projected_points) / max(season_games, 1), 0.0)
+            # ESPN supplies a season total, which already includes missed time.
+            # Convert to a conditional mean before drawing availability; otherwise
+            # the fallback prior discounts that season total a second time.
+            mean = (
+                max(float(projected_points) / (max(season_games, 1) * fallback_availability), 0.0)
+                if fallback_availability > 0
+                else 0.0
+            )
             player = TeamPlayerProjection(
                 player_id=int(espn_id or 0),
                 name=str(row.get("player_display_name") or ""),
@@ -485,28 +495,14 @@ def team_strengths(
         conditional_variance_sum = 0.0
         bench_rescue_sum = 0.0
         complete_count = 0
-        vor_sum = 0.0
-        vor_square_sum = 0.0
+        availability_means = []
         for _ in range(TEAM_SIMULATIONS):
             active = [rng.random() < player.availability for player in players]
             selected, complete = _best_lineup(players, active, requirements)
-            # The same scenario on the VOR scale: best active lineup by ranking value.
-            ranked_active = (
-                [active[players.index(player)] for player in ranked_players]
-                if ranked_players
-                else []
-            )
-            vor_selected, _ = (
-                _best_lineup(ranked_players, ranked_active, requirements)
-                if ranked_players
-                else (set(), False)
-            )
-            scenario_vor = sum(
-                float(ranked_players[index].ranking_value or 0.0) for index in vor_selected
-            )
-            vor_sum += scenario_vor
-            vor_square_sum += scenario_vor**2
+            # VOR already incorporates expected availability. Keep it on the
+            # static power board, never multiply it by another availability draw.
             conditional_mean = sum(players[index].mean for index in selected)
+            availability_means.append(conditional_mean)
             conditional_variance = sum(players[index].volatility ** 2 for index in selected)
             conditional_mean_sum += conditional_mean
             conditional_mean_square_sum += conditional_mean**2
@@ -523,19 +519,12 @@ def team_strengths(
         )
         weekly_variance = conditional_variance_sum / TEAM_SIMULATIONS + availability_variance
         risk = math.sqrt(max(weekly_variance, 0.0))
-        # Risk-adjusted VOR: expected best-active-lineup VOR across availability
-        # scenarios, less 0.674 x its spread (an approximate 25th percentile). It
-        # penalises stars-and-scrubs construction on the same scale as the power rank
-        # without mixing in ordinary week-to-week scoring noise, which every roster has.
-        expected_lineup_vor = vor_sum / TEAM_SIMULATIONS
-        lineup_vor_risk = math.sqrt(
-            max(vor_square_sum / TEAM_SIMULATIONS - expected_lineup_vor**2, 0.0)
-        )
         simulation_results[team_id] = {
             "ranking_total": ranking_total,
-            "expected_lineup_vor": expected_lineup_vor,
-            "lineup_vor_risk": lineup_vor_risk,
-            "risk_adjusted_total": expected_lineup_vor - 0.674 * lineup_vor_risk,
+            "availability_floor_points": statistics.quantiles(
+                availability_means, n=4, method="inclusive"
+            )[0],
+            "availability_spread_points": math.sqrt(availability_variance),
             "expected_weekly_points": expected,
             "weekly_risk": risk,
             "weekly_floor": max(expected - 0.674 * risk, 0.0),
@@ -557,7 +546,7 @@ def team_strengths(
         ),
     )
 
-    result: dict[int, dict[str, int | float | str]] = {}
+    result: dict[int, dict[str, int | float | str | None]] = {}
     for rank, team_id in enumerate(ordered, start=1):
         expected = float(simulation_results[team_id]["expected_weekly_points"])
         ranking_total = float(simulation_results[team_id]["ranking_total"])
@@ -568,12 +557,15 @@ def team_strengths(
             "team_rank": rank,
             "team_score": round(rating, 1),
             "ranking_total": round(ranking_total, 1),
-            "expected_lineup_vor": round(
-                float(simulation_results[team_id]["expected_lineup_vor"]), 1
+            # Deprecated compatibility keys: there is no second VOR risk score.
+            "expected_lineup_vor": None,
+            "lineup_vor_risk": None,
+            "risk_adjusted_total": None,
+            "availability_floor_points": round(
+                float(simulation_results[team_id]["availability_floor_points"]), 1
             ),
-            "lineup_vor_risk": round(float(simulation_results[team_id]["lineup_vor_risk"]), 1),
-            "risk_adjusted_total": round(
-                float(simulation_results[team_id]["risk_adjusted_total"]), 1
+            "availability_spread_points": round(
+                float(simulation_results[team_id]["availability_spread_points"]), 1
             ),
             "ranking_metric": ranking_column,
             "expected_weekly_points": round(expected, 1),

@@ -1,0 +1,9 @@
+{
+  "research_manifest_sha256": "81e5d0d600d364741e391ffe9fc92dc76d9a7e4aff0fb4ff02245cc739f4d8a3",
+  "files": {
+    "research/report_qb_boosting.py": "c8aa98c6c1aae21d675d279cec0b7d5c73ca083f0fa93553eafa73fdac569406",
+    "docs/qb_boosting_capacity_2026-09-24.md": "fc6c2e33b21ce7b3aaf7bfa12daa1a70a0ef258eabea669b2d231899d6541156",
+    "docs/assets/qb_boosting_capacity_2026-09-24.png": "783dc0d2319d43c2520879c5e58955c23aa9e9fca5dc9a34fccf67699ea75424",
+    "docs/assets/qb_boosting_policy_2026-09-24.png": "5434c97031ebd429f58524be1f35b07f020382c76688e9606a155890be000293"
+  }
+}

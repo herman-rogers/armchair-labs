@@ -1,29 +1,38 @@
-"""Read-only HTTP API over the built board.
+"""Verified NextGen analysis and explicitly scoped research archives.
 
-Phase 1 serves what the pipeline has already produced rather than computing on
-request. A board build pulls several seasons of play-by-play; that belongs on a
-schedule, not on an HTTP handler. The API reads `data/outputs/board.json` and reports
-plainly when it is missing, which is the state before the first `patron board` run.
-
-Phase 3 replaces the file with a live store and adds the ESPN-derived endpoints
-(the ranked wire, roster health, the alerts feed).
+Current measurements and forecasts come from the one published data/policy catalog.
+Old boards, model reports and decision experiments require research scope. League
+observations use a separately refreshed snapshot without selecting a legacy model.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
+from patron.api.college_routes import router as college_router
+from patron.api.league_observation_routes import router as league_observation_router
 from patron.api.league_routes import router as league_router
+from patron.api.nextgen_routes import router as nextgen_router
+from patron.api.profile_routes import router as profile_router
+from patron.api.qb_passing_routes import router as qb_passing_router
+from patron.api.ranking_routes import router as ranking_router
+from patron.api.research_routes import router as research_router
 from patron.artifacts import artifact_status, verify_draft
 from patron.config.league import get_league
 from patron.config.settings import get_settings
+from patron.data.releases import current_catalog
+from patron.data.verification import VerificationChanged, verification_batch
 from patron.observability import configure_logging
 
 # Under uvicorn our loggers are otherwise silent, which hides ESPN fetches,
@@ -32,24 +41,155 @@ configure_logging()
 
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app):
+    def warm():
+        from patron.data.serving import generation, validate_sources
+
+        data = get_settings().data_dir
+        if generation(data) is not None:
+            validate_sources(data, "profile-directory")
+
+    try:
+        await run_in_threadpool(warm)
+    except (OSError, ValueError, KeyError, TypeError, HTTPException):
+        logger.exception("Published release unavailable at startup; API will fail closed")
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Patron Saints Analytics Engine",
-    description="League-exact fantasy valuation for Sweaty Plays.",
+    description="Verified player measurements, outcome-specific forecasts and research archives.",
     version="0.1.0",
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.include_router(ranking_router)
+app.include_router(qb_passing_router)
+
+
+@app.middleware("http")
+async def analysis_boundary(request, call_next):
+    """Archived data is never a silent analysis default or fallback."""
+    path = request.url.path
+    if path.startswith("/api/"):
+        try:
+            current_catalog(get_settings().data_dir)
+        except (OSError, ValueError, KeyError, TypeError):
+            return JSONResponse(
+                {"detail": "Current catalog is invalid; archive fallback disabled."},
+                status_code=409,
+            )
+        archive = path.startswith(
+            (
+                "/api/research/",
+                "/api/league",
+                "/api/board",
+                "/api/players",
+                "/api/positions",
+                "/api/metric-report",
+            )
+        )
+        archive = archive and path != "/api/research/data-catalog"
+        research = (
+            request.headers.get("X-Analysis-Scope") == "research"
+            or request.query_params.get("scope") == "research"
+        )
+        if path.startswith("/api/profiles") and not research:
+            from patron.data.nextgen import load_analysis, read_json
+
+            try:
+                root, _ = await run_in_threadpool(load_analysis, get_settings().data_dir)
+                if any(r["status"] == "open" for r in read_json(root / "incidents.json")):
+                    raise ValueError("Profiles require revalidation after an open data incident")
+            except (OSError, ValueError, KeyError, TypeError):
+                return JSONResponse(
+                    {"detail": "Verified analysis is required for player profiles."},
+                    status_code=409,
+                )
+        if archive:
+            if not research:
+                return JSONResponse(
+                    {
+                        "detail": "Archived models/data are excluded from current analysis. "
+                        "Use /api/nextgen, or scope=research to inspect the archive.",
+                        "disposition": "archived_not_for_analysis",
+                    },
+                    status_code=409,
+                )
+            response = await call_next(request)
+            response.headers["X-Analysis-Scope"] = "research"
+            response.headers["X-Artifact-Disposition"] = "archived_not_for_analysis"
+            return response
+        if research:
+            response = await call_next(request)
+            response.headers["X-Analysis-Scope"] = "research"
+            response.headers["X-Artifact-Disposition"] = "research_only"
+            return response
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def pin_data_catalog(request, call_next):
+    """Do not put a new release's response into an old frontend query cache."""
+    requested = request.headers.get("X-Data-Catalog")
+    if requested is None:
+        return await call_next(request)
+
+    def token():
+        catalog = current_catalog(get_settings().data_dir)
+        return f"{catalog['gold']['version']}@{catalog['published_at']}" if catalog else None
+
+    def stale():
+        return JSONResponse(
+            {"detail": "The current data release changed. Refreshing the data catalog."},
+            status_code=409,
+            headers={"X-Data-Catalog-Stale": "true"},
+        )
+
+    try:
+        if token() != requested:
+            return stale()
+        response = await call_next(request)
+        return response if token() == requested else stale()
+    except (OSError, ValueError, KeyError, TypeError):
+        return JSONResponse(
+            {"detail": "The canonical data catalog is unavailable."}, status_code=409
+        )
+
 
 # The React dev server runs on its own origin. Production serves the built frontend
 # as static files from this app, where CORS does not apply.
+@app.middleware("http")
+async def verified_request(request, call_next):
+    try:
+        with verification_batch():
+            return await call_next(request)
+    except VerificationChanged:
+        return JSONResponse(
+            {
+                "detail": "Release dependencies changed during request. Refresh the catalog."
+            },
+            status_code=409,
+        )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 # Live ESPN state. Its own router so the board endpoints below stay independent
 # of anything that can fail because a third-party API is down.
 app.include_router(league_router)
+app.include_router(research_router)
+app.include_router(college_router)
+app.include_router(profile_router)
+app.include_router(nextgen_router)
+app.include_router(league_observation_router)
 
 
 MetricVersion = Literal["v1", "v2", "adaptive"]
@@ -108,10 +248,35 @@ def load_metric_report() -> dict[str, Any]:
 
 
 @app.get("/api/status")
-def status() -> dict[str, Any]:
+def status(scope: str = "analysis") -> dict[str, Any]:
     """Whether a board exists, when it was built, and under what league settings."""
-    paths = {version: board_path(version) for version in METRIC_VERSIONS}
     config = get_league()
+    data = getattr(get_settings(), "data_dir", None)
+    if data and scope != "research":
+        from patron.api.nextgen_routes import release
+        from patron.data.nextgen import read_json
+
+        root, manifest = release()
+        report = read_json(root / "report.json")
+        return {
+            "board_available": False,
+            "built_at": manifest["generated_at"],
+            "player_count": report["players"],
+            "metric_versions": {},
+            "metric_report": {"available": False, "built_at": None},
+            "analysis": {"version": manifest["version"], "default_model": "baseline"},
+            "league": {
+                "name": config.name,
+                "team_count": config.team_count,
+                "board_season": config.board_season,
+                "draft_season": config.draft_season,
+                "seasons": config.seasons,
+                "vor_baseline_rank": config.vor_baseline_rank,
+            },
+            "espn_connected": False,
+            "phase": 1,
+        }
+    paths = {version: board_path(version) for version in METRIC_VERSIONS}
     available = {version: path.exists() for version, path in paths.items()}
     built = any(available.values())
     newest = max(
@@ -119,12 +284,10 @@ def status() -> dict[str, Any]:
         key=lambda path: path.stat().st_mtime,
         default=None,
     )
-    player_count = (
-        len(load_board("v2"))
-        if available["v2"]
-        else (len(load_board("v1")) if available["v1"] else 0)
-    )
-
+    boards = {
+        version: load_board(version) if available[version] else [] for version in METRIC_VERSIONS
+    }
+    player_count = len(boards["v2"] if available["v2"] else boards["v1"])
     report_path = metric_report_path()
     return {
         "board_available": built,
@@ -136,7 +299,19 @@ def status() -> dict[str, Any]:
             version: {
                 "available": available[version],
                 "provenance": artifact_status(paths[version]),
-                "player_count": len(load_board(version)) if available[version] else 0,
+                "player_count": len(boards[version]),
+                "built_at": (
+                    datetime.fromtimestamp(paths[version].stat().st_mtime, tz=UTC).isoformat()
+                    if available[version]
+                    else None
+                ),
+                "forecast_as_of": sorted(
+                    {
+                        str(row["forecast_as_of"])
+                        for row in boards[version]
+                        if row.get("forecast_as_of")
+                    }
+                ),
             }
             for version in METRIC_VERSIONS
         },
