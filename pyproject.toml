@@ -25,6 +25,11 @@ dependencies = [
 [project.scripts]
 patron = "patron.cli:app"
 
+[project.optional-dependencies]
+shared-data = [
+    "google-cloud-storage>=3.0,<4",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",

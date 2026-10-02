@@ -158,3 +158,27 @@ check: lint typecheck test
 # Precompute version-bound API profiles, historical summaries, rankings and comparisons.
 data-serving *ARGS:
     uv run python research/build_read_models.py {{ARGS}}
+
+# Strip embedded Jupyter outputs; marimo source files already contain code only.
+notebooks-clean:
+    uv run python -m patron.data.notebook_clean
+
+# Fail if versionable notebooks contain outputs or session caches.
+notebooks-check:
+    uv run python -m patron.data.notebook_clean --check
+
+# Fetch a pinned shared release and restore its inputs to notebook-compatible paths.
+data-fetch profile="notebooks" *ARGS:
+    uv run --extra shared-data python -m patron.data.shared fetch --profile {{profile}} {{ARGS}}
+
+# Verify the downloaded transport release, without contacting GCS.
+data-cache-verify profile="notebooks":
+    uv run python -m patron.data.shared verify --offline --profile {{profile}}
+
+# Freeze local inputs into a deduplicated snapshot (does not upload or train).
+data-snapshot release:
+    uv run python -m patron.data.shared snapshot --release {{release}} --output data/.shared/staging/{{release}}/manifest.json
+
+# Upload immutable objects first, publish the completion manifest last.
+data-upload release store:
+    uv run --extra shared-data python -m patron.data.shared publish --manifest data/.shared/staging/{{release}}/manifest.json --store {{store}} --reference data/releases/{{release}}.json

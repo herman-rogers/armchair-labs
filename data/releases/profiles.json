@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "notebooks": {
+      "description": "Inputs and saved comparisons for all current future-player marimo notebooks; no training required.",
+      "include": [
+        "data/raw",
+        "data/enriched",
+        "data/gold",
+        "data/static",
+        "data/research/injury_archive_20260925_r1",
+        "data/research/individual_stats_20260923_r4",
+        "data/research/nextgen_qb_variations_20260924_r2",
+        "experiments/future_player_lab/runs/deep_data_001",
+        "experiments/future_player_lab/runs/deep_search_003",
+        "experiments/future_player_lab/runs/deep_capacity_002",
+        "experiments/future_player_lab/runs/deep_report_001",
+        "experiments/future_player_lab/runs/deep_diagnostics_001",
+        "experiments/future_player_lab/runs/raw_distributions_001"
+      ]
+    },
+    "rebuild": {
+      "description": "Notebook inputs plus preserved source collections and the inputs used by data_pipeline build.",
+      "extends": ["notebooks"],
+      "include": [
+        "data/research/historical_backfill_20260923_r2",
+        "data/research/college_source_20260922_r1",
+        "data/cache/historical_evidence",
+        "data/outputs/rookie_watch_2026.json",
+        "data/outputs/rookie_snapshots"
+      ]
+    },
+    "archive": {
+      "description": "Research history, including failed/interrupted experiments as evidence, not approved models. Excludes runtime/session caches.",
+      "extends": ["rebuild"],
+      "include": [
+        "data/research",
+        "data/cache/nflverse",
+        "data/catalog_history",
+        "data/current.json",
+        "experiments/future_player_lab/runs",
+        "experiments/player_signals_lab/runs",
+        "experiments/representation_lab/runs"
+      ]
+    }
+  }
+}

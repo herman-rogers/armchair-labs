@@ -56,3 +56,7 @@ web/dist/
 
 # persisted browser profile from `patron auth login` — holds a live ESPN session
 data/.browser-profile/
+
+# Shared data staging, download readiness markers, and optional repository-local cache
+/data/.shared/
+/.armchair-cache/
