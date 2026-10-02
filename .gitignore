@@ -35,7 +35,9 @@ data/raw/
 data/enriched/
 data/gold/
 data/serving/
+data/weekly/
 data/current.json
+data/source_catalog.json
 data/catalog_history/
 data/research/
 # generated backfill; retain its reference manifest and collection code in Git

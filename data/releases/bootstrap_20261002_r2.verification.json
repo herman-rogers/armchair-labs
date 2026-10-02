@@ -1,0 +1,56 @@
+{
+  "release": "bootstrap_20261002_r2",
+  "manifest_sha256": "2af31d3d6ce886970095c444e79d6fc18247013b749239233703b8eb7982ef62",
+  "verified_at": "2026-10-02T21:05:16.584212+00:00",
+  "store": "gs://armchair-labs-data/armchair-labs",
+  "profile": "archive",
+  "independent_cache": true,
+  "all_files_sha256_verified": 81859,
+  "inventory": {
+    "archive": {
+      "files": 81859,
+      "unique_objects": 42975,
+      "logical_bytes": 13826449129,
+      "unique_bytes": 5164491056
+    },
+    "notebooks": {
+      "files": 30732,
+      "unique_objects": 30084,
+      "logical_bytes": 3188771280,
+      "unique_bytes": 2736797818
+    },
+    "rebuild": {
+      "files": 44141,
+      "unique_objects": 35268,
+      "logical_bytes": 4353713213,
+      "unique_bytes": 3068403139
+    }
+  },
+  "notebook_readers": {
+    "auxiliary_sources_verified": {},
+    "network": "disabled",
+    "training": "not run",
+    "gold_tables": 25,
+    "rb_examples": 5038,
+    "rb_matrix_shape": [
+      5038,
+      2929
+    ],
+    "weekly_target_rows": 423704,
+    "reviewed_absence_events": 107,
+    "injury_rows": 92985,
+    "schedule_rows": 7548,
+    "preseason_rows": 18235,
+    "saved_comparison_rows": {
+      "persistence": 2955,
+      "auto_lgb_all": 2955,
+      "new:top_3": 1571
+    },
+    "original_model_examples": 2279,
+    "original_model_inputs": 67,
+    "raw_assets": 4222,
+    "saved_distribution_rows": 49139,
+    "prepared_input_hashes_verified": 14
+  },
+  "models_trained": false
+}

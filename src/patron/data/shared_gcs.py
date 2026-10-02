@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import threading
-from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
 import google.auth
 import google.auth.credentials
 import google_crc32c
-from google.api_core.exceptions import NotFound, PreconditionFailed
+from google.api_core.exceptions import NotFound
 from google.auth.exceptions import DefaultCredentialsError, RefreshError
 from google.cloud import storage
 
@@ -75,6 +75,7 @@ class GCSStore:
             credentials, project = GcloudCredentials(), None
         self.credentials, self.project = credentials, project
         self.local = threading.local()
+        self.uploads = threading.BoundedSemaphore(4)
 
     def bucket(self):
         # One HTTP session/client per worker; credentials coordinate refreshes.
@@ -94,16 +95,38 @@ class GCSStore:
         try:
             blob.reload()
         except NotFound:
-            blob.metadata = {"sha256": spec["sha256"]}
-            # Another publisher may create the same content-addressed object.
-            with suppress(PreconditionFailed):
-                blob.upload_from_filename(
-                    str(source),
-                    if_generation_match=0,
-                    checksum="crc32c",
-                    timeout=180,
+            # Invoke gcloud in bounded parallel workers; retain per-object SHA
+            # metadata. gcloud no-clobber sets the atomic generation-zero precondition.
+            env = {
+                **os.environ,
+                "CLOUDSDK_STORAGE_PROCESS_COUNT": "1",
+                "CLOUDSDK_STORAGE_THREAD_COUNT": "4",
+                "CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED": "False",
+            }
+            with self.uploads:
+                result = subprocess.run(
+                    [
+                        "gcloud",
+                        "storage",
+                        "cp",
+                        str(source),
+                        f"gs://{self.bucket_name}/{self.name(key)}",
+                        "--no-clobber",
+                        f"--custom-metadata=sha256={spec['sha256']}",
+                        "--quiet",
+                    ],
+                    env=env,
+                    capture_output=True,
+                    text=True,
                 )
-            blob.reload()
+            try:
+                blob.reload()
+            except NotFound:
+                raise RuntimeError(
+                    f"gcloud upload failed for {key}: {result.stderr[-2000:]}"
+                ) from None
+            # A competing create may return a nonzero exit code. Only a matching
+            # remote object is accepted, regardless of gcloud's skip/exit status.
         if (
             blob.size != spec["size"]
             or blob.crc32c != checksum

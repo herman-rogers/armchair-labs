@@ -1,0 +1,7 @@
+{
+  "manifest_generation": "1790976969807762",
+  "manifest_key": "releases/bootstrap_20261002_r4/manifest.json",
+  "manifest_sha256": "57d97bb2493d3ab00ad14ebb6a055e869e28a3135ef63b40fd7b100e28ee2b47",
+  "release": "bootstrap_20261002_r4",
+  "store": "gs://armchair-labs-data/armchair-labs"
+}

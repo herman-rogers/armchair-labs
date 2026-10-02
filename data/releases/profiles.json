@@ -16,12 +16,15 @@
         "experiments/future_player_lab/runs/deep_capacity_002",
         "experiments/future_player_lab/runs/deep_report_001",
         "experiments/future_player_lab/runs/deep_diagnostics_001",
-        "experiments/future_player_lab/runs/raw_distributions_001"
+        "experiments/future_player_lab/runs/raw_distributions_001",
+        "data/source_catalog.json"
       ]
     },
     "rebuild": {
       "description": "Notebook inputs plus preserved source collections and the inputs used by data_pipeline build.",
-      "extends": ["notebooks"],
+      "extends": [
+        "notebooks"
+      ],
       "include": [
         "data/research/historical_backfill_20260923_r2",
         "data/research/college_source_20260922_r1",
@@ -32,7 +35,9 @@
     },
     "archive": {
       "description": "Research history, including failed/interrupted experiments as evidence, not approved models. Excludes runtime/session caches.",
-      "extends": ["rebuild"],
+      "extends": [
+        "rebuild"
+      ],
       "include": [
         "data/research",
         "data/cache/nflverse",

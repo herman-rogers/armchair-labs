@@ -257,3 +257,40 @@ def test_sealed_bytecode_and_lockfiles_survive_cleanup(release, tmp_path):
     assert str(fresh.relative_to(root)) in manifest["excluded_files"]
     assert "data/research/sealed/uv.lock" in manifest["files"]
     shared.validate_manifest(manifest)
+
+
+def test_source_catalog_binds_full_dependency_chain(release, tmp_path):
+    root, cache, _ = release
+    source = {"id": "tracking_example"}
+    raw_file = root / "data/raw/objects/example"
+    raw_file.parent.mkdir(parents=True)
+    raw_file.write_bytes(b"provider observation")
+    ref = None
+    for layer, directory in [("raw", "snapshots"), ("enriched", "releases"), ("gold", "releases")]:
+        folder = root / "data" / layer / directory / "source_v1"
+        folder.mkdir(parents=True)
+        document = {"layer": layer, "status": "accepted", "source": source}
+        if layer == "raw":
+            document["files"] = {"raw/objects/example": shared.sha256(raw_file)}
+        else:
+            document["input"] = ref
+            (folder / "table.parquet").write_bytes(b"normalized observation")
+            document["files"] = {"table.parquet": shared.sha256(folder / "table.parquet")}
+        path = folder / "manifest.json"
+        path.write_text(json.dumps(document))
+        ref = {"version": "source_v1", "manifest_sha256": shared.sha256(path)}
+    catalog = {"sources": {"tracking_example": ref}}
+    (root / "data/source_catalog.json").write_text(json.dumps(catalog))
+    config = {"profiles": {"notebooks": {"include": ["data"]}}}
+    manifest = shared.snapshot(root, config, "sources", cache, tmp_path / "sources.json")
+    assert shared.verify_source_catalog_snapshot(manifest, cache) == catalog["sources"]
+    name = "data/raw/objects/example"
+    spec = manifest["files"].pop(name)
+    with pytest.raises(ValueError, match="dependency missing or changed"):
+        shared.verify_source_catalog_snapshot(manifest, cache)
+    manifest["files"][name] = {**spec, "sha256": "0" * 64}
+    with pytest.raises(ValueError, match="dependency missing or changed"):
+        shared.verify_source_catalog_snapshot(manifest, cache)
+    manifest["files"][name] = {**spec, "profiles": []}
+    with pytest.raises(ValueError, match="missing from a download profile"):
+        shared.verify_source_catalog_snapshot(manifest, cache)

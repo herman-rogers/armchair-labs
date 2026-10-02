@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -214,6 +214,49 @@ def progress(label: str, done: int, total: int):
         print(f"{label}: {done:,}/{total:,}", flush=True)
 
 
+def verify_source_catalog_snapshot(manifest: dict, cache: Path) -> dict:
+    """Bind auxiliary source selections to their entire sealed dependency chains."""
+    files = manifest["files"]
+    catalog_path = "data/source_catalog.json"
+    if catalog_path not in files:
+        return {}
+    profiles = set(files[catalog_path]["profiles"])
+
+    def bound(name, expected=None):
+        spec = files.get(name)
+        if spec is None or (expected is not None and spec["sha256"] != expected):
+            raise ValueError(f"Source catalog dependency missing or changed: {name}")
+        if not profiles <= set(spec["profiles"]):
+            raise ValueError(f"Source dependency missing from a download profile: {name}")
+        return spec
+
+    def read(name, expected=None):
+        spec = bound(name, expected)
+        return json.loads(inside(cache, object_key(spec["sha256"])).read_text())
+
+    sources = read(catalog_path)["sources"]
+    for source_id, original_ref in sources.items():
+        ref = original_ref
+        for layer, directory in [
+            ("gold", "releases"),
+            ("enriched", "releases"),
+            ("raw", "snapshots"),
+        ]:
+            root = f"data/{layer}/{directory}/{identifier(ref['version'])}"
+            document = read(f"{root}/manifest.json", ref["manifest_sha256"])
+            if document.get("source", {}).get("id") != source_id:
+                raise ValueError(f"Source identity mismatch: {source_id}/{layer}")
+            if document.get("status") != "accepted" or document.get("layer") != layer:
+                raise ValueError(f"Unaccepted source dependency: {source_id}/{layer}")
+            for relative_path, digest in document["files"].items():
+                relative(relative_path)
+                prefix = "data" if layer == "raw" else root
+                bound(f"{prefix}/{relative_path}", digest)
+            if layer != "raw":
+                ref = document["input"]
+    return sources
+
+
 def snapshot(root: Path, config: dict, release: str, cache: Path, output: Path) -> dict:
     """Freeze selected bytes; no writes to source inputs or existing sealed manifests."""
     identifier(release)
@@ -296,6 +339,7 @@ def snapshot(root: Path, config: dict, release: str, cache: Path, output: Path) 
             ],
         }
         validate_manifest(manifest)
+        verify_source_catalog_snapshot(manifest, cache)
         write_new(output, json_bytes(manifest))
     return manifest
 
@@ -377,9 +421,18 @@ def publish(manifest: dict, store: Store, cache: Path, output: Path, workers=16)
 
         generations = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for i, (digest, generation) in enumerate(pool.map(upload, unique.items()), 1):
-                generations[digest] = generation
-                progress("Publish objects", i, len(unique))
+            futures = [pool.submit(upload, item) for item in unique.items()]
+            try:
+                for i, future in enumerate(as_completed(futures), 1):
+                    digest, generation = future.result()
+                    generations[digest] = generation
+                    progress("Publish objects", i, len(unique))
+            except BaseException:
+                # Leave completed immutable objects available for retry, but do not
+                # start thousands of queued uploads after one object has failed.
+                for future in futures:
+                    future.cancel()
+                raise
         final = {**manifest, "object_generations": generations}
         payload = json_bytes(final)
         # The completion manifest is written only after every object was verified/uploaded.

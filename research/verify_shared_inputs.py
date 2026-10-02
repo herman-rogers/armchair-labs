@@ -49,7 +49,22 @@ def verify(root: Path) -> dict:
         for name, expected in prepared["inputs"].items():
             if work.digest(root / name) != expected:
                 raise ValueError(f"Prepared input differs: {name}")
+        auxiliary = {}
+        source_catalog = root / "data/source_catalog.json"
+        if source_catalog.exists():
+            import pyarrow.parquet as pq
+
+            for source_id, ref in json.loads(source_catalog.read_text())["sources"].items():
+                release = load_gold(root / "data", ref["version"])
+                if release.ref != ref or release.manifest["source"]["id"] != source_id:
+                    raise ValueError(f"Source catalog mismatch: {source_id}")
+                tables = release.manifest["tables"]
+                for name, spec in tables.items():
+                    if pq.ParquetFile(release.path(name)).metadata.num_rows != spec["rows"]:
+                        raise ValueError(f"Source row count mismatch: {source_id}/{name}")
+                auxiliary[source_id] = {"version": ref["version"], "tables": len(tables)}
         return {
+            "auxiliary_sources_verified": auxiliary,
             "network": "disabled",
             "training": "not run",
             "gold_tables": len(gold.manifest["tables"]),

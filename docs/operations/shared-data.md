@@ -5,10 +5,14 @@ release manifests, and a verified local SSD cache. Git stores source, cleaned
 notebooks, profile definitions, and small release references. It does not store
 research tables, saved model binaries, cached sessions, or generated notebook exports.
 
-The transport is implemented in `patron.data.shared`. Bucket creation/publication
-requires a working Google Cloud login and a chosen project. A release is available
-only after its reference has been published to `data/releases/`; the presence of
-local staging files does not mean an upload completed.
+The transport is implemented in `patron.data.shared`. The Google Cloud project is
+`armchair-labs` (project number `1062502564356`), and its private Standard-storage
+bucket is `gs://armchair-labs-data` in `us-east1`. Shared objects use the
+`armchair-labs/` prefix. Uniform bucket-level access and public access prevention
+are enabled. Billing is linked to the existing open Definetti account.
+
+A release is available only after its reference has been published to
+`data/releases/`; the presence of local staging files does not mean an upload completed.
 
 ## Another machine: download once
 
@@ -23,8 +27,8 @@ bash experiments/future_player_lab/notebooks/launch.sh
 ```
 
 The commands use `data/releases/current.json`, a small Git-versioned reference to
-one immutable remote manifest with its SHA-256 and GCS generation. Until that file
-exists, the initial cloud publication is still pending. To use a particular release:
+one immutable remote manifest with its SHA-256 and GCS generation. To use a
+particular release:
 
 ```sh
 just data-fetch notebooks --reference data/releases/RELEASE.json
@@ -34,7 +38,7 @@ Available download profiles (each larger profile includes the previous one):
 
 | Profile | Contents |
 |---|---|
-| `notebooks` | Preserved raw objects, gold/enriched releases, prepared feature matrices, injury archive, original benchmark inputs, saved tree/ensemble comparisons and distribution results |
+| `notebooks` | Preserved raw objects, gold/enriched releases, auxiliary source catalog and its selected datasets, prepared feature matrices, injury archive, original benchmark inputs, saved tree/ensemble comparisons and distribution results |
 | `rebuild` | Notebook inputs plus accepted historical source collections, captured college sources, source evidence, and captured current-season reports/snapshots |
 | `archive` | Rebuild inputs plus the broader research and experiment history, provider cache and saved catalog references |
 
@@ -42,7 +46,9 @@ Available download profiles (each larger profile includes the previous one):
 or uploading one does not certify it as a valid model. The profiles are defined in
 [`data/releases/profiles.json`](../../data/releases/profiles.json). They describe
 inputs captured at snapshot time; refresh the profile/release when notebooks gain
-new dependencies.
+new dependencies. The auxiliary source catalog is checked against the complete
+gold → enriched → raw manifest chain before a snapshot can be published. Every
+profile containing that catalog must include its declared dependencies.
 
 The cache defaults to `~/.cache/armchair-labs`. Set `ARMCHAIR_DATA_CACHE` to another
 SSD directory if desired. Objects are SHA-256 addressed and stored once per cache;
@@ -81,7 +87,8 @@ just notebooks-clean
 just notebooks-check
 ```
 
-Create a dedicated bucket in the selected project (one-time operation):
+The initial bucket is already provisioned. To provision a separate environment
+later, create a dedicated bucket in its project (one-time operation):
 
 ```sh
 gcloud storage buckets create gs://BUCKET \
@@ -100,7 +107,7 @@ Stop writers to the selected inputs before freezing a release:
 just data-snapshot RELEASE
 uv run python -m patron.data.shared inventory \
   --manifest data/.shared/staging/RELEASE/manifest.json
-just data-upload RELEASE gs://BUCKET/armchair-labs
+just data-upload RELEASE gs://armchair-labs-data/armchair-labs
 ```
 
 Snapshot copies selected bytes into the content-addressed cache, detects files
@@ -111,12 +118,18 @@ retained to preserve old manifest verification. Existing sealed Parquet, CSV, JS
 NumPy, source captures and source/environment snapshots keep their original bytes.
 New tables should use Parquet; no legacy conversion is performed during transport.
 
-Upload uses create-only writes and checks remote size, CRC32C and SHA-256 metadata.
-It reuses matching existing objects and rejects collisions. All data objects are
+Uploads invoke `gcloud storage cp --no-clobber` in up to four parallel workers.
+The CLI applies a generation-zero precondition for no-clobber; an additional
+`--if-generation-match` flag must not be combined with it. Each upload retains
+SHA-256 metadata, then the adapter checks remote size, CRC32C, SHA-256 metadata,
+and generation. Matching existing objects are reused; collisions are rejected.
+Composite uploads are disabled to avoid temporary cloud components; ordinary
+resumable uploads retain retry support. The SDK handles metadata checks and
+generation-pinned downloads. All data objects are
 uploaded before the completed remote manifest; an interrupted upload has no new
 published release. Retry the same command to resume. GCS generations and the final
 manifest hash are recorded in `data/releases/RELEASE.json`.
-[Google upload/precondition documentation](https://docs.cloud.google.com/storage/docs/samples/storage-upload-file).
+[Google CLI copy documentation](https://docs.cloud.google.com/sdk/gcloud/reference/storage/cp).
 
 After verifying a cloud download in a clean destination, select the default release:
 
@@ -194,34 +207,42 @@ then use the normal upload command. Include required data/preprocessing paths in
 the profile if they are not already independently pinned and available. Keep
 unfinished runs local unless explicitly archiving them as failed/interrupted evidence.
 
-## Initial bootstrap verification (October 2, 2026)
+## Bootstrap release (October 2, 2026)
 
-Prepared local snapshot: `bootstrap_20261002_r2`. Its staging manifest and verification
-report are under `data/.shared/staging/bootstrap_20261002_r2/` (ignored by Git).
-Cloud publication is pending a refreshed Google Cloud login and project selection.
-No remote release or default `current.json` has been claimed or created.
+Published default: `bootstrap_20261002_r4`, selected by
+[`data/releases/current.json`](../../data/releases/current.json). The full archive
+was independently restored from GCS and verified on October 2, 2026; see the
+[verification receipt](../../data/releases/bootstrap_20261002_r4.verification.json).
 
 | Profile | Logical files | Unique objects | Unique bytes |
 |---|---:|---:|---:|
-| notebooks | 30,732 | 30,084 | 2,736,797,818 |
-| rebuild | 44,141 | 35,268 | 3,068,403,139 |
-| archive | 81,859 | 42,975 | 5,164,491,056 |
+| notebooks | 31,369 | 30,400 | 6,365,523,549 |
+| rebuild | 44,778 | 35,584 | 6,697,128,870 |
+| archive | 82,496 | 43,290 | 8,791,064,040 |
 
-The complete archive represents 13,826,449,129 logical bytes before content
-deduplication. The initial snapshot contains no recognized fitted-model binaries.
+The full archive represents 17,851,769,437 logical bytes, stored as approximately
+8.19 GiB of distinct objects. A fresh archive restore needs approximately 25 GiB
+for both its cache and working copies (about 13 GiB for the notebooks profile).
+It includes ten auxiliary source packages: NFLverse
+players, rosters, NGS, participation and FTN; Big Data Bowl 2019 sample, 2020,
+2026 prediction, 2026 analytics, and the 2024 SumerSports mirror. Their raw captures,
+normalized Parquet tables, quality reports and manifest dependencies are preserved.
+Uploading these observations does not automatically add features to the RB model.
 
-Verified locally:
+The earlier `bootstrap_20261002_r2` release was independently restored from GCS:
+all 81,859 archive files passed SHA-256 checks, and the notebook readers passed
+with networking disabled. Local rebuild verification also registered 4,222 source
+assets and rebuilt 25 gold tables. No models were trained during these checks.
 
-- Restored and hash-checked all 44,141 rebuild-profile files in a separate directory.
-- Disabled networking and loaded 5,038 RB examples with 2,929 features, 423,704
-  weekly target rows, 107 reviewed absence events, and 92,985 injury rows.
-- Loaded saved tree/ensemble comparisons, original-model inputs, all 4,222 raw
-  asset descriptors, and 49,139 saved distribution result rows.
-- Checked all 14 hashes in the prepared dataset's direct input inventory.
-- Registered 4,222 source assets and rebuilt 25 gold tables from restored inputs.
-- Ran transport tests for corruption, interrupted uploads, retry, concurrent fetch,
-  offline recovery, local-file conflicts, path traversal, model-file round trips,
-  notebook output cleaning, legacy seal preservation, and GCS preconditions.
+The latest release passed these checks using an independent cache populated from GCS:
 
-These checks did not train models. Local transport and GCS adapter tests do not
-substitute for a real GCS upload/download verification, which remains outstanding.
+- All 82,496 files passed size and SHA-256 verification after restoration.
+- All ten auxiliary sources passed manifest identity checks and Parquet row-count checks.
+- With networking disabled, the readers loaded 5,038 RB examples with 2,929 features,
+  423,704 weekly target rows, 92,985 injury rows and 49,139 saved distribution rows.
+- Saved tree/ensemble comparisons and all 14 prepared-input hashes verified.
+- The local notebooks profile also passed against the published manifest.
+- All 24 transport tests passed, including parallel gcloud no-clobber uploads,
+  interrupted transfers, corruption, concurrent creation and offline recovery.
+
+Notebook output checks, lint and type checks passed. No model training was run.

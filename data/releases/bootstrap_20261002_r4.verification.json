@@ -1,0 +1,97 @@
+{
+  "release": "bootstrap_20261002_r4",
+  "manifest_sha256": "57d97bb2493d3ab00ad14ebb6a055e869e28a3135ef63b40fd7b100e28ee2b47",
+  "verified_at": "2026-10-02T21:38:58.130496+00:00",
+  "store": "gs://armchair-labs-data/armchair-labs",
+  "profile": "archive",
+  "independent_cache": true,
+  "all_files_sha256_verified": 82496,
+  "inventory": {
+    "archive": {
+      "files": 82496,
+      "unique_objects": 43290,
+      "logical_bytes": 17851769437,
+      "unique_bytes": 8791064040
+    },
+    "notebooks": {
+      "files": 31369,
+      "unique_objects": 30400,
+      "logical_bytes": 7214091588,
+      "unique_bytes": 6365523549
+    },
+    "rebuild": {
+      "files": 44778,
+      "unique_objects": 35584,
+      "logical_bytes": 8379033521,
+      "unique_bytes": 6697128870
+    }
+  },
+  "notebook_readers": {
+    "auxiliary_sources_verified": {
+      "nflverse_players": {
+        "version": "tracking_nflverse_players_20261002_r2",
+        "tables": 1
+      },
+      "nflverse_ngs": {
+        "version": "tracking_nflverse_ngs_20261002_r2",
+        "tables": 6
+      },
+      "nflverse_participation": {
+        "version": "tracking_nflverse_participation_20261002_r2",
+        "tables": 10
+      },
+      "nflverse_ftn": {
+        "version": "tracking_nflverse_ftn_20261002_r2",
+        "tables": 5
+      },
+      "bdb_2019_sample": {
+        "version": "tracking_bdb_2019_sample_20261002_r4",
+        "tables": 4
+      },
+      "nflverse_rosters": {
+        "version": "tracking_nflverse_rosters_20261002_r2",
+        "tables": 12
+      },
+      "bdb_2026_prediction": {
+        "version": "tracking_bdb2026_prediction_20261002_r2",
+        "tables": 38
+      },
+      "bdb_2020": {
+        "version": "tracking_bdb2020_20261002_r4",
+        "tables": 1
+      },
+      "bdb_2026_analytics": {
+        "version": "tracking_bdb2026_analytics_20261002_r1",
+        "tables": 37
+      },
+      "bdb_2024_sumersports": {
+        "version": "tracking_bdb2024_sumersports_20261002_r1",
+        "tables": 13
+      }
+    },
+    "network": "disabled",
+    "training": "not run",
+    "gold_tables": 25,
+    "rb_examples": 5038,
+    "rb_matrix_shape": [
+      5038,
+      2929
+    ],
+    "weekly_target_rows": 423704,
+    "reviewed_absence_events": 107,
+    "injury_rows": 92985,
+    "schedule_rows": 7548,
+    "preseason_rows": 18235,
+    "saved_comparison_rows": {
+      "persistence": 2955,
+      "auto_lgb_all": 2955,
+      "new:top_3": 1571
+    },
+    "original_model_examples": 2279,
+    "original_model_inputs": 67,
+    "raw_assets": 4222,
+    "saved_distribution_rows": 49139,
+    "prepared_input_hashes_verified": 14
+  },
+  "models_trained": false
+}
