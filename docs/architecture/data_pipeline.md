@@ -248,9 +248,10 @@ selection, catalog refresh, stale-token rejection, and mobile layout. See
 
 ## Application serving products
 
-After publishing a data/analysis catalog, run `just data-serving` (or
+After publishing a data/analysis catalog and running `just tables refresh`, run `just data-serving` (or
 `.venv/bin/python research/build_read_models.py`) to build disposable, page-ready
-JSON responses. This does not refit models or modify gold/research artifacts.
+JSON responses from the same DuckDB query scope used by application requests.
+This does not refit models or modify preserved research artifacts.
 The default build includes the complete profile directory, rankings for both
 horizons, measurements for all four periods, latest profiles and career comparisons
 for current candidates, and their observed completed-season profiles. Other
@@ -259,7 +260,7 @@ response cache. `--no-history` builds a smaller bundle without historical profil
 
 Serving bundles live in `data/serving/releases/<manifest-sha256>/`. An atomic
 `data/serving/current.json` pointer pins the bundle. Each response has a content
-hash; the generation binds the complete analytical catalog, serving schema, and
+hash; the generation binds the complete application and query catalogs, serving schema, and
 Python implementation. Builds verify dependencies before committing and share the
 catalog-publication lock. A different catalog or implementation makes an older
 bundle ineligible; the API computes against the verified current sources until a
@@ -274,11 +275,12 @@ that permits a changed artifact to remain valid. Hash memoization still verifies
 changed bytes. Failed checks are not cached, and request/publication races return
 409. API startup warms the current release's verification state.
 
-Decoded Parquet data is bounded to 128 MiB per process, with optional column and
-player projection. Serialized response caching is bounded to 64 MiB per process.
+Research/build readers retain a decoded Parquet cache bounded to 128 MiB per process.
+Application data readers use native DuckDB tables, with projection and player-ID
+filtering available in SQL. Serialized response caching is bounded to 64 MiB per process.
 These caches are optimizations, not alternate authorities: source verification and
 HTTP analysis/incident/catalog boundaries still apply on cache hits. Responses are
-compressed in transit. No database, Redis service, or browser Parquet engine is
+compressed in transit. No database server, Redis service, or browser Parquet engine is
 required. Run `just data-serving` again after changing backend code or publishing a
 new analytical catalog; existing data remains available through verified lazy reads.
 

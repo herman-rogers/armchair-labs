@@ -1,4 +1,4 @@
-"""Shared frame reader: application SQL or a bounded research/build Parquet cache."""
+"""Bounded decoded Parquet cache, invalidated by file replacement or edit."""
 
 from collections import OrderedDict
 from pathlib import Path
