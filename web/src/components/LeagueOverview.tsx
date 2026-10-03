@@ -1,53 +1,72 @@
-import type { LeagueObservations, RankingsResponse } from '../api/nextgen'
-import { leagueSummary, recentTransactions } from '../leagueSummary'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import { DataTable } from './DataTable'
+import type { LeagueObservations, RankingsResponse } from '../api/nextgen'
+import { weeklyForecastsQuery, rankingHistoryQuery } from '../api/queries'
+import { useDataRelease } from '../dataRelease'
+import { leagueOutlook } from '../leagueOutlook'
+import { currentWeeklyForecasts, weeklyForecastLabel } from '../weeklyForecasts'
 import { leaguePath, to } from '../navigation'
+import { fixed, rank } from '../format'
+import { DataTable } from './DataTable'
+import { RankMovement } from './RankMovement'
+import { QueryError } from './Controls'
+import { WeeklyForecastReview } from './WeeklyForecastReview'
+import { LeagueMatchupWeek } from './LeagueMatchupWeek'
 
-const n = (v: number | null | undefined) => v == null ? '—' : v.toFixed(1)
 const rosterLink = (teamId: number) => to(leaguePath('rosters'), { team: teamId })
+function PointsChange({ value, label }: { value: number | null; label: string }) {
+  if (value == null) return <small className="faint">No prior week</small>
+  const rounded = Math.round(value * 10) / 10
+  return <small className={rounded > 0 ? 'rank-up' : rounded < 0 ? 'rank-down' : 'faint'} aria-label={`${label}: ${rounded > 0 ? '+' : ''}${fixed(rounded)}`}>
+    {rounded > 0 ? '+' : ''}{fixed(rounded)} vs last week
+  </small>
+}
 
 export function LeagueOverview({data, rankings}: { data: LeagueObservations; rankings?: RankingsResponse }) {
-  const teams = leagueSummary(data, rankings)
+  const { token } = useDataRelease()
+  const history = useQuery(rankingHistoryQuery('rest_of_season', token))
+  const matchups = useQuery(weeklyForecastsQuery(token))
+  const forecasts = currentWeeklyForecasts(data, matchups.data)
+  const { teams, prior_week, completed_weeks } = leagueOutlook(data, rankings, history.data, forecasts)
   const mine = teams.find(t => t.is_mine)
-  const transactions = recentTransactions(data)
-  return <section aria-label="League overview">
-    <div className="league-update-cards">
-      <section><span className="eyebrow">Your team</span><h3>{mine?.team_name ?? 'Team not identified'}</h3><p>{mine ? `${mine.wins} wins · ${mine.losses} losses` : 'Choose a roster below'}</p><p>{mine?.last_result}</p></section>
-      <section><span className="eyebrow">NextGen roster forecast</span><h3>{mine?.nextgen_team_rank == null ? 'Incomplete / unavailable' : `#${mine.nextgen_team_rank} of ${teams.filter(t=>t.nextgen_team_rank != null).length} covered teams`}</h3><p>{n(mine?.forecast_points)} remaining points across QB/RB/WR/TE</p><p>{mine?.forecast_count ?? 0}/{mine?.skill_count ?? 0} skill players covered · includes bench</p></section>
-      <section><span className="eyebrow">Around the league</span><h3>{teams.reduce((sum,t)=>sum+t.urgent,0)} urgent player flags</h3><p>{teams.reduce((sum,t)=>sum+t.alerts,0)} rostered players need review</p><p>{transactions.length} captured transactions · Your FAAB: {mine?.faab_remaining ?? 'Unknown'}</p></section>
+  const myGame = mine?.game
+  const margin = myGame?.margin
+  const favoriteText = myGame ? myGame.favorite ? `${myGame.favorite.team_name} by ${Math.abs(margin ?? 0) < .1 ? '<0.1' : fixed(Math.abs(margin ?? 0))}` : margin === 0 ? 'Even projection' : 'Projection unavailable' : 'Projection unavailable'
+  return <section className="league-outlook" aria-label="League overview">
+    <div className="league-update-cards outlook-kpis">
+      <section><span className="eyebrow">Your roster forecast rank</span><h3>{rank(mine?.nextgen_team_rank)} <RankMovement current={mine?.nextgen_team_rank} previous={mine?.previous_forecast_rank} /></h3><p>{mine?.team_name ?? 'Team not identified'} · {mine?.record ?? '—'}</p><p>{prior_week != null ? `Forecasts through W${prior_week} → W${rankings?.report.through_week}` : 'Weekly rank comparison unavailable'}</p></section>
+      <section><span className="eyebrow">Your Week {data.week} matchup</span><h3>{fixed(mine?.weekly_projection)} <span className="faint">vs</span> {fixed(mine?.opponent?.model_projection)}</h3><p>Projected winner: {favoriteText}</p><p>{weeklyForecastLabel(forecasts)} · Current starters</p></section>
+      <section><span className="eyebrow">Your projected season pace</span><h3>{fixed(mine?.season_pace)} <span className="faint">pts</span></h3><PointsChange value={mine?.season_pace_change ?? null} label="Season pace change" /><p>{fixed(mine?.ppg)} points/week · {data.regular_season_weeks}-week regular season</p></section>
     </div>
-    <h3>Standings & roster forecasts</h3>
-    <p className="legend">NextGen team rank orders the sum of current roster players’ remaining-season forecasts, including bench and reserve. It is not a win forecast or an optimized starting lineup; larger rosters can have larger totals. K/DST are not modeled. Incomplete rosters receive no team rank.</p>
-    <p className="legend">NextGen average rank is the average overall rank of ranked players on each roster, including bench and reserve. Lower is better; unranked players, kickers and defenses are excluded.</p>
+
+    <QueryError query={matchups} label="NextGen weekly forecasts unavailable" />
+    <LeagueMatchupWeek data={data} forecasts={forecasts} />
+
+    <section className="outlook-standings" aria-label="Current league outlook">
+    <div className="outlook-section-head"><div><h3>League outlook</h3><p>Current Patron ranks · Scoring through Week {completed_weeks} · Changes vs previous week</p></div></div>
+    <QueryError query={history} label="Previous forecast ranks unavailable">. Current ranks and matchup projections remain available.</QueryError>
     <DataTable rows={teams} columns={[
-      {key:'team_name',label:'Team',title:'Open this team’s current roster and individual forecasts.',align:'left', render:r=><Link className="player-profile-link" to={rosterLink(r.team_id)}>{r.team_name}{r.is_mine ? ' · You' : ''}</Link>},
-      {key:'wins',label:'Wins',title:'Recorded wins; sorting is not an official playoff tiebreaker.'},
-      {key:'losses',label:'Losses',title:'Recorded losses.'},
-      {key:'points_for',label:'Points for',title:'Sum of captured completed schedule results; excludes the current partial week.',render:r=>n(r.points_for)},
-      {key:'points_against',label:'Points against',title:'Opponent scores for those completed games. Unknown if an opposing result is missing.',render:r=>n(r.points_against)},
-      {key:'results_captured',label:'Results captured',title:'Completed schedule scores included in points for/against.'},
-      {key:'nextgen_team_rank',label:'NextGen · team',title:'Rank by full remaining-season skill-roster total among completely covered teams; ties share rank.',initial:'asc',render:r=>r.nextgen_team_rank == null ? '—' : `#${r.nextgen_team_rank}`},
-      {key:'average_overall_rank',label:'NextGen · average rank',title:'Sum of rostered players’ published overall ranks divided by the number of ranked players, including bench and reserve. Lower is better; unranked players are excluded.',initial:'asc',render:r=><span title={`${r.ranked_count} of ${r.skill_count} skill players ranked`}>{n(r.average_overall_rank)}</span>},
-      {key:'forecast_points',label:'Remaining points',title:'Sum of published remaining-season forecasts for every rostered skill player, including reserve.',render:r=>n(r.forecast_points)},
-      {key:'forecast_count',label:'Coverage',title:'Covered QB/RB/WR/TE players / captured QB/RB/WR/TE players.',render:r=>`${r.forecast_count}/${r.skill_count}`},
-      {key:'urgent',label:'Urgent flags',title:'Rostered players with a captured urgent alert; review the roster.'},
-      {key:'faab_remaining',label:'FAAB',title:'Captured remaining acquisition budget.'},
-    ]} defaultSort="wins" sortParam="sort" rowKey={r=>r.team_id} rowClass={r=>r.is_mine?'mine-row':undefined} rowLabel={r=>`${r.team_name} forecast breakdown`} renderDetails={r=><div className="player-details">
-      <p>{r.last_result} · Division: {r.division_name ?? 'Not recorded'}</p>
-      <p>NextGen average overall rank: {n(r.average_overall_rank)} · {r.ranked_count}/{r.skill_count} skill players ranked, including bench and reserve.</p>
-      <p>{n(r.starter_points)} known remaining points in currently filled starting slots (not optimized). All roster slots: {n(r.known_points)} points from covered players; {r.reference_count} reference forecasts; {r.constrained_count} dated availability constraints; {r.unmodeled_count} unmodeled roster entries.</p>
-      <DataTable rows={r.positions} columns={[
-        {key:'position',label:'Position',title:'Skill position.',align:'left'},
-        {key:'players',label:'Rostered',title:'All current roster players at this position.'},
-        {key:'covered',label:'Forecasts',title:'Players with a published forecast; missing is not zero.'},
-        {key:'points',label:'Known remaining points',title:'Sum of available player forecasts; check coverage before comparing.',render:p=>n(p.points)},
-      ]} defaultSort="position" rowKey={p=>p.position} />
+      {key:'nextgen_team_rank',label:'Rank',title:'Patron rank by remaining-season points across the full QB/RB/WR/TE roster. Includes bench and IR; not a win probability.',initial:'asc',align:'left',render:r=>rank(r.nextgen_team_rank)},
+      {key:'forecast_change',label:'Change',align:'left',title:prior_week != null ? `Current rosters scored with W${prior_week} and W${rankings?.report.through_week} forecasts. Up is a better rank; #2 → #4 is down two.` : 'No comparable previous-week forecast available.',render:r=><RankMovement current={r.nextgen_team_rank} previous={r.previous_forecast_rank} />},
+      {key:'team_name',label:'Team',title:'Open this team’s roster.',align:'left',render:r=><Link className="player-profile-link" to={rosterLink(r.team_id)}>{r.team_name}{r.is_mine ? ' · You' : ''}</Link>},
+      {key:'record',label:'Record',title:'Completed regular-season wins–losses–ties.',align:'left'},
+      {key:'weekly_projection',label:`Week ${data.week} projected`,title:'Dedicated weekly model points for the current starting lineup; K/DST and unpromoted positions use labeled references.',render:r=><div className="outlook-cell"><strong>{fixed(r.weekly_projection)}</strong><small title={r.opponent?.team_name}>{r.opponent ? `vs ${r.opponent.team_name}` : 'No matchup captured'}</small></div>},
+      {key:'ppg',label:'Points / week',title:'Actual completed regular-season points divided by weeks played. Change compares the average through the prior week.',render:r=><div className="outlook-cell"><strong>{fixed(r.ppg)}</strong><PointsChange value={r.ppg_change} label="Weekly scoring average change" /></div>},
+      {key:'season_pace',label:'Projected season pace',title:`Actual points per week × ${data.regular_season_weeks} regular-season weeks. A scoring-pace estimate, not a schedule-adjusted forecast. Change is versus last week’s pace.`,render:r=><div className="outlook-cell"><strong>{fixed(r.season_pace)}</strong><PointsChange value={r.season_pace_change} label="Season pace change" /></div>},
+    ]} defaultSort="nextgen_team_rank" sortParam="sort" rowKey={r=>r.team_id} rowClass={r=>r.is_mine?'mine-row':undefined} rowLabel={r=>`${r.team_name} forecast breakdown`} renderDetails={r=><div className="player-details">
+      <h4>Weekly scoring history</h4>
+      <ol className="standings-history">{(r.schedule ?? []).filter(g => g.week >= 1 && g.week <= completed_weeks && ['W','L','T'].includes(g.outcome)).map(g => <li key={g.week}>Week {g.week}: <strong>{fixed(g.score)} pts</strong> · {g.outcome} vs {data.teams.find(t=>t.team_id===g.opponent_team_id)?.team_name ?? 'Unknown opponent'}</li>)}</ol>
+      <p>{fixed(r.completed_points)} points scored · {fixed(r.ppg)} per week · {fixed(r.season_pace)} projected at this pace over {data.regular_season_weeks} weeks.</p>
+      <p>Patron roster forecast: {rank(r.nextgen_team_rank)}{r.previous_forecast_rank != null ? `, previously #${r.previous_forecast_rank} on the same roster` : ''}. {fixed(r.forecast_points)} remaining player points across {r.forecast_count}/{r.skill_count} skill players, including bench and IR. This total is separate from your starting-lineup season pace.</p>
+      <p>{r.reference_count} reference forecasts · {r.constrained_count} availability constraints · FAAB: {r.faab_remaining == null ? 'Unknown' : `$${r.faab_remaining}`}</p>
       <Link className="button" to={rosterLink(r.team_id)}>View player forecasts</Link>
     </div>} />
-    <details className="league-recent-activity"><summary>Latest captured activity · {transactions.length} transactions</summary>
-      {transactions.length ? <ul>{transactions.slice(0,8).map((t,i)=><li key={i}><strong>{t.team_name ?? 'Unknown team'}</strong> · {t.kind ?? 'Transaction'} · {t.player_name ?? 'Unknown player'}{t.bid_amount != null ? ` · $${t.bid_amount}` : ''}<small>{t.date ? new Date(t.date).toLocaleString() : 'Date not captured'}</small></li>)}</ul> : <p>No transactions captured.</p>}
-      <Link className="button" to={leaguePath('transactions')}>All transactions</Link>
+    </section>
+    <WeeklyForecastReview forecasts={forecasts} />
+    <details className="outlook-method"><summary>How to read these numbers</summary>
+      <p><strong>Forecast rank and movement:</strong> current rosters ranked by the sum of published remaining-season QB/RB/WR/TE forecasts. Bench and IR count; K/DST do not. Movement compares the same roster against the previous week’s published forecasts, so it measures forecast changes, not past ownership or win/loss standings. Incomplete comparisons show no prior rank.</p>
+      <p><strong>Matchup forecasts:</strong> The dedicated one-week model learns from earlier seasons using scoring, opportunity, snaps and prior opponent results. Positions that fail promotion use a directly evaluated weekly reference. K/DST use up to four earlier recorded scores. Winner picks are comparisons of forecast points, not calibrated win probabilities. ESPN supplies lineup selections and observed scores only.</p>
+      <p><strong>Season pace:</strong> actual completed regular-season scoring average multiplied by {data.regular_season_weeks}. It includes K/DST and excludes partial weeks, bench points and playoffs. It assumes the same scoring pace continues; it does not account for future injuries, byes or roster changes. Changes compare with the previous completed week’s average and pace.</p>
     </details>
   </section>
 }

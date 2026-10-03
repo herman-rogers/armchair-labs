@@ -1,11 +1,7 @@
 import { PlayerProfileLink } from './PlayerProfile'
 import type { MetricVersion, Player } from '../api/types'
 import { forecastSource, forecastValues, rankBasis, rankerLabel } from '../metricPresentation'
-
-const n = (value: number | null | undefined, digits = 1) =>
-  value == null ? '—' : value.toFixed(digits)
-const pct = (value: number | null | undefined) =>
-  value == null ? '—' : `${(value * 100).toFixed(0)}%`
+import { fixed, percent } from '../format'
 
 function Facts({ rows }: { rows: [string, string][] }) {
   return (
@@ -33,18 +29,18 @@ export function PlayerDetails({ player: p, version }: { player: Player; version:
             rows={
               version === 'v1'
                 ? [
-                    ['Historical PPG', n(p.ppg)],
-                    ['Games counted', n(p.games, 0)],
-                    ['Season points', n(p.season_pts, 0)],
+                    ['Historical PPG', fixed(p.ppg)],
+                    ['Games counted', fixed(p.games, 0)],
+                    ['Season points', fixed(p.season_pts, 0)],
                   ]
                 : [
-                    ['Active-game PPG', n(forecast.activePPG)],
-                    ['Expected games', n(forecast.expectedGames)],
-                    ['Season points', n(forecast.seasonPoints, 0)],
-                    ['Season-equivalent PPG', n(p.season_equivalent_ppg)],
+                    ['Active-game PPG', fixed(forecast.activePPG)],
+                    ['Expected games', fixed(forecast.expectedGames)],
+                    ['Season points', fixed(forecast.seasonPoints, 0)],
+                    ['Season-equivalent PPG', fixed(p.season_equivalent_ppg)],
                     ['Source', forecastSource(p, version)],
                     ['Forecast cutoff', p.forecast_as_of ?? 'Not recorded'],
-                    ['Sample support', pct(p.forecast_sample_support ?? p.projection_confidence)],
+                    ['Sample support', percent(p.forecast_sample_support ?? p.projection_confidence)],
                   ]
             }
           />
@@ -67,17 +63,17 @@ export function PlayerDetails({ player: p, version }: { player: Player; version:
             rows={
               version === 'v1'
                 ? [
-                    ['Draft VOR', n(p.adj_vor)],
-                    ['Replacement PPG', n(p.repl_ppg)],
-                    ['Manual adjustment', n(p.override_delta)],
+                    ['Draft VOR', fixed(p.adj_vor)],
+                    ['Replacement PPG', fixed(p.repl_ppg)],
+                    ['Manual adjustment', fixed(p.override_delta)],
                   ]
                 : [
-                    ['Overall VOR', n(p.v2_overall_vor)],
-                    ['Position rank', n(p.v2_position_rank, 0)],
+                    ['Overall VOR', fixed(p.v2_overall_vor)],
+                    ['Position rank', fixed(p.v2_position_rank, 0)],
                     ['Position basis', p.v2_rank_key ? rankerLabel(p.v2_rank_key) : 'Not recorded'],
                     ['Basis value', rankBasis(p)],
-                    ['Position VOR', n(p.v2_rank_vor)],
-                    ['Consensus position rank', n(p.market_ecr, 0)],
+                    ['Position VOR', fixed(p.v2_rank_vor)],
+                    ['Consensus position rank', fixed(p.market_ecr, 0)],
                     ['Market snapshot', p.market_snapshot ?? 'Not recorded'],
                   ]
             }
@@ -93,15 +89,15 @@ export function PlayerDetails({ player: p, version }: { player: Player; version:
           <h5>Historical production</h5>
           <Facts
             rows={[
-              ['PPG', n(p.ppg)],
-              ['Games', n(p.games, 0)],
-              ['Season points', n(p.season_pts, 0)],
-              ['Weekly 25th percentile', n(p.floor)],
-              ['Weekly standard deviation', n(p.volatility)],
-              ['Big-play bonus points', n(p.bonus_pts, 0)],
-              ['Target share', pct(p.target_share)],
-              ['Air-yards share', pct(p.air_yards_share)],
-              ['Age in reference season', n(p.age_at_season)],
+              ['PPG', fixed(p.ppg)],
+              ['Games', fixed(p.games, 0)],
+              ['Season points', fixed(p.season_pts, 0)],
+              ['Weekly 25th percentile', fixed(p.floor)],
+              ['Weekly standard deviation', fixed(p.volatility)],
+              ['Big-play bonus points', fixed(p.bonus_pts, 0)],
+              ['Target share', percent(p.target_share)],
+              ['Air-yards share', percent(p.air_yards_share)],
+              ['Age in reference season', fixed(p.age_at_season)],
             ]}
           />
           <p>
@@ -121,15 +117,15 @@ export function PlayerDetails({ player: p, version }: { player: Player; version:
           </p>
           <Facts
             rows={[
-              ['Component PPG', n(p.component_proj_ppg)],
-              ['Historical prior PPG', n(p.historical_ppg_prior)],
-              ['Blended input PPG', n(p.proj_ppg)],
-              ['Input expected games', n(p.expected_games)],
-              ['Targets / game', n(p.projected_targets_pg)],
-              ['Carries / game', n(p.projected_carries_pg)],
-              ['Dropback on-field share (proxy)', pct(p.projected_route_participation)],
-              ['End-zone targets / game', n(p.projected_end_zone_targets_pg, 2)],
-              ['Depth rank', n(p.depth_chart_rank, 0)],
+              ['Component PPG', fixed(p.component_proj_ppg)],
+              ['Historical prior PPG', fixed(p.historical_ppg_prior)],
+              ['Blended input PPG', fixed(p.proj_ppg)],
+              ['Input expected games', fixed(p.expected_games)],
+              ['Targets / game', fixed(p.projected_targets_pg)],
+              ['Carries / game', fixed(p.projected_carries_pg)],
+              ['Dropback on-field share (proxy)', percent(p.projected_route_participation)],
+              ['End-zone targets / game', fixed(p.projected_end_zone_targets_pg, 2)],
+              ['Depth rank', fixed(p.depth_chart_rank, 0)],
               ['Depth snapshot', p.depth_chart_date ?? 'Not recorded'],
               ['Projected NFL team', p.projected_team ?? 'Not recorded'],
             ]}

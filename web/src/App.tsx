@@ -1,14 +1,21 @@
-import { isRouteErrorResponse, Link, Outlet, ScrollRestoration, useRouteError } from 'react-router'
+import { isRouteErrorResponse, Link, Outlet, ScrollRestoration, useRouteError, useLocation } from 'react-router'
 import { DataReleaseProvider } from './components/DataRelease'
 import { useQuery } from '@tanstack/react-query'
-import { fetchStatus } from './api/client'
+import { statusQuery } from './api/queries'
+import { useEffect } from 'react'
+import { PageNavigation } from './components/PageNavigation'
+import { useCurrentPage } from './pageNavigation'
 import { ThemeToggle } from './components/ThemeToggle'
 
 /** Root layout for every route in `routes.tsx`. */
 export default function App() {
-  const status = useQuery({ queryKey: ['status'], queryFn: fetchStatus })
+  const status = useQuery(statusQuery())
+  const { pathname } = useLocation()
+  const page = useCurrentPage()
+  useEffect(() => { document.title = `${page?.title ?? 'Player analytics'} · Sweaty Plays` }, [page?.title])
 
   return <div className="app instrument-dashboard">
+    <a className="skip-link" href="#page-content">Skip to content</a>
     <header className="masthead">
       <div className="masthead-row">
         <div className="dashboard-identity"><span className="eyebrow">League analytics</span>
@@ -24,7 +31,10 @@ export default function App() {
       </div>
     </header>
     {status.isError && <div className="notice"><h2>Release status unavailable</h2><p>{status.error.message}</p></div>}
-    <DataReleaseProvider><Outlet /></DataReleaseProvider>
+    <DataReleaseProvider><div className="page-shell">
+      <PageNavigation key={pathname} />
+      <div id="page-content" className="page-content" tabIndex={-1}><Outlet /></div>
+    </div></DataReleaseProvider>
     <ScrollRestoration />
   </div>
 }

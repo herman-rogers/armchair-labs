@@ -1,19 +1,14 @@
 import { forecastColumns } from './ForecastColumns'
-import type { LeaguePlayer } from '../api/types'
+import type { LeaguePlayer, MetricVersion } from '../api/types'
 import { useQuery } from '@tanstack/react-query'
-import { fetchUnrankable, fetchWire } from '../api/client'
-import type { MetricVersion } from '../api/types'
 import { SEASON_EQUIVALENT_TITLE } from '../metricPresentation'
 import { Freshness } from './Freshness'
 import { useUrlFlag, useUrlState } from '../navigation'
-import {
-  FLAGS_COLUMN,
-  IDENTITY,
-  PlayerTable,
-  ROSTERED_PERCENT,
-  number,
-  type PlayerColumn,
-} from './PlayerTable'
+import { SKILL_POSITIONS } from '../positions'
+import { unrankableQuery, wireQuery } from '../api/queries/archive'
+import { PlayerTable } from './PlayerTable'
+import { FLAGS_COLUMN, IDENTITY, ROSTERED_PERCENT, type PlayerColumn } from './playerColumns'
+import { fixed } from '../format'
 
 const COLUMNS: PlayerColumn[] = [
   ...IDENTITY,
@@ -22,20 +17,20 @@ const COLUMNS: PlayerColumn[] = [
     label: 'Wire VOR',
     title:
       'Historical PPG above the best freely available player in the current free-agent pool. This is not preseason draft VOR.',
-    render: (p) => <span className="strong">{number(p.wire_vor, 2)}</span>,
+    render: (p) => <span className="strong">{fixed(p.wire_vor, 2)}</span>,
   },
   {
     key: 'ppg',
     label: 'PPG',
     title: 'League-scored points per game from last season.',
-    render: (p) => number(p.ppg),
+    render: (p) => fixed(p.ppg),
   },
   FLAGS_COLUMN,
   {
     key: 'floor',
     label: 'Floor',
     title: 'Historical 25th-percentile weekly score; descriptive, not a guaranteed floor.',
-    render: (p) => <span className="dim">{number(p.floor)}</span>,
+    render: (p) => <span className="dim">{fixed(p.floor)}</span>,
   },
   ROSTERED_PERCENT,
 ]
@@ -52,14 +47,8 @@ export function WirePanel({ version }: { version: MetricVersion }) {
   const [positionParam, setPosition] = useUrlState('position', '')
   const position = positionParam || null
 
-  const wire = useQuery({
-    queryKey: ['wire', version, healthyOnly],
-    queryFn: () => fetchWire(version, healthyOnly),
-  })
-  const unrankable = useQuery({
-    queryKey: ['unrankable', version],
-    queryFn: () => fetchUnrankable(version),
-  })
+  const wire = useQuery(wireQuery(version, healthyOnly))
+  const unrankable = useQuery(unrankableQuery(version))
 
   if (wire.isError) {
     return <div className="notice">{(wire.error as Error).message}</div>
@@ -73,7 +62,7 @@ export function WirePanel({ version }: { version: MetricVersion }) {
   return (
     <section>
       <div className="controls">
-        {['QB', 'RB', 'WR', 'TE'].map((pos) => (
+        {SKILL_POSITIONS.map((pos) => (
           <button
             key={pos}
             type="button"
@@ -114,9 +103,9 @@ export function WirePanel({ version }: { version: MetricVersion }) {
         players={players}
         columns={version === 'v1' ? COLUMNS : [
           ...IDENTITY,
-          { key: 'wire_vor', label: 'Wire VOR', title: 'Season-equivalent PPG above the best free agent at this position.', render: p => <b>{number(p.wire_vor, 2)}</b> },
-          { key: 'lineup_improvement', label: 'Lineup gain', title: 'Preseason season-equivalent improvement to your best legal lineup before choosing a drop.', render: p => number(p.lineup_improvement) },
-          { key: 'season_equivalent_ppg', label: 'Season PPG', title: SEASON_EQUIVALENT_TITLE, render: p => number(p.season_equivalent_ppg) },
+          { key: 'wire_vor', label: 'Wire VOR', title: 'Season-equivalent PPG above the best free agent at this position.', render: p => <b>{fixed(p.wire_vor, 2)}</b> },
+          { key: 'lineup_improvement', label: 'Lineup gain', title: 'Preseason season-equivalent improvement to your best legal lineup before choosing a drop.', render: p => fixed(p.lineup_improvement) },
+          { key: 'season_equivalent_ppg', label: 'Season PPG', title: SEASON_EQUIVALENT_TITLE, render: p => fixed(p.season_equivalent_ppg) },
           ...forecastColumns<LeaguePlayer>(version).filter(column => !['v2_overall_vor', 'v2_position_rank'].includes(column.key)),
         ]}
         defaultSort="wire_vor"

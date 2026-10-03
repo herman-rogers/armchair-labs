@@ -155,3 +155,27 @@ def evidence(horizon: str = "rest_of_season", position: str = "ALL"):
             )
         )
     return dict(version=manifest["version"], evaluations=results)
+
+
+@router.get("/history")
+def history(horizon: str = "rest_of_season"):
+    """Published weekly snapshots; unavailable history never hides current rankings."""
+    from patron.data.ranking_history import ranking_history
+
+    if horizon not in HORIZONS:
+        raise HTTPException(422, "Unknown ranking horizon")
+    root, manifest = ranking_release()
+    report = read_json(root / "ranking_report.json")
+    try:
+        snapshots = ranking_history(
+            get_settings().data_dir, report["season"], report["through_week"], horizon
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(409, "Published ranking history could not be verified") from exc
+    return dict(
+        version=manifest["version"],
+        season=report["season"],
+        through_week=report["through_week"],
+        horizon=horizon,
+        snapshots=snapshots,
+    )

@@ -1,6 +1,6 @@
-import { NavLink, Outlet, useParams } from 'react-router'
+import { Navigate, NavLink, Outlet, useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchLeague, refreshLeague } from '../api/client'
+import { refreshLeague } from '../api/client'
 import type { MetricVersion } from '../api/types'
 import { Freshness } from './Freshness'
 import { LeagueBoard } from './LeagueBoard'
@@ -9,10 +9,11 @@ import { WirePanel } from './WirePanel'
 import { DraftPanel } from './DraftPanel'
 import { PlayersView } from './PlayersView'
 import { DataTable } from './DataTable'
-import { ARCHIVED_VIEWS, archivePath } from '../navigation'
+import { archivedLeagueQuery } from '../api/queries/archive'
+import { ARCHIVED_VIEWS, archivePath, isArchivedView } from '../navigation'
 
-/** Archived league tabs; the router accepts only the ids in `ARCHIVED_VIEWS.league`. */
-const LEAGUE_VIEW_TABS: { id: typeof ARCHIVED_VIEWS.league[number]; label: string; hint: string }[] = [
+/** Archived league pages; the router accepts only the ids in `ARCHIVED_VIEWS.league`. */
+const LEAGUE_PAGES: { id: typeof ARCHIVED_VIEWS.league[number]; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Power ranks, roster detail, and team comparisons' },
   { id: 'matchups', label: 'Matchups', hint: 'The schedule and each weekly lineup edge' },
   { id: 'players', label: 'Players', hint: 'Search the league player pool and inspect individual stats' },
@@ -27,10 +28,7 @@ const version: MetricVersion = 'v2'
 export function LeagueView() {
   const queryClient = useQueryClient()
 
-  const league = useQuery({
-    queryKey: ['league', version],
-    queryFn: () => fetchLeague(version),
-  })
+  const league = useQuery(archivedLeagueQuery(version))
   const refresh = useMutation({
     mutationFn: () => refreshLeague(version),
     // Everything on these screens derives from one snapshot, so a refresh invalidates
@@ -69,9 +67,9 @@ export function LeagueView() {
         <h2>{league.data.league_name}</h2><p>Every team, every week. Scores and ownership from your league snapshot.</p></div>
         <span className="instrument-tag">Week {league.data.week} · {league.data.season}</span>
       </div>
-      <div className="subnav" aria-label="Archived league views">
-        {LEAGUE_VIEW_TABS.map((entry) => (
-          <NavLink key={entry.id} className="subtab" to={archivePath('league', entry.id)} title={entry.hint} preventScrollReset>
+      <nav className="archive-page-links" aria-label="Archived league views">
+        {LEAGUE_PAGES.map((entry) => (
+          <NavLink key={entry.id} to={archivePath('league', entry.id)} title={entry.hint}>
             {entry.label}
           </NavLink>
         ))}
@@ -81,7 +79,7 @@ export function LeagueView() {
           onRefresh={() => refresh.mutate()}
           refreshing={refresh.isPending}
         />
-      </div>
+      </nav>
       <Outlet />
     </>
   )
@@ -90,7 +88,8 @@ export function LeagueView() {
 /** `/research/archive/league/:view`. */
 export function LeagueViewTab() {
   const { view } = useParams()
-  const league = useQuery({ queryKey: ['league', version], queryFn: () => fetchLeague(version) })
+  const league = useQuery(archivedLeagueQuery(version))
+  if (!isArchivedView('league', view)) return <Navigate replace to={archivePath('league', 'overview')} />
   if (!league.data) return null
   const hasMyTeam = league.data.teams.some((team) => team.is_mine)
   return (

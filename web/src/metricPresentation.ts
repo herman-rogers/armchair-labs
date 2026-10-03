@@ -76,17 +76,6 @@ export function rankBasis(player: Player) {
   return key.endsWith('season_points') ? `${raw.toFixed(0)} pts` : `${raw.toFixed(1)}/g`
 }
 
-export function rankBasisTitle(player: Player) {
-  if (!player.v2_rank_key) return 'No position-specific rank key was available.'
-  if (player.v2_rank_key === 'market') {
-    return 'No usable tape for the model. Placed by rank-matching the FantasyPros consensus: the value shown is the median model value of the three rated players at this position whose market rank is nearest. Tagged market, not imputed as a model score.'
-  }
-  if (player.v2_rank_key === 'espn_ppr_rank') {
-    return 'No prior NFL production is available to Patron. ESPN’s current PPR draft-room ordering supplies this explicitly flagged fallback; no model score was imputed.'
-  }
-  return `Position rank uses ${rankerLabel(player.v2_rank_key)}, expressed above that model’s positional replacement and then adjusted by any manual override. This cell shows the raw model basis.`
-}
-
 export const OVERALL_VOR_TITLE =
   'Overall board value: the selected forecast system’s season score (as a per-game rate) above its positional replacement, plus any manual override. This common scale drives the overall # rank.'
 
@@ -95,7 +84,6 @@ export const POSITION_RANK_TITLE =
 
 export const SEASON_EQUIVALENT_TITLE =
   'Selected forecast season points converted to a per-scheduled-game rate. Unlike active-game PPG, this includes fitted availability and is the value used for waiver comparisons.'
-
 
 export const SYSTEM_LABELS: Record<MetricVersion, string> = {
   v1: 'Draft reference', v2: 'Production forecast', adaptive: 'Frozen experiment',

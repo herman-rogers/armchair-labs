@@ -635,7 +635,6 @@ export interface CompareResponse extends Freshness {
   margin: number
 }
 
-
 // ---------------------------------------------------------------- draft recap
 
 export interface DraftBestAvailable {
@@ -794,63 +793,6 @@ export interface LeagueImpact {
   season: number
   week: number
   stale: boolean
-}
-
-export interface RookiePlayer {
-  position_rank?: number | null
-  latest_targets?: number
-  latest_carries?: number
-  player_id: string
-  player_display_name: string
-  position: string
-  team: string | null
-  draft_pick: number | null
-  points_to_date: number
-  targets: number
-  carries: number
-  snap_share: number | null
-  observed_stat_weeks: number
-  snap_observations: number
-  forecast_next4: number | null
-  pace_next4: number | null
-  analog_p10: number | null
-  analog_p90: number | null
-  history_count: number
-  neighbor_count: number
-  forecast_status: string
-  availability: 'unknown' | 'free_agent' | 'rostered'
-  owner_team_name: string | null
-  is_mine: boolean
-  injury_status: string | null
-  analogs: Array<{
-    player_display_name: string; season: number; points_per_week: number
-    targets: number; carries: number; snap_share: number | null; next4_actual: number
-  }>
-}
-export interface RookieWatch {
-  history?: { version: string }
-  history_seasons?: number[]
-  current_source?: string
-  season: number
-  through_week: number
-  horizon: number[]
-  saved_at: string
-  forecast_age_hours: number
-  newer_week_possible: boolean
-  ownership_available: boolean
-  ownership_stale: boolean
-  ownership_captured_at: string | null
-  method: string
-  limitations: string[]
-  players: RookiePlayer[]
-  backtest: {
-    basis: string
-    positions: Array<{
-      position: string; eligible: number; scored: number; seasons: number[]
-      forecast_next4_mae: number | null; pace_next4_mae: number | null
-      historical_mean_next4_mae: number | null
-    }>
-  }
 }
 
 export interface OutlookPlayer {

@@ -1,11 +1,10 @@
+import { SKILL_POSITIONS, isSkillPosition } from './positions'
 import type { LeagueObservations, Ranking, RankingsResponse } from './api/nextgen'
 
-export const skillPositions = ['QB', 'RB', 'WR', 'TE']
 const reserve = new Set(['BE', 'BN', 'IR', 'ER'])
 export function forecastFor(playerId: string | null | undefined, rankings?: RankingsResponse) {
   return rankings?.rankings.find(r => r.player_id === playerId && Number.isFinite(r.prediction))
 }
-export function rankLabel(rank: number | null | undefined) { return rank == null ? '—' : `#${rank}` }
 export function forecastBasis(r?: Ranking) {
   return !r ? 'Unavailable' : r.evidence_status === 'validated_forecast' ? 'Historically validated' : 'Reference'
 }
@@ -14,7 +13,7 @@ export function leagueSummary(data: LeagueObservations, rankings?: RankingsRespo
   const byId = new Map(rankings?.rankings.filter(r => Number.isFinite(r.prediction)).map(r => [r.player_id, r]))
   const teams = data.teams.map(team => {
     const roster = data.players.filter(p => p.owner_team_id === team.team_id)
-    const skills = roster.filter(p => skillPositions.includes(p.position))
+    const skills = roster.filter(p => isSkillPosition(p.position))
     const rated = skills.map(p => ({player: p, forecast: byId.get(p.player_id ?? '')})).filter(p => p.forecast != null)
     const overallRanks = rated.flatMap(p => {
       const rank = p.forecast?.overall_rank
@@ -40,7 +39,7 @@ export function leagueSummary(data: LeagueObservations, rankings?: RankingsRespo
       results_captured: schedule.length,
       last_result: last ? `W${last.week} ${last.outcome} · ${last.score.toFixed(1)} vs ${data.teams.find(t => t.team_id === last.opponent_team_id)?.team_name ?? 'Unknown opponent'}` : 'No completed result captured',
       starter_points: rated.filter(p => p.player.lineup_slot && !reserve.has(p.player.lineup_slot)).reduce((sum,p) => sum+p.forecast!.prediction,0),
-      positions: skillPositions.map(position => {
+      positions: SKILL_POSITIONS.map(position => {
         const pool = skills.filter(p => p.position === position)
         const forecasts = rated.filter(p => p.player.position === position)
         return {position, players:pool.length, covered: forecasts.length,

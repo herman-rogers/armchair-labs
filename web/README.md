@@ -40,16 +40,17 @@ explicit research scope; current analysis fails closed when verification fails.
 Run `web/tests/nextgen_smoke.py` against local API and frontend servers for the
 current desktop/mobile flow. Older smoke scripts describe archived layouts.
 
-Current navigation: **Intelligence** (NextGen rankings, Players, Rookies), **League**
-(League overview, Rosters, Free agents, Transactions, Draft recap), and **Research**.
-Players opens shared profiles, including Similar careers statistical comparisons.
-All-careers browsing is hidden; historical data remains available for comparisons.
-NextGen rankings are the default Intelligence tab, with remaining-season/next-four-week
+Navigation is organized into persistent page groups: **Player analysis** (rankings,
+QB passing, rookies), **League management** (overview, matchups, rosters and
+comparisons, free agents, transactions, draft recap), and **Research** (model
+evidence, QB experiments, reference forecasts, archive). On small screens, Browse
+pages opens the same navigation. It stays available on player profiles.
+Rankings remain the entry page, with remaining-season/next-four-week
 horizons and explicit reference/validated status. Roster/free-agent tables and current
 profiles use the same published ranks. Dated preseason ECR remains a separate reference.
 Sorting/filtering covers full result sets before display pagination. Run
 `web/tests/rankings_smoke.py` for the ranking and league integration checks. See
-[workflow map](../docs/navigation_restoration_2026-09-23.md).
+[workflow map](../docs/history/navigation_restoration_2026-09-23.md).
 
 ## Navigation
 
@@ -57,7 +58,8 @@ React Router owns every place in the app; `src/navigation.ts` documents the one
 pattern to follow:
 
 - **Places are paths**, declared in `src/routes.tsx` and reached with `<Link>`/`<NavLink>`.
-  Tab bars are `<NavLink>`s (active tab: `aria-current="page"`), not buttons with state.
+  Grouped page links use `<NavLink>` (active page: `aria-current="page"`).
+  `src/pageNavigation.ts` defines page labels, descriptions and purpose groups.
 - **View configuration is search params** (filters, sort, page, week, team), via
   `useUrlState` / `useUrlPage` / `useUrlParams`. Changes push history so Back undoes
   them; free-text search uses `replace` so keystrokes don't pile up. A page's primary
@@ -70,7 +72,7 @@ pattern to follow:
 | Path | Page |
 |---|---|
 | `/intelligence/rankings` · `/qb-passing` · `/rookies` | Current analysis |
-| `/league/overview` · `/rosters?team=` · `/free-agents` · `/transactions` · `/draft` | League |
+| `/league/overview` · `/matchups?week=` · `/rosters?team=` · `/free-agents` · `/transactions` · `/draft` | League |
 | `/research/evidence` · `/qb-experiments` · `/forecasts` · `/archive` | Research |
 | `/research/archive/intelligence/:view` · `/research/archive/league/:view` | Archived workspaces |
 | `/players/:playerId/:section?` · `/college/:collegeId/:section?` | Profiles |
@@ -84,8 +86,11 @@ production host, serve `web/dist/index.html` for non-file frontend paths (for ex
 `try_files $uri $uri/ /index.html` in nginx), while proxying `/api/` to FastAPI.
 This is required for direct links and refreshing any page.
 
-League overview combines standings, weekly matchups, roster forecast summaries and
-recent activity. See [league overview behavior](../docs/league_overview_2026-09-24.md).
+League overview combines standings, roster forecast summaries and recent activity,
+with navigation to other league pages in the sidebar. Weekly scores and lineups live
+on the Matchups schedule; the selected week remains in its URL. Each game opens
+`/league/matchups/:week/:homeId/:awayId` with scores and complete lineups. Game
+pages link back to their week, to adjacent matchups, and to current team rosters. See [league overview behavior](../docs/history/league_overview_2026-09-24.md).
 
 ## Data access and caching
 
@@ -117,3 +122,53 @@ node web/tests/data_queries_test.mjs             # from the repository root
 
 The browser check blocks live ESPN calls and verifies search/query reuse, profile
 cutoffs, server pagination, mobile layout, and stale-catalog rejection.
+
+## Weekly rank movement
+
+Player rankings, roster/free-agent tables, and player profiles compare the current
+published ranks with the latest prior completed-week publication for the same
+season and horizon. `/api/nextgen/rankings/history` follows the verified catalog
+publication chain, keeps the final published revision per cutoff, and excludes
+unpublished experiments. Historical ranking eligibility is checked against that
+release's policy. Week labels make gaps explicit; missing ranks are never zero.
+Row details and profiles show the available weekly history. Recipe changes and
+changing forecast windows can affect the movement.
+
+League overview reconstructs standings after each completed week using win
+percentage (ties count as half a win), then points scored. Equal totals share rank.
+These are labeled reconstructed standings, not official provider playoff seeds.
+An incomplete set of results withholds that week; the current partial week is
+excluded. Team row details show the season's weekly standings.
+
+Checks: `pytest tests/test_ranking_history.py tests/test_current_ranking_routes.py`,
+`node web/tests/standings_history_test.mjs`, and browser checks
+`web/tests/rank_movement_smoke.py` / `web/tests/league_overview_smoke.py`.
+
+## Weekly model points and accuracy
+
+League overview and matchup detail pages use `/api/nextgen/league/forecasts` for
+point estimates. The explicitly labeled `nextgen-weekly-reference-v1` recipe
+allocates each skill player's eligible published next-four forecast evenly across
+scheduled NFL games. K/DST estimates average up to four earlier recorded scores.
+No ESPN projections enter this recipe. ESPN remains the source of lineup selections,
+ownership and actual results. Missing starter forecasts withhold team totals and
+winner picks. This is a weekly reference, not a separately validated weekly model,
+opponent adjustment or calibrated win probability.
+
+Inputs must match the season and the immediately preceding completed week. Current
+or later scores are excluded from K/DST predictors; bench forecasts never enter
+starting totals. Details expose individual model points and coverage.
+
+Forecast requests preserve immutable captures under
+`data/outputs/weekly_forecasts/<league>/<season>/`. Accuracy starts at Week 1 and
+counts only saved forecasts generated, published and lineup-captured before 00:00
+UTC on the week's earliest NFL game date (a conservative cutoff because this
+schedule lacks kickoff times). The latest qualifying capture supplies each pick.
+Missing captures, incomplete forecasts and actual ties do not inflate the winner
+accuracy denominator. Point MAE is measured on verified complete team forecasts.
+Historical results remain visible without invented historical predictions. Capture
+happens while the forecast page is in use; this does not schedule an unattended job.
+
+Checks: `pytest tests/test_weekly_lineup.py tests/test_league_observations.py`,
+`node web/tests/league_outlook_test.mjs`, and
+`python web/tests/weekly_forecasts_smoke.py` with the local API and Vite running.

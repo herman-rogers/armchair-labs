@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchRoster } from '../api/client'
-import type { LeagueTeam, MetricVersion } from '../api/types'
-import { IDENTITY, PlayerTable } from './PlayerTable'
+import type { LeagueTeam, MetricVersion, LeaguePlayer } from '../api/types'
+import { PlayerTable } from './PlayerTable'
+import { IDENTITY } from './playerColumns'
 import { forecastColumns } from './ForecastColumns'
+import { rosterQuery } from '../api/queries/archive'
 import { RankingExplanation } from './PlayerDetails'
-import type { LeaguePlayer } from '../api/types'
 
 /** One team's roster, joined to the board, decisions first. */
 export function RosterPanel({
@@ -14,10 +14,7 @@ export function RosterPanel({
   team: LeagueTeam
   version: MetricVersion
 }) {
-  const roster = useQuery({
-    queryKey: ['roster', team.team_id, version],
-    queryFn: () => fetchRoster(team.team_id, version),
-  })
+  const roster = useQuery(rosterQuery(team.team_id, version))
 
   if (roster.isError) return <div className="notice">{(roster.error as Error).message}</div>
   if (!roster.data) return <div className="notice">Loading roster…</div>

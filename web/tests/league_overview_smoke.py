@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from playwright.sync_api import expect, sync_playwright
 from patron.api.nextgen_routes import league
-from patron.api.ranking_routes import rankings
+from patron.api.ranking_routes import history, rankings
 from patron.espn.observations import weekly_matchups
 from patron.espn.sync import LeagueSnapshot
 
@@ -18,6 +18,7 @@ def main():
     snap = LeagueSnapshot.read(Path('data/outputs/league_snapshot.json'))
     data = league(SimpleNamespace(observations=lambda: (snap, True, 3600)))
     ranks = rankings(limit=1000, offset=0)
+    rank_history = history()
     while len(ranks['rankings']) < ranks['total']:
         ranks['rankings'].extend(rankings(limit=1000, offset=len(ranks['rankings']))['rankings'])
     by_id = {r['player_id']:r for r in ranks['rankings']}
@@ -38,18 +39,31 @@ def main():
             elif u.path=='/api/nextgen/rankings':
                 offset=int(q.get('offset',[0])[0]); limit=int(q.get('limit',[500])[0])
                 route.fulfill(status=200,json={**ranks,'rankings':ranks['rankings'][offset:offset+limit]})
+            elif u.path=='/api/nextgen/rankings/history': route.fulfill(status=200,json=rank_history)
             else: route.abort()
-        page.route(re.compile(r'.*/api/nextgen/(league(?:/[^?]*)?|rankings)(?:\?.*)?$'),intercept)
+        page.route(re.compile(r'.*/api/nextgen/(league(?:/[^?]*)?|rankings(?:/history)?)(?:\?.*)?$'),intercept)
         page.goto('http://127.0.0.1:5173/?section=league')
         expect(page).to_have_url(re.compile(r'/league/overview$'))
-        tabs=page.get_by_role('navigation',name='League views')
-        expect(tabs.get_by_role('link')).to_have_text(['League overview','Rosters','Free agents','Transactions','Draft recap'])
-        expect(page.get_by_role('heading',name='Standings & roster forecasts')).to_be_visible()
+        tabs=page.get_by_role('navigation',name='Main navigation')
+        expect(tabs.get_by_role('link', name='Matchups', exact=True)).to_have_count(0)
+        expect(page.get_by_role('heading',name='League outlook',exact=True)).to_be_visible()
+        expect(page.get_by_role('columnheader',name='Change',exact=False)).to_be_visible()
+        expect(page.get_by_label('Explore your league')).to_have_count(0)
         expect(page.get_by_role('heading',name=f'Week {snap.week} matchups')).to_be_visible()
-        expect(page.get_by_role('columnheader',name='NextGen · team',exact=False)).to_be_visible()
+        expect(page.get_by_role('columnheader',name='Rank',exact=False)).to_be_visible()
+        expect(page.get_by_role('columnheader',name='Projected season pace',exact=False)).to_be_visible()
+        expect(page.get_by_role('columnheader',name='Points / week',exact=False)).to_be_visible()
+        expect(page.get_by_role('columnheader',name='Results captured',exact=False)).to_have_count(0)
+        expect(page.get_by_role('columnheader',name='NextGen · average rank',exact=False)).to_have_count(0)
+        expect(page.locator('.outlook-matchup')).to_have_count(len(weekly_matchups(snap,snap.week)['matchups']))
+        page.set_viewport_size({'width':1920,'height':1000})
+        tops=page.locator('.outlook-matchup').evaluate_all('(cards) => cards.map(c => c.getBoundingClientRect().top)')
+        assert len(set(tops)) == 1, tops
+        page.screenshot(path='/tmp/league-overview-wide.png',full_page=True)
+        page.set_viewport_size({'width':1440,'height':1000})
         team=data['teams'][0]
         page.get_by_role('button',name=f"Show details for {team['team_name']} forecast breakdown",exact=True).click()
-        expect(page.get_by_role('columnheader',name='Known remaining points',exact=False)).to_be_visible()
+        expect(page.get_by_role('heading',name='Weekly scoring history',exact=True)).to_be_visible()
         page.screenshot(path='/tmp/league-overview-desktop.png',full_page=True)
         page.set_viewport_size({'width':390,'height':844})
         assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
@@ -57,7 +71,7 @@ def main():
         page.set_viewport_size({'width':1440,'height':1000})
         page.get_by_role('link',name='View player forecasts',exact=True).click()
         expect(page).to_have_url(re.compile(rf"/league/rosters\?team={team['team_id']}$"))
-        expect(tabs.get_by_role('link',name='Rosters',exact=True)).to_have_attribute('aria-current','page')
+        expect(tabs.get_by_role('link',name='Rosters & comparisons',exact=True)).to_have_attribute('aria-current','page')
         expect(page.get_by_role('heading',name=team['team_name'],exact=True)).to_be_visible()
         expect(page.get_by_role('columnheader',name='NextGen · overall',exact=False)).to_be_visible()
         tabs.get_by_role('link',name='Free agents',exact=True).click()
@@ -71,7 +85,7 @@ def main():
         row=page.get_by_role('row').filter(has_text=draft['player_display_name'])
         expect(row.get_by_role('cell',name=f"#{by_id[draft['player_id']]['overall_rank']}",exact=True)).to_be_visible()
         expect(page.get_by_text('Original draft order alongside',exact=False)).to_be_visible()
-        # Back steps through the league tabs; the free-agent search survives.
+        # Back steps through the league pages; the free-agent search survives.
         page.go_back()
         expect(page).to_have_url(re.compile(r'/league/free-agents\?q=[^&]+$'))
         expect(page.get_by_label('Find league player')).to_have_value(free['player_display_name'])
@@ -80,15 +94,76 @@ def main():
         expect(page).to_have_url(re.compile(rf"/league/rosters\?team={team['team_id']}$"))
         tabs.get_by_role('link',name='League overview',exact=True).click()
         future=min(snap.week+1,snap.regular_season_weeks)
-        page.get_by_role('tablist',name='Week',exact=True).get_by_role('tab',name=str(future),exact=True).click()
+        page.get_by_label('Matchup week', exact=True).select_option(str(future))
         expect(page.get_by_role('heading',name=f'Week {future} matchups')).to_be_visible()
         expect(page).to_have_url(re.compile(rf'/league/overview\?week={future}$'))
-        page.get_by_role('button', name=re.compile(': Show lineups$')).first.click()
+        game_link = page.get_by_role('link', name=re.compile(': View matchup$')).first
+        game_path = game_link.get_attribute('href')
+        game_link.click()
+        expect(page).to_have_url(re.compile(re.escape(game_path) + '$'))
+        expect(page.get_by_role('region', name='Weekly matchups', exact=True)).to_have_count(0)
+        expect(tabs.get_by_role('link', name='League overview', exact=True)).to_have_attribute('aria-current', 'page')
+        expect(page.get_by_role('heading', name='Recorded lineups', exact=True)).to_be_visible()
+        page.reload()
+        expect(page.get_by_role('heading', name='Recorded lineups', exact=True)).to_be_visible()
+        page.get_by_role('link', name='Next matchup →', exact=True).click()
+        expect(page).not_to_have_url(re.compile(re.escape(game_path) + '$'))
+        page.go_back()
+        expect(page).to_have_url(re.compile(re.escape(game_path) + '$'))
         expect(page.get_by_text('No lineup captured for this week.',exact=False).first).to_be_visible()
+        for width in (1440, 390):
+            page.set_viewport_size({'width': width, 'height': 844})
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+        page.screenshot(path='/tmp/matchup-detail-mobile.png', full_page=True)
+        page.get_by_role('link', name=f'← Week {future} matchups', exact=True).click()
+        expect(page.get_by_label('Matchup week', exact=True)).to_have_value(str(future))
+        page.goto(f'http://127.0.0.1:5173/league/matchups/{future}/999999/888888')
+        expect(page.get_by_role('heading', name='Matchup not found', exact=True)).to_be_visible()
+        page.get_by_role('link', name='Back to the weekly schedule', exact=True).click()
+        expect(page.get_by_label('Matchup week', exact=True)).to_have_value(str(future))
+        page.goto('http://127.0.0.1:5173/league/matchups/invalid/1/2')
+        expect(page.get_by_role('heading', name='Matchup not found', exact=True)).to_be_visible()
+        # Historical games retain their actual lineups on a directly loadable URL.
+        historical_week = next(w for w in range(1, snap.week) if any(g['home']['lineup_available'] for g in weekly_matchups(snap,w)['matchups']))
+        historical_game = next(g for g in weekly_matchups(snap,historical_week)['matchups'] if g['home']['lineup_available'])
+        historical_path = f"/league/matchups/{historical_week}/{historical_game['home']['team_id']}/{historical_game['away']['team_id']}"
+        page.goto('http://127.0.0.1:5173' + historical_path)
+        expect(page.get_by_role('heading', name='Starters', exact=True).first).to_be_visible()
+        expect(page.get_by_text('Current injury tags are not applied', exact=False)).to_be_visible()
+        for width in (1440, 390):
+            page.set_viewport_size({'width': width, 'height': 844})
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+        page.set_viewport_size({'width': 1440, 'height': 1000})
+        page.screenshot(path='/tmp/matchup-detail-desktop.png', full_page=True)
+        page.goto(f'http://127.0.0.1:5173/league/overview?week={future}')
+        expect(page).to_have_url(re.compile(rf'/league/overview\?week={future}$'))
+        page.goto(f'http://127.0.0.1:5173/league/matchups?week={future}')
+        expect(page).to_have_url(re.compile(rf'/league/overview\?week={future}#matchups$'))
+        page.reload()
+        expect(page.get_by_role('heading', name=f'Week {future} matchups')).to_be_visible()
+        # Week selection survives reload and Back, while the outlook stays current.
+        page.get_by_label('Matchup week', exact=True).select_option(str(historical_week))
+        expect(page.get_by_text('Final scores · Select a game for lineups',exact=True)).to_be_visible()
+        expect(page.get_by_role('columnheader',name=f'Week {snap.week} projected',exact=False)).to_be_visible()
+        page.go_back()
+        expect(page.get_by_label('Matchup week', exact=True)).to_have_value(str(future))
+        for width in (1440, 390):
+            page.set_viewport_size({'width': width, 'height': 844})
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+        menu = page.get_by_role('button', name='Browse pages')
+        expect(tabs).to_be_hidden()
+        menu.click()
+        expect(tabs).to_be_visible()
+        tabs.get_by_role('link', name='Transactions', exact=True).click()
+        expect(page).to_have_url(re.compile(r'/league/transactions$'))
+        expect(tabs).to_be_hidden()
+        page.go_back()
+        expect(page.get_by_role('heading', name=f'Week {future} matchups')).to_be_visible()
+        page.screenshot(path='/tmp/matchups-page-mobile.png', full_page=True)
         assert not errors, errors
         page.unroute_all(behavior='wait')
         browser.close()
-    print('League overview browser checks passed: merged views, team drilldown, free-agent/draft global ranks, future weeks, mobile.')
+    print('League overview browser checks passed: page navigation, dedicated matchups, team drilldown, free-agent/draft global ranks, future weeks, mobile.')
 
 
 if __name__=='__main__': main()

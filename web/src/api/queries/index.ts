@@ -1,28 +1,36 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
-import { fetchPlayerProfile, get } from '../client'
+import { fetchDataCatalog, fetchPlayerProfile, fetchStatus, get } from '../client'
+import { allPages } from '../pagination'
 import type { ProfileDirectory } from '../profiles'
-import { nextgenCatalog, nextgenLeague, nextgenMatchups, nextgenPlayers, nextgenRankings, nextgenRankingEvidence, nextgenForecasts, nextgenRegistry, nextgenRookies, nextgenEvidence } from '../nextgen'
+import { nextgenWeeklyEvidence, nextgenWeeklyForecasts, nextgenForecastAccuracy, nextgenRankingHistory, nextgenCatalog, nextgenLeague, nextgenMatchups, nextgenPlayers, nextgenRankings, nextgenRankingEvidence, nextgenForecasts, nextgenRegistry, nextgenRookies, nextgenEvidence } from '../nextgen'
 import { passingForecasts, passingEvidence, passingVariations } from '../qbPassing'
 
 // The catalog provider polls and verifies the release; changing its token selects
 // new cache entries. Live observations use their own freshness and invalidation.
 const published = { staleTime: Infinity, gcTime: 30 * 60_000, retry: false as const }
-export const canonicalParams = (params: URLSearchParams) => {
+/** Browsing lists keep showing the previous page while the next loads, but never across releases. */
+const keepWithinRelease = (token: string | undefined) =>
+  <T,>(previous: T | undefined, query?: { queryKey: readonly unknown[] }) => query?.queryKey[1] === token ? previous : undefined
+const canonicalParams = (params: URLSearchParams) => {
   const copy = new URLSearchParams(params); copy.sort(); return copy.toString()
 }
 const paramsQuery = <T,>(name: string, params: URLSearchParams, token: string | undefined, fetcher: (params: URLSearchParams, token?: string, signal?: AbortSignal) => Promise<T>) => {
   const key = canonicalParams(params)
   return queryOptions({ ...published, queryKey: [name, token, key], queryFn: ({ signal }) => fetcher(new URLSearchParams(key), token, signal) })
 }
+export const statusQuery = () => queryOptions({ queryKey: ['status'], queryFn: fetchStatus })
+/** The canonical data release; polled so a newly published release replaces cached analysis. */
+export const dataCatalogQuery = () => queryOptions({ queryKey: ['data-catalog'], queryFn: fetchDataCatalog, retry: false, refetchInterval: 60_000, staleTime: 30_000 })
 export const catalogQuery = (token?: string) => queryOptions({ ...published, queryKey: ['nextgen-catalog', token], queryFn: ({ signal }) => nextgenCatalog(token, signal) })
 export const profileQuery = (params: URLSearchParams, token?: string) => paramsQuery('player-profile', params, token, fetchPlayerProfile)
 export const directoryQuery = (token?: string) => queryOptions({ ...published, queryKey: ['profile-directory', token], queryFn: ({ signal }) => get<ProfileDirectory>('/api/profiles/directory', token, undefined, signal) })
 export const rankingsQuery = (horizon = 'rest_of_season', token?: string) => paramsQuery('nextgen-rankings', new URLSearchParams({ horizon }), token, nextgenRankings)
+export const rankingHistoryQuery = (horizon = 'rest_of_season', token?: string) => paramsQuery('ranking-history', new URLSearchParams({ horizon }), token, nextgenRankingHistory)
 export const measurementsQuery = (period: string, token?: string) => paramsQuery('nextgen-players', new URLSearchParams({ period }), token, nextgenPlayers)
 export const rankingEvidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('ranking-evidence', params, token, nextgenRankingEvidence)
-export const forecastsQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-forecasts', params, token, nextgenForecasts)
-export const registryQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-registry', params, token, nextgenRegistry)
-export const rookiesQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-rookies', params, token, nextgenRookies)
+export const forecastsQuery = (params: URLSearchParams, token?: string) => ({ ...paramsQuery('nextgen-forecasts', params, token, nextgenForecasts), placeholderData: keepWithinRelease(token) })
+export const registryQuery = (params: URLSearchParams, token?: string) => ({ ...paramsQuery('nextgen-registry', params, token, nextgenRegistry), placeholderData: keepWithinRelease(token) })
+export const rookiesQuery = (params: URLSearchParams, token?: string) => ({ ...paramsQuery('nextgen-rookies', params, token, nextgenRookies), placeholderData: keepWithinRelease(token) })
 export const evidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-evidence', params, token, nextgenEvidence)
 export const passingQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-passing', params, token, passingForecasts)
 export const passingEvidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-passing-evidence', params, token, passingEvidence)
@@ -55,3 +63,14 @@ export function prefetchProfile(client: QueryClient, params: URLSearchParams, to
 
 export const collegeQuery = <T,>(resource: string, params: URLSearchParams, token?: string) =>
   paramsQuery(`college-${resource}`, params, token, (p, t, signal) => get<T>(`/api/research/college${resource ? '/' + resource : ''}?${p}`, t, 'research', signal))
+
+type IndividualEvidence = { total: number; comparisons: Record<string, string | number | boolean | null>[] }
+/** Every screening comparison recorded for one research stat. */
+export const individualEvidenceQuery = (stat: string, token?: string) => queryOptions({ ...published, queryKey: ['individual-evidence', token, stat],
+  queryFn: () => allPages<IndividualEvidence>(new URLSearchParams({ scope: 'research', search: stat, limit: '100' }),
+    page => get<IndividualEvidence>(`/api/nextgen/individual-evidence?${page}`, token), 'comparisons') })
+
+export const weeklyForecastsQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token, 'weekly-forecasts'], queryFn: ({ signal }) => nextgenWeeklyForecasts(token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false })
+export const forecastAccuracyQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token, 'forecast-accuracy'], queryFn: ({ signal }) => nextgenForecastAccuracy(token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false })
+
+export const weeklyEvidenceQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token, 'weekly-evidence'], queryFn: ({ signal }) => nextgenWeeklyEvidence(token, signal), staleTime: 60_000, retry: false })

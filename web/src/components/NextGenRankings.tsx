@@ -1,7 +1,8 @@
-import { leagueQuery, rankingsQuery, rankingEvidenceQuery } from '../api/queries'
+import { RankMovement } from './RankMovement'
+import { PlayerRankHistory } from './PlayerRankHistory'
+import { rankingHistoryQuery, leagueQuery, rankingsQuery, rankingEvidenceQuery } from '../api/queries'
 import { Link } from 'react-router'
 import { intelligencePath, playerPath, researchPath, to, useUrlPage, useUrlParams, useUrlState } from '../navigation'
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getResponse } from '../api/client'
 import type { Ranking } from '../api/nextgen'
@@ -9,9 +10,9 @@ import { useDataRelease } from '../dataRelease'
 import { DataTable, type Column } from './DataTable'
 import { consensusColumns } from './RankComparison'
 import { AttentionBadges, PlayerStatus } from './LeagueAttention'
-
-const number = (n: number | null | undefined, digits = 1) => n == null ? '—' : n.toFixed(digits)
-
+import { Pager, PositionOptions, QueryError } from './Controls'
+import { useDownload } from '../download'
+import { fixed } from '../format'
 
 /** `/intelligence/rankings` */
 export function NextGenRankings() {
@@ -22,10 +23,13 @@ export function NextGenRankings() {
   const [ownership, setOwnership] = useUrlState('pool', 'all', { resets: ['page'] })
   const [, update] = useUrlParams()
   const page = useUrlPage(50)
-  const { offset, onPage: setOffset } = page
-  const [exportError, setExportError] = useState('')
+  const exporter = useDownload()
   const params = new URLSearchParams({ horizon, position, search })
   const query = useQuery(rankingsQuery(horizon, token))
+  const historyQuery = useQuery(rankingHistoryQuery(horizon, token))
+  const history = historyQuery.data?.version === query.data?.version ? historyQuery.data : undefined
+  const previous = history?.snapshots.at(-1)
+  const priorRanks = new Map(previous?.rankings.map(r => [r.player_id, r]))
   const league = useQuery(leagueQuery(token))
   const evidence = useQuery(rankingEvidenceQuery(new URLSearchParams({ horizon, position }), token))
   const owners = new Map(league.data?.players.filter(p => p.player_id).map(p => [p.player_id, p]))
@@ -33,11 +37,12 @@ export function NextGenRankings() {
     (ownership === 'free' ? owners.get(r.player_id)?.availability === 'free_agent' : owners.get(r.player_id)?.is_mine))
   const columns: Column<Ranking>[] = [
     { key: 'overall_rank', label: 'NextGen rank', title: 'Raw forecast points across positions; not scarcity-adjusted draft or waiver value.', initial: 'asc' },
+    { key: 'rank_movement', label: previous ? `Change · W${previous.through_week} → W${query.data?.report.through_week}` : 'Rank change', title: 'Overall rank movement since the previous published weekly cutoff, before filters. Positive means a better rank.', value: r => { const prior = priorRanks.get(r.player_id)?.overall_rank; return prior != null && r.overall_rank != null ? prior - r.overall_rank : null }, render: r => <RankMovement current={r.overall_rank} previous={priorRanks.get(r.player_id)?.overall_rank} /> },
     { key: 'player_display_name', label: 'Player', title: 'Open the player profile in a full page.', align: 'left' },
     { key: 'position_rank', label: 'NextGen · position', title: 'Predicted points rank within this position and horizon, before any filters. Equal predictions share rank.', initial: 'asc', render: r => r.position_rank == null ? 'Unranked' : `${r.position}${r.position_rank}` },
     ...consensusColumns<Ranking>({ showDates: false }),
-    { key: 'prediction', label: horizon === 'next4' ? 'Next 4 weeks · points' : 'Remaining points', title: 'Expected league points during the displayed horizon, including scheduled byes.', render: r => number(r.prediction) },
-    { key: 'current_points', label: 'Points so far', title: 'Observed current-season league points through the stated cutoff.', render: r => number(r.current_points) },
+    { key: 'prediction', label: horizon === 'next4' ? 'Next 4 weeks · points' : 'Remaining points', title: 'Expected league points during the displayed horizon, including scheduled byes.', render: r => fixed(r.prediction) },
+    { key: 'current_points', label: 'Points so far', title: 'Observed current-season league points through the stated cutoff.', render: r => fixed(r.current_points) },
     { key: 'ownership', label: 'Ownership', title: 'Separately refreshed ESPN ownership; unmatched players are not assumed free agents.', align: 'left',
       value: r => { const p = owners.get(r.player_id); return p ? p.owner_team_name ?? 'Unrostered' : null },
       render: r => { const p = owners.get(r.player_id); return p ? p.owner_team_name ?? 'Unrostered' : 'Not captured' } },
@@ -48,24 +53,17 @@ export function NextGenRankings() {
         {r.constraint && <span className="badge out">Reported season-ending absence</span>}
       </div> } },
   ]
-  const exportRows = async () => {
-    setExportError('')
-    try {
-      const response = await getResponse(`/api/nextgen/rankings?${params}&format=csv`, token)
-      const url = URL.createObjectURL(await response.blob())
-      const a = document.createElement('a'); a.href = url; a.download = `nextgen-${horizon}.csv`; a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch (error) { setExportError(error instanceof Error ? error.message : 'Export failed') }
-  }
+  const exportRows = () => exporter.download(`nextgen-${horizon}.csv`,
+    async () => (await getResponse(`/api/nextgen/rankings?${params}&format=csv`, token)).blob())
   return <section aria-label="NextGen rankings">
     <div className="analysis-controls">
       <label>Ranking horizon<select value={horizon} onChange={e => setHorizon(e.target.value)}><option value="rest_of_season">Rest of regular season</option><option value="next4">Next four weeks</option></select></label>
-      <label>Ranking position<select value={position} onChange={e => setPosition(e.target.value)}>{['ALL','QB','RB','WR','TE'].map(p => <option key={p}>{p}</option>)}</select></label>
+      <label>Ranking position<select value={position} onChange={e => setPosition(e.target.value)}><PositionOptions /></select></label>
       <label>Find ranked player<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label>
       <label>Ranking pool<select value={ownership} onChange={e => setOwnership(e.target.value)}><option value="all">All candidates</option><option value="free">Available in my league</option><option value="mine">My roster</option></select></label>
       <button type="button" className="button" onClick={() => update({ q: null, position: null, pool: null, page: null })}>Clear ranking filters</button>
     </div>
-    {query.isError && <p className="notice" role="alert">{query.error.message}</p>}
+    <QueryError query={query} />
     {query.isFetching && <p role="status">Loading published NextGen rankings…</p>}
     {league.isError && <p className="notice">League ownership unavailable. All-player rankings remain available.</p>}
     {query.data && <>
@@ -76,17 +74,20 @@ export function NextGenRankings() {
       {league.data && <p className="legend">Ownership/status captured {new Date(league.data.captured_at).toLocaleString()}{league.data.stale ? ' · Saved snapshot; refresh in League.' : ''}</p>}
       {league.data && league.data.week > query.data.report.through_week + 1 && <p className="notice" role="alert">Rankings need a new completed-week build. League observations are newer than the model cutoff.</p>}
       {!!query.data.excluded.length && <p className="notice" role="alert">Some ranking scopes are withheld: {[...new Set(query.data.excluded.map(e => e.reason))].join('; ')}</p>}
-      <DataTable rows={rows} columns={columns} pagination={page} sortParam="sort" defaultSort="overall_rank" rowKey={r => r.player_id} rowLabel={r => r.player_display_name}
+      {historyQuery.isError && <p className="notice">Ranking history unavailable. Current ranks remain available.</p>}
+      {history && <p className="legend">Rank movement compares published snapshots through completed weeks, for the same horizon. Recipe changes and the shrinking forecast window can affect ranks. {previous ? `Comparing Week ${previous.through_week} with Week ${query.data.report.through_week}.` : 'No earlier published weekly snapshot is available.'} Open row details for the weekly history.</p>}
+      <DataTable rows={rows} columns={columns} pagination={page} sortParam="sort" defaultSort="overall_rank" rowNumbers rowKey={r => r.player_id} rowLabel={r => r.player_display_name}
         rowClass={r => owners.get(r.player_id)?.is_mine ? 'mine-row' : undefined}
         emptyMessage={ownership !== 'all' && !league.data ? 'League ownership is required for this filter.' : 'No players match these filters.'}
+        renderDetails={r => <PlayerRankHistory ranking={r} history={history} />}
         profileHref={r => playerPath(r.player_id)} />
-      <div className="analysis-controls"><span>{rows.length} matching players</span><button type="button" className="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Previous rankings</button><button type="button" className="button" disabled={offset + 50 >= rows.length} onClick={() => setOffset(offset + 50)}>Next rankings</button>
-        <button type="button" className="button" onClick={() => void exportRows()}>Export rankings · all ownership</button></div>
-      {exportError && <p role="alert">{exportError}</p>}
+      <Pager page={page} total={rows.length} noun="rankings" summary={`${rows.length} matching players`}>
+        <button type="button" className="button" onClick={() => void exportRows()}>Export rankings · all ownership</button></Pager>
+      {exporter.error && <p role="alert">{exporter.error}</p>}
       <details className="reference-section"><summary>Ranking evidence and model decisions</summary>
         <p>Every historical forecast and recipe selection uses earlier seasons only. Modern tests cover 2019–2025; the full selection-policy check begins in 2011. All earlier training seasons are retained. Publication also checks ranking point capture, squared error, small samples and rookies.</p>
-        {evidence.isError && <p role="alert">{evidence.error.message}</p>}
-        {evidence.data?.evaluations.map(e => <section key={e.position}><h4>{e.position} · {e.serving === 'approved' ? 'Validated forecast' : 'Reference forecast'}</h4><p>{e.serving_reason}</p><p>Modern selection-policy MAE: {number(e.modern.error)} versus {number(e.modern.baseline_error)} reference points. Improvement: {number(e.modern.improvement)} points; 95% interval {number(e.modern.ci_low)} to {number(e.modern.ci_high)}. Adjusted q: {number(e.q_value, 3)}. Full-history improvement: {number(e.all_history.improvement)} points.</p></section>)}
+        <QueryError query={evidence} />
+        {evidence.data?.evaluations.map(e => <section key={e.position}><h4>{e.position} · {e.serving === 'approved' ? 'Validated forecast' : 'Reference forecast'}</h4><p>{e.serving_reason}</p><p>Modern selection-policy MAE: {fixed(e.modern.error)} versus {fixed(e.modern.baseline_error)} reference points. Improvement: {fixed(e.modern.improvement)} points; 95% interval {fixed(e.modern.ci_low)} to {fixed(e.modern.ci_high)}. Adjusted q: {fixed(e.q_value, 3)}. Full-history improvement: {fixed(e.all_history.improvement)} points.</p></section>)}
         <p>{query.data.report.limitations.join(' ')}</p>
       </details>
     </>}

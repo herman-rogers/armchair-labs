@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useUrlNumber } from '../navigation'
 import { useQuery } from '@tanstack/react-query'
-import { fetchMatchups } from '../api/client'
 import type { MetricVersion } from '../api/types'
 import { boardMetricLabel } from '../metricPresentation'
+import { archivedMatchupsQuery } from '../api/queries/archive'
 import { TeamCompare } from './TeamCompare'
 
 /**
@@ -24,10 +24,7 @@ export function MatchupsPanel({ version }: { version: MetricVersion }) {
   const week = selectedWeek > 0 ? selectedWeek : null
   const [expanded, setExpanded] = useState<number | null>(0)
 
-  const matchups = useQuery({
-    queryKey: ['matchups', version, week],
-    queryFn: () => fetchMatchups(version, week ?? undefined),
-  })
+  const matchups = useQuery(archivedMatchupsQuery(version, week))
 
   if (matchups.isError) return <div className="notice">{(matchups.error as Error).message}</div>
   if (!matchups.data) return <div className="notice">Loading matchups…</div>

@@ -6,9 +6,7 @@ import {
   POSITION_RANK_TITLE,
 } from '../metricPresentation'
 import type { Column } from './DataTable'
-
-const number = (value: number | null | undefined, digits = 1) =>
-  value == null ? '—' : value.toFixed(digits)
+import { fixed } from '../format'
 
 /** Every player surface displays and sorts the same selected forecast. */
 export function forecastColumns<Row extends Player>(version: MetricVersion): Column<Row>[] {
@@ -18,25 +16,25 @@ export function forecastColumns<Row extends Player>(version: MetricVersion): Col
         key: 'adj_vor',
         label: 'Draft VOR',
         title: 'Preserved draft value above positional replacement, including manual adjustments.',
-        render: (p) => <b>{number(p.adj_vor)}</b>,
+        render: (p) => <b>{fixed(p.adj_vor)}</b>,
       },
       {
         key: 'ppg',
         label: 'Historical PPG',
         title: 'League points divided by production-row games in the preserved draft reference.',
-        render: (p) => number(p.ppg),
+        render: (p) => fixed(p.ppg),
       },
       {
         key: 'games',
         label: 'Games',
         title: 'Games counted in the preserved draft reference.',
-        render: (p) => number(p.games, 0),
+        render: (p) => fixed(p.games, 0),
       },
       {
         key: 'season_pts',
         label: 'Season points',
         title: 'League points scored in the reference season.',
-        render: (p) => number(p.season_pts, 0),
+        render: (p) => fixed(p.season_pts, 0),
       },
     ]
   const columns: Column<Row>[] = [
@@ -44,7 +42,7 @@ export function forecastColumns<Row extends Player>(version: MetricVersion): Col
       key: 'v2_overall_vor',
       label: 'Overall VOR',
       title: OVERALL_VOR_TITLE,
-      render: (p) => <b>{number(p.v2_overall_vor)}</b>,
+      render: (p) => <b>{fixed(p.v2_overall_vor)}</b>,
     },
     {
       key: 'v2_position_rank',
@@ -61,14 +59,14 @@ export function forecastColumns<Row extends Player>(version: MetricVersion): Col
         label: 'Active PPG',
         title: 'Selected production forecast per active game.',
         value: (p) => forecastValues(p, version).activePPG,
-        render: (p) => number(forecastValues(p, version).activePPG),
+        render: (p) => fixed(forecastValues(p, version).activePPG),
       },
       {
         key: 'forecast_expected_games',
         label: 'Expected games',
         title: 'Expected active games underlying the selected season forecast.',
         value: (p) => forecastValues(p, version).expectedGames,
-        render: (p) => number(forecastValues(p, version).expectedGames),
+        render: (p) => fixed(forecastValues(p, version).expectedGames),
       },
     )
   columns.push(
@@ -77,7 +75,7 @@ export function forecastColumns<Row extends Player>(version: MetricVersion): Col
       label: 'Season points',
       title: 'Selected forecast in league points for the season.',
       value: (p) => forecastValues(p, version).seasonPoints,
-      render: (p) => <b>{number(forecastValues(p, version).seasonPoints, 0)}</b>,
+      render: (p) => <b>{fixed(forecastValues(p, version).seasonPoints, 0)}</b>,
     },
     {
       key: 'forecast_source',

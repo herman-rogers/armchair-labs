@@ -1,11 +1,10 @@
 import { useEffect, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchDataCatalog } from '../api/client'
+import { dataCatalogQuery } from '../api/queries'
 import { ReleaseContext, useDataRelease } from '../dataRelease'
 
 export function DataReleaseProvider({ children }: { children: ReactNode }) {
-  const query = useQuery({ queryKey: ['data-catalog'], queryFn: fetchDataCatalog, retry: false,
-    refetchInterval: 60_000, staleTime: 30_000 })
+  const query = useQuery(dataCatalogQuery())
   const { refetch } = query
   useEffect(() => {
     const refresh = () => { void refetch() }

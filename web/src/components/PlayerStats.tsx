@@ -1,8 +1,10 @@
-import { catalogQuery } from '../api/queries'
+import type { Catalog } from '../api/nextgen'
+import { useCatalog } from '../api/queries/hooks'
+import { measurementsQuery } from '../api/queries'
 import { useUrlState } from '../navigation'
 import { useQuery } from '@tanstack/react-query'
-import { measurementsQuery } from '../api/queries'
 import { useDataRelease } from '../dataRelease'
+import { fixed, percent } from '../format'
 
 const groups: Record<string, string[]> = {
   Production: ['passing_yards', 'rushing_yards', 'receiving_yards', 'receptions', 'league_points'],
@@ -16,17 +18,20 @@ const periods = [
   ['career', 'Completed NFL career'],
   ['current', 'Current season · partial'],
 ]
-const format = (value: unknown, key: string) => typeof value !== 'number' ? '—'
-  : ['snap_share', 'top2_positive_share'].includes(key) ? `${(value * 100).toFixed(1)}%` : value.toFixed(1)
+const format = (value: unknown, key: string) =>
+  ['snap_share', 'top2_positive_share'].includes(key) ? percent(value, 1) : fixed(value)
+
+/** Measurement catalog entries keyed by stat name (`measurement:targets` → `targets`). */
+const measurementDefinitions = (catalog?: Catalog) => new Map(catalog?.entries.filter(entry => entry.kind === 'measurement')
+  .map(entry => [entry.id.replace('measurement:', ''), entry]))
 
 export function PlayerStats({ playerId, name }: { playerId: string; name: string }) {
   const { token } = useDataRelease()
   const [period, setPeriod] = useUrlState('period', 'prior')
-  const catalog = useQuery(catalogQuery(token))
+  const catalog = useCatalog()
   const query = useQuery(measurementsQuery(period, token))
   const player = query.data?.players.find(row => row.player_id === playerId)
-  const definitions = new Map(catalog.data?.entries.filter(entry => entry.kind === 'measurement')
-    .map(entry => [entry.id.replace('measurement:', ''), entry]))
+  const definitions = measurementDefinitions(catalog.data)
 
   return <section className="player-stats" aria-label={`${name} player stats`}>
     <div className="profile-heading">
@@ -58,10 +63,8 @@ export function PlayerStats({ playerId, name }: { playerId: string; name: string
 }
 
 export function PlayerStatDefinitions() {
-  const { token } = useDataRelease()
-  const catalog = useQuery(catalogQuery(token))
-  const definitions = new Map(catalog.data?.entries.filter(entry => entry.kind === 'measurement')
-    .map(entry => [entry.id.replace('measurement:', ''), entry]))
+  const catalog = useCatalog()
+  const definitions = measurementDefinitions(catalog.data)
   if (catalog.isError) return <p role="alert">Stat definitions unavailable: {catalog.error.message}</p>
   if (!catalog.data) return <p role="status">Loading stat definitions…</p>
   return <section className="player-stat-definitions"><h4>Player stat definitions</h4>

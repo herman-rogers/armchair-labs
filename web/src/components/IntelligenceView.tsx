@@ -1,9 +1,8 @@
 import { PlayerProfiles, PlayerProfileLink } from './PlayerProfile'
-import { NavLink, Outlet, useParams } from 'react-router'
+import { Navigate, NavLink, Outlet, useParams } from 'react-router'
 import { CollegePathways } from './CollegePathways'
 import { useQuery } from '@tanstack/react-query'
 import type { IntelligenceTeam, ResearchPlayer, Status } from '../api/types'
-import { fetchLeaguePlayers, fetchLeagueImpact, fetchResearchCatalog, fetchResearchPlayers, fetchResearchSources } from '../api/client'
 import { PLAYER_MODELS, researchModelLabel, researchModelDescription } from '../researchModels'
 import { DataTable, type Column } from './DataTable'
 import { MetricReportView } from './MetricReportView'
@@ -12,39 +11,39 @@ import { ReferenceBoard } from './ReferenceBoard'
 import { PlayerOutlook } from './PlayerOutlook'
 import { DataReleaseProvider, DataReleaseStatus } from './DataRelease'
 import { useDataRelease } from '../dataRelease'
-import { archiveGet } from '../api/client'
-import { ARCHIVED_VIEWS, archivePath, useUrlFlag, useUrlNumber, useUrlParams, useUrlState } from '../navigation'
+import { ARCHIVED_VIEWS, archivePath, isArchivedView, useUrlFlag, useUrlNumber, useUrlParams, useUrlState } from '../navigation'
+import { PositionOptions, QueryError } from './Controls'
+import { SKILL_POSITIONS } from '../positions'
+import { archivedStatusQuery, leagueImpactQuery, leaguePlayersQuery, researchCatalogQuery, researchPlayersQuery, researchSourcesQuery } from '../api/queries/archive'
+import { fixed, rank } from '../format'
 
-const number = (value: number | null | undefined) => value == null ? '—' : value.toFixed(1)
-const rank = (value: number | null) => value == null ? '—' : `#${value}`
 const teamColumns: Column<IntelligenceTeam>[] = [
   { key: 'scenario_rank', label: 'Scenario rank', title: 'Power ordering under this model and these assumptions.', initial: 'asc', render: r => rank(r.scenario_rank) },
   { key: 'team_name', label: 'Team', title: 'Current Sweaty Plays roster.', align: 'left' },
   { key: 'baseline_rank', label: 'Production rank', title: 'The same legal lineups evaluated with the production forecast.', initial: 'asc', render: r => rank(r.baseline_rank) },
   { key: 'rank_change', label: 'Rank change', title: 'Positive means the team rises under this scenario.', render: r => `${r.rank_change > 0 ? '+' : ''}${r.rank_change}` },
   { key: 'wins', label: 'Record', title: 'Actual league wins and losses, independent of the scenario.', render: r => `${r.wins}–${r.losses}` },
-  { key: 'scenario_value', label: 'Lineup value', title: 'Best legal lineup on the scenario value scale.', render: r => number(r.scenario_value) },
-  { key: 'value_change', label: 'Value change', title: 'Scenario lineup value minus production lineup value.', render: r => number(r.value_change) },
+  { key: 'scenario_value', label: 'Lineup value', title: 'Best legal lineup on the scenario value scale.', render: r => fixed(r.scenario_value) },
+  { key: 'value_change', label: 'Value change', title: 'Scenario lineup value minus production lineup value.', render: r => fixed(r.value_change) },
   { key: 'modeled_players', label: 'Modeled', title: 'Rostered skill players with usable research forecasts.' },
   { key: 'fallback_players', label: 'Fallbacks', title: 'Players using the declared production fallback.' },
   { key: 'missing_players', label: 'Missing', title: 'Players excluded because they have no usable scenario score.' },
 ]
 
 const SECTION_LABELS: Record<typeof ARCHIVED_VIEWS.intelligence[number], string> = { players: 'Players', 'league-impact': 'League impact', research: 'Research' }
-const archivedStatus = () => archiveGet<Status>('/api/status?scope=research')
 
 /** Layout for `/research/archive/intelligence/*`: the archived status and section links. */
 export function ArchivedIntelligence() {
-  const status = useQuery({ queryKey: ['archived-status'], queryFn: archivedStatus, retry: false })
+  const status = useQuery(archivedStatusQuery())
   return <>
     <p className="archive-banner">ARCHIVED: these runs retain their original data, including known timing or target-count defects. “Accepted” in an old report refers to its original checks, not current approval.</p>
-    {status.isError && <p role="alert">{status.error.message}</p>}
+    <QueryError query={status} />
     {status.data && <DataReleaseProvider><section className="intelligence-workspace">
       <div className="section-heading"><div><span className="eyebrow">Analysis workspace</span>
         <h2>Intelligence</h2><p>Find players to investigate. Check current opportunity. Compare the historical evidence.</p></div></div>
       <DataReleaseStatus />
-      <nav className="subnav" aria-label="Archived intelligence views">
-        {ARCHIVED_VIEWS.intelligence.map(id => <NavLink key={id} className="subtab" to={archivePath('intelligence', id)} preventScrollReset>{SECTION_LABELS[id]}</NavLink>)}
+      <nav className="archive-page-links" aria-label="Archived intelligence views">
+        {ARCHIVED_VIEWS.intelligence.map(id => <NavLink key={id} to={archivePath('intelligence', id)}>{SECTION_LABELS[id]}</NavLink>)}
       </nav>
       <Outlet />
     </section></DataReleaseProvider>}
@@ -54,7 +53,8 @@ export function ArchivedIntelligence() {
 /** `/research/archive/intelligence/:view` */
 export function ArchivedIntelligenceView() {
   const { view } = useParams()
-  const status = useQuery({ queryKey: ['archived-status'], queryFn: archivedStatus, retry: false })
+  const status = useQuery(archivedStatusQuery())
+  if (!isArchivedView('intelligence', view)) return <Navigate replace to={archivePath('intelligence', 'players')} />
   if (!status.data) return null
   return <IntelligenceWorkspace status={status.data} section={view === 'league-impact' ? 'league' : view === 'research' ? 'research' : 'players'} />
 }
@@ -62,7 +62,7 @@ export function ArchivedIntelligenceView() {
 const DEFAULT_WEIGHTS = { QB: 1, RB: 1, WR: 1, TE: 1 }
 
 function IntelligenceWorkspace({ status, section }: { status: Status; section: 'players' | 'league' | 'research' }) {
-  const { token: dataRelease } = useDataRelease()
+  const { token } = useDataRelease()
   const [params, update] = useUrlParams()
   const [playerView, setPlayerView] = useUrlState('view', 'profiles')
   const [playerGroup] = useUrlState('group', 'all')
@@ -84,7 +84,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
   const [pricingDirection, setPricingDirection] = useUrlState('direction', 'all')
   const [minimumGap, setMinimumGap] = useUrlNumber('gap', 10, { replace: true })
   const [ownership, setOwnership] = useUrlState('roster', 'all')
-  const owners = useQuery({ queryKey: ['league-players', 'v2'], queryFn: () => fetchLeaguePlayers('v2'), retry: false })
+  const owners = useQuery(leaguePlayersQuery('v2'))
   const ownerById = new Map(owners.data?.players.map(p => [p.player_id, p]))
   const [search, setSearch] = useUrlState('q', '', { replace: true, resets: ['page'] })
   const [missing, setMissing] = useUrlState('missing', 'production')
@@ -98,11 +98,10 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
   // Rookie populations have no core-model forecasts, so choosing one also switches the model.
   const choosePopulation = (key: 'group' | 'population', value: string) => update({ [key]: value === 'all' ? null : value, page: null,
     ...(value === 'rookie' && ['fitted_season_points', 'fitted_ppg'].includes(model) ? { model: 'fitted_nextgen_season_points' } : {}) })
-  const sources = useQuery({ queryKey: ['research-sources', dataRelease], queryFn: fetchResearchSources, enabled: savedResearch, retry: false })
+  const sources = useQuery({ ...researchSourcesQuery(token), enabled: savedResearch })
   const activeDataset = dataset || sources.data?.default_id || ''
   const source = sources.data?.datasets.find(entry => entry.id === activeDataset)
-  const catalog = useQuery({ queryKey: ['research-catalog', activeDataset],
-    queryFn: () => fetchResearchCatalog(activeDataset), enabled: savedResearch && !!activeDataset, retry: false })
+  const catalog = useQuery({ ...researchCatalogQuery(activeDataset), enabled: savedResearch && !!activeDataset })
   const activeSeason = tab === 'league' || reality === 'current' ? status.league.draft_season : season
   const availableModels = catalog.data?.models.filter(m => m.seasons.includes(activeSeason)
     && (tab !== 'league' || ['season points', 'active-game PPG'].includes(m.unit))
@@ -111,15 +110,12 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
   const cutoffs = catalog.data?.seasons.find(entry => entry.season === activeSeason)?.cutoff_dates ?? []
   const impactParams = new URLSearchParams({ dataset: activeDataset, model: activeModel?.id ?? '', missing,
     ...Object.fromEntries(Object.entries(weights).map(([key, value]) => [key.toLowerCase(), String(value)])) })
-  const impact = useQuery({ queryKey: ['league-impact', impactParams.toString()],
-    queryFn: () => fetchLeagueImpact(impactParams), enabled: tab === 'league' && !!activeModel, retry: false })
+  const impact = useQuery({ ...leagueImpactQuery(impactParams), enabled: tab === 'league' && !!activeModel })
   const overallEspnComparison = tab === 'mispricing' && pricingBasis === 'espn'
   const playerParams = new URLSearchParams({ dataset: activeDataset, model: activeModel?.id ?? '', position: overallEspnComparison ? 'ALL' : position,
     population: overallEspnComparison ? 'all' : population,
     ...(reality === 'current' ? { benchmark: tab === 'mispricing' ? 'market' : 'production' } : { season: String(activeSeason), target, benchmark: tab === 'mispricing' ? 'market' : benchmark }) })
-  const players = useQuery({ queryKey: ['research-players', reality, playerParams.toString()],
-    queryFn: () => fetchResearchPlayers(playerParams, reality === 'current'),
-    enabled: comparisonView && !!activeModel, retry: false })
+  const players = useQuery({ ...researchPlayersQuery(playerParams, reality === 'current'), enabled: comparisonView && !!activeModel })
   const visiblePlayers = (players.data?.players ?? []).filter(row =>
     (!overallEspnComparison || ((position === 'ALL' || row.position === position) &&
       (population === 'all' || row.population === population))) &&
@@ -151,8 +147,8 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
       render: r => ownerById.get(r.player_id)?.injury_status ?? 'Unknown' },
     { key: 'actual_rank', label: 'Actual rank', title: 'Rank by observed fantasy production, including players missing research scores.', initial: 'asc', render: r => rank(r.actual_rank) },
     { key: 'rank_gap', label: 'Rank gap', title: 'Actual rank minus research rank. Positive means research ranked the player higher.', render: r => r.rank_gap == null ? '—' : `${r.rank_gap > 0 ? '+' : ''}${r.rank_gap}` },
-    { key: 'model_value', label: 'Research score', title: `Saved model output in ${activeModel?.unit ?? 'model units'}.`, render: r => number(r.model_value) },
-    { key: 'actual_value', label: 'Actual result', title: reality === 'current' ? 'Observed ESPN points to date; this can be partial.' : target === 'actual_ppg' ? 'Observed active-game fantasy PPG.' : 'Observed fantasy season points.', render: r => number(r.actual_value) },
+    { key: 'model_value', label: 'Research score', title: `Saved model output in ${activeModel?.unit ?? 'model units'}.`, render: r => fixed(r.model_value) },
+    { key: 'actual_value', label: 'Actual result', title: reality === 'current' ? 'Observed ESPN points to date; this can be partial.' : target === 'actual_ppg' ? 'Observed active-game fantasy PPG.' : 'Observed fantasy season points.', render: r => fixed(r.actual_value) },
     { key: 'benchmark_rank', label: 'Benchmark rank', title: reality !== 'current' && benchmark === 'market' ? 'Market ECR order in the selected pool.' : 'Production season-points order in the same saved fold.', initial: 'asc', render: r => rank(r.benchmark_rank) },
     { key: 'population', label: 'Population', title: 'Returning player, rookie, or market-only candidate.', align: 'left' },
   ]
@@ -177,7 +173,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
     <span className="instrument-tag">{section === 'players' ? 'Career history & current opportunity' : section === 'league' ? 'Roster scenarios' : 'Models & evidence'}</span>
     {section === 'players' && <div className="analysis-controls player-browser-controls">
       <label>Search players<input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Player name…" /></label>
-      <label>Position<select aria-label="Position" value={position} onChange={e => setPosition(e.target.value)}>{['ALL', 'QB', 'RB', 'WR', 'TE'].map(p => <option key={p}>{p}</option>)}</select></label>
+      <label>Position<select aria-label="Position" value={position} onChange={e => setPosition(e.target.value)}><PositionOptions /></select></label>
       <label>Population<select aria-label="Population" value={playerGroup} onChange={e => choosePopulation('group', e.target.value)}><option value="all">All NFL players</option><option value="rookie">Rookies</option><option value="returner">Returners</option><option value="college">College → NFL</option></select></label>
       <label>Player view<select aria-label="Player view" value={playerGroup === 'college' && playerView === 'outlook' ? 'players' : playerView} onChange={e => setPlayerView(e.target.value)}>
         <option value="profiles">{playerGroup === 'college' ? 'College careers' : 'Career history'}</option>
@@ -196,7 +192,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
     {tab === 'college' && <CollegePathways view={playerView === 'profiles' ? 'identities' : 'players'} filters={filters} />}
     {(tab === 'college-evidence' || tab === 'college-identities') && <CollegePathways view={tab === 'college-evidence' ? 'evidence' : 'identities'} audit />}
     {savedResearch && <>
-      {sources.isError && <p className="notice">Could not load research datasets: {sources.error.message}</p>}
+      <QueryError query={sources} label="Could not load research datasets" />
       {sources.isLoading && <p role="status">Checking accepted research datasets…</p>}
       {sources.data && !sources.data.datasets.length && <p className="notice">No accepted or legacy research datasets are available.</p>}
       <div className="analysis-controls">
@@ -210,7 +206,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
       {sources.data?.unavailable.map(entry => <p className="notice" key={entry.id}>{entry.reason}</p>)}
     </>}
     {(tab === 'league' || comparisonView) && <>
-      {catalog.isError && <div className="notice">{catalog.error.message}</div>}
+      <QueryError query={catalog} />
       {!catalog.data && !catalog.isError && <p className="notice">Loading research models…</p>}
       <div className="analysis-controls">
         <label>Research model<select aria-label="Research model" value={activeModel?.id ?? ''} onChange={e => setModel(e.target.value)}>
@@ -233,7 +229,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
     </>}
     {tab === 'league' && <>
       <div className="assumption-panel"><div><h3>Positional assumptions</h3><p>Adjust forecast strength by position. 100% keeps the model unchanged.</p></div>
-        <div className="analysis-controls">{(['QB', 'RB', 'WR', 'TE'] as const).map(pos => <label key={pos}>{pos} weight (%)
+        <div className="analysis-controls">{SKILL_POSITIONS.map(pos => <label key={pos}>{pos} weight (%)
           <input type="number" min="0" max="200" step="5" value={Math.round(weights[pos] * 100)}
             onChange={e => { const n = Number(e.target.value); if (Number.isFinite(n)) { const percent = Math.max(0, Math.min(200, n)); update({ [`${pos.toLowerCase()}_weight`]: percent === 100 ? null : percent }, { replace: true }) } }} />
         </label>)}
@@ -243,13 +239,13 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
           <button type="button" className="button" onClick={() => update({ qb_weight: null, rb_weight: null, wr_weight: null, te_weight: null, missing: null })}>Reset assumptions</button>
         </div>
       </div>
-      {impact.isError && <div className="notice">{impact.error.message}</div>}
+      <QueryError query={impact} />
       {impact.isFetching && <p role="status">Recalculating roster values…</p>}
       {impact.data && <><p className="legend">{impact.data.basis} {impact.data.stale && 'League snapshot is stale.'}</p>
         <DataTable rows={impact.data.teams} columns={teamColumns} defaultSort="scenario_rank" rowKey={r => r.team_id}
           rowLabel={r => r.team_name} emptyMessage="No current rosters are available."
           renderDetails={r => <div className="player-details"><h3>{r.team_name} · scenario starters</h3>
-            {r.starters.map((s, i) => <p key={i}>{s.slot} · {s.name ?? 'Unfilled'} · {number(s.value)}</p>)}</div>} />
+            {r.starters.map((s, i) => <p key={i}>{s.slot} · {s.name ?? 'Unfilled'} · {fixed(s.value)}</p>)}</div>} />
       </>}
     </>}
     {comparisonView && <>
@@ -289,7 +285,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
           <option value="all">All players</option><option value="returner">Returners</option><option value="rookie">Rookies</option><option value="market_only">Market only</option>
         </select></label>
         <label>Position<select aria-label="Position" value={position} onChange={e => setPosition(e.target.value)}>
-          {['ALL', 'QB', 'RB', 'WR', 'TE'].map(p => <option key={p}>{p}</option>)}
+          <PositionOptions />
         </select></label>
         </>}
         <label>Coverage<select aria-label="Coverage" value={coverage} onChange={e => setCoverage(e.target.value)}>
@@ -303,7 +299,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
       </div>
       {owners.isError && <p className="legend">Current roster ownership is unavailable; player rankings remain available.</p>}
       {owners.data && <p className="legend faint">Roster labels reflect the current league snapshot, even for historical seasons. Your players are highlighted.{owners.data.stale && ' Ownership snapshot is stale.'}</p>}
-      {players.isError && <div className="notice">{players.error.message}</div>}
+      <QueryError query={players} />
       {players.isFetching && <p role="status">Loading player comparisons…</p>}
       {players.data && <><p className="legend">{players.data.outcome_status}</p>
         <p className="legend faint">{players.data.scored_players} / {players.data.pool_size} model-scored · {players.data.ranking_basis}</p>
@@ -313,7 +309,7 @@ function IntelligenceWorkspace({ status, section }: { status: Status; section: '
           rowLabel={r => r.player_display_name}
           renderDetails={r => <><PlayerProfileLink playerId={r.player_id} /><details className="player-details"><summary>Selected forecast context</summary>
             <p>Saved preseason cutoff: {r.historical_context?.cutoff_date ?? 'Not recorded'}. Historical roster evidence: {r.historical_context?.roster_evidence?.replaceAll('_', ' ') ?? 'Unknown'}; historical status: {r.historical_context?.roster_status ?? 'Unknown'}.</p>
-            <p>Prior-season sample: {number(r.historical_context?.prior_games)} games · {number(r.historical_context?.prior_ppg)} active-game PPG · observed offensive snap share {r.historical_context?.prior_snap_share == null ? 'unknown' : `${(100 * r.historical_context.prior_snap_share).toFixed(0)}%`}.</p>
+            <p>Prior-season sample: {fixed(r.historical_context?.prior_games)} games · {fixed(r.historical_context?.prior_ppg)} active-game PPG · observed offensive snap share {r.historical_context?.prior_snap_share == null ? 'unknown' : `${(100 * r.historical_context.prior_snap_share).toFixed(0)}%`}.</p>
             <p>Current saved health: {ownerById.get(r.player_id)?.injury_status ?? 'Unknown'}. Verify latest news and role before acting; current ownership and health do not update this preseason forecast.</p>
           </details></>} />
       </>}

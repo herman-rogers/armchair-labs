@@ -1,16 +1,18 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchBoard, fetchLeaguePlayers, fetchStatus } from '../api/client'
 import type { LeaguePlayer, MetricVersion, Position } from '../api/types'
 import { forecastColumns } from './ForecastColumns'
 import { RankingExplanation } from './PlayerDetails'
 import { BoardTable } from './BoardTable'
 import { ForecastContext } from './ForecastContext'
 import { Freshness } from './Freshness'
-import { IDENTITY, OWNERSHIP, PlayerTable } from './PlayerTable'
+import { PlayerTable } from './PlayerTable'
+import { IDENTITY, OWNERSHIP } from './playerColumns'
+import { SKILL_POSITIONS } from '../positions'
+import { statusQuery } from '../api/queries'
+import { boardQuery, leaguePlayersQuery } from '../api/queries/archive'
 import { useUrlState } from '../navigation'
 
-const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE']
 const FLAGS = ['age', 'ESPN-only'] as const
 
 type Ownership = 'all' | 'free_agent' | 'rostered' | 'mine'
@@ -29,7 +31,7 @@ const OWNERSHIP_FILTERS: { id: Ownership; label: string; hint: string }[] = [
  * is useful on its own — it just cannot tell you who is available.
  */
 export function PlayersView({ version }: { version: MetricVersion }) {
-  const status = useQuery({ queryKey: ['status'], queryFn: fetchStatus })
+  const status = useQuery(statusQuery())
   const [positionList, setPositionList] = useUrlState('positions', '')
   const positions = useMemo(() => new Set(positionList.split(',').filter(Boolean) as Position[]), [positionList])
   const [flagParam, setFlagParam] = useUrlState('flag', '')
@@ -38,38 +40,28 @@ export function PlayersView({ version }: { version: MetricVersion }) {
   const ownership = ownershipParam as Ownership
   const [search, setSearch] = useUrlState('q', '', { replace: true })
 
-  const league = useQuery({
-    queryKey: ['league-players', version],
-    queryFn: () => fetchLeaguePlayers(version),
-    retry: false,
-  })
+  const league = useQuery(leaguePlayersQuery(version))
   // Only fetched when the league join is unavailable, so an unauthenticated user still
   // gets the board rather than an error screen.
-  const board = useQuery({
-    queryKey: ['board', version],
-    queryFn: () => fetchBoard(version),
-    enabled: league.isError,
-  })
+  const board = useQuery({ ...boardQuery(version), enabled: league.isError })
 
   const connected = !league.isError && !!league.data
   const rows: LeaguePlayer[] = connected
     ? league.data.players
     : ((board.data?.players ?? []) as LeaguePlayer[])
 
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    return rows.filter((player) => {
-      if (positions.size && !positions.has(player.position)) return false
-      if (flag && !player.flags.includes(flag)) return false
-      if (needle && !player.player_display_name.toLowerCase().includes(needle)) return false
-      if (connected && ownership !== 'all') {
-        if (ownership === 'mine' && !player.is_mine) return false
-        if (ownership === 'free_agent' && player.availability !== 'free_agent') return false
-        if (ownership === 'rostered' && player.availability !== 'rostered') return false
-      }
-      return true
-    })
-  }, [rows, positions, flag, search, ownership, connected])
+  const needle = search.trim().toLowerCase()
+  const filtered = rows.filter((player) => {
+    if (positions.size && !positions.has(player.position)) return false
+    if (flag && !player.flags.includes(flag)) return false
+    if (needle && !player.player_display_name.toLowerCase().includes(needle)) return false
+    if (connected && ownership !== 'all') {
+      if (ownership === 'mine' && !player.is_mine) return false
+      if (ownership === 'free_agent' && player.availability !== 'free_agent') return false
+      if (ownership === 'rostered' && player.availability !== 'rostered') return false
+    }
+    return true
+  })
 
   const togglePosition = (position: Position) => {
     const next = new Set(positions)
@@ -87,7 +79,7 @@ export function PlayersView({ version }: { version: MetricVersion }) {
   return (
     <>
       <div className="controls">
-        {POSITIONS.map((position) => (
+        {SKILL_POSITIONS.map((position) => (
           <button
             key={position}
             type="button"

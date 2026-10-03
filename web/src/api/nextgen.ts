@@ -1,4 +1,4 @@
-import { get } from './client'
+import { get, post } from './client'
 import { allPages } from './pagination'
 
 export interface Entry {
@@ -71,10 +71,10 @@ export interface LeagueObservations {
 }
 export interface ObservedLineup {
   espn_id: number; player_display_name: string; position: string | null; slot: string;
-  points: number; projected_points: number | null; pro_opponent: string | null; on_bye: boolean; started: boolean;
+  points: number; pro_opponent: string | null; on_bye: boolean; started: boolean;
 }
 export interface MatchupSide {
-  team_id: number; team_name: string; score: number | null; espn_projection: number | null;
+  team_id: number; team_name: string; score: number | null;
   lineup: ObservedLineup[]; lineup_available: boolean;
 }
 export interface ObservedMatchups {
@@ -101,12 +101,41 @@ export const nextgenMatchups = (week: number | null, token?: string, signal?: Ab
   get<ObservedMatchups>(`/api/nextgen/league/matchups${week == null ? '' : `?week=${week}`}`, token, undefined, signal)
 export const nextgenRookies = (params: URLSearchParams, token?: string, signal?: AbortSignal) =>
   allPages<{ total: number; players: Rookie[]; season: number; through_week: number }>(params, p => get<{ total: number; players: Rookie[]; season: number; through_week: number }>(`/api/nextgen/rookies?${p}`, token, undefined, signal), 'players', 1000)
-export async function refreshObservations(token?: string) {
-  const response = await fetch('/api/nextgen/league/refresh', { method: 'POST', headers: token ? { 'X-Data-Catalog': token } : {} })
-  if (!response.ok) {
-    if (response.headers.get('X-Data-Catalog-Stale') === 'true') window.dispatchEvent(new Event('data-catalog-changed'))
-    const body = await response.json().catch(() => ({}))
-    throw new Error(body.detail ?? 'League refresh failed')
-  }
-  return response.json()
+/** Pull fresh ESPN league observations (rosters, matchups, injuries). */
+export const refreshObservations = (token?: string) =>
+  post<{ captured_at: string; stale: boolean; age_seconds: number }>('/api/nextgen/league/refresh', { dataCatalog: token })
+
+export interface RankingHistory {
+  version: string; season: number; through_week: number; horizon: string;
+  snapshots: { through_week: number; version: string; rankings: (Pick<Ranking, 'player_id' | 'overall_rank' | 'position_rank'> & { prediction?: number | null; scheduled_games?: number | null })[] }[];
 }
+export const nextgenRankingHistory = (params: URLSearchParams, token?: string, signal?: AbortSignal) =>
+  get<RankingHistory>(`/api/nextgen/rankings/history?${params}`, token, undefined, signal)
+
+export interface WeeklyForecastSide {
+  team_id: number; team_name: string; score: number | null; model_projection: number | null;
+  covered_starters: number; starter_count: number;
+  forecasts: { espn_id: number; player_display_name: string; position: string | null; slot: string; started: boolean; prediction: number | null; basis: string | null; unavailable_reason: string | null }[];
+}
+export interface WeeklyForecasts {
+  source: 'nextgen_weekly_reference' | 'nextgen_weekly_model';
+  weekly_version?: string | null;
+  version: string; season: number; current_week: number; requested_week: number; through_week: number;
+  captured_at: string; generated_at: string; stale: boolean; recipe: string; evidence_status: string; limitations: string[];
+  matchups: { home: WeeklyForecastSide; away: WeeklyForecastSide; involves_me: boolean; margin: number | null; favorite_team_id: number | null }[];
+}
+export interface ForecastAccuracy {
+  season: number; through_week: number; correct: number; evaluated: number; total: number; accuracy: number | null; point_mae: number | null; point_teams: number; method: string;
+  games: { week: number; home: string; away: string; home_id: number; away_id: number; home_score: number | null; away_score: number | null; predicted_winner: string | null; projected_home: number | null; projected_away: number | null; status: string; correct: boolean | null }[];
+}
+export const nextgenWeeklyForecasts = (token?: string, signal?: AbortSignal) => get<WeeklyForecasts>('/api/nextgen/league/forecasts', token, undefined, signal)
+export const nextgenForecastAccuracy = (token?: string, signal?: AbortSignal) => get<ForecastAccuracy>('/api/nextgen/league/forecast-accuracy', token, undefined, signal)
+
+export interface WeeklyEvidence {
+  version: string; season: number; through_week: number;
+  positions: { position: string; approved: boolean; reason: string; mean_season_gain: number; ci_low: number; ci_high: number;
+    modern: { model: { n: number; mae: number; mse: number }; reference: { n: number; mae: number; mse: number } } }[];
+  limitations: string[];
+  replay: Pick<ForecastAccuracy, 'games' | 'total' | 'evaluated' | 'correct' | 'accuracy' | 'point_mae' | 'method'>;
+}
+export const nextgenWeeklyEvidence = (token?: string, signal?: AbortSignal) => get<WeeklyEvidence>('/api/nextgen/league/forecast-evidence', token, undefined, signal)

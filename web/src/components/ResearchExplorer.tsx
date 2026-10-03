@@ -4,13 +4,10 @@ import { rankerLabel } from '../metricPresentation'
 import { PLAYER_MODELS, researchModelLabel, researchModelDescription } from '../researchModels'
 import { useUrlFlag, useUrlState } from '../navigation'
 import { DataTable, type Column } from './DataTable'
+import { POSITION_FILTERS } from '../positions'
+import { saveFile, toCsv } from '../download'
+import { fixed, percent, pointLift } from '../format'
 
-const pct = (value: number | null | undefined) =>
-  value == null ? '—' : `${(100 * value).toFixed(1)}%`
-const num = (value: number | null | undefined, digits = 2) =>
-  value == null ? '—' : value.toFixed(digits)
-const lift = (value: number | null | undefined) =>
-  value == null ? '—' : `${value >= 0 ? '+' : ''}${(100 * value).toFixed(1)} pp`
 type Score = 'hit_rate' | 'ndcg'
 type Fold = { season: number; model?: MetricRankingFoldResult; baseline?: MetricRankingFoldResult }
 
@@ -39,15 +36,7 @@ function downloadFolds(folds: Fold[], model: string, baseline: string) {
       f.baseline?.ndcg,
     ]),
   ]
-  const csv = rows
-    .map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(','))
-    .join('\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'forecast-fold-comparison.csv'
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  saveFile(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }), 'forecast-fold-comparison.csv')
 }
 
 function FoldChart({
@@ -122,7 +111,7 @@ function FoldChart({
                   >
                     <title>
                       {fold.season} · {side === 'model' ? model : baseline}:{' '}
-                      {score === 'hit_rate' ? pct(value) : num(value, 3)}
+                      {score === 'hit_rate' ? percent(value, 1) : fixed(value, 3)}
                     </title>
                   </circle>
                 )
@@ -186,7 +175,7 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
   const pool = (populations.find((entry) => entry.id === population) ?? populations[0]).rows.filter(
     (row) => row.window === window,
   )
-  const positions = ['ALL', 'QB', 'RB', 'WR', 'TE'].filter((pos) =>
+  const positions = POSITION_FILTERS.filter((pos) =>
     pool.some((row) => row.position === pos),
   )
   const activePosition = positions.includes(position) ? position : positions[0]
@@ -257,19 +246,19 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
       key: 'hit_rate',
       label: 'Hit @K',
       title: 'Share of the selected top K that are also in the actual top K.',
-      render: (row) => pct(row.hit_rate),
+      render: (row) => percent(row.hit_rate, 1),
     },
     {
       key: 'ndcg',
       label: 'NDCG',
       title: 'Rank-discounted actual value relative to ideal ordering; higher is better.',
-      render: (row) => num(row.ndcg, 3),
+      render: (row) => fixed(row.ndcg, 3),
     },
     {
       key: 'pool_spearman',
       label: 'Rank correlation',
       title: 'Spearman rank correlation in the evaluated pool.',
-      render: (row) => num(row.pool_spearman, 3),
+      render: (row) => fixed(row.pool_spearman, 3),
     },
     {
       key: 'folds',
@@ -284,7 +273,7 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
         'Reported lift versus this row’s best baseline; may differ from the benchmark selected above.',
       render: (row) => (
         <span title={row.best_baseline ? `Versus ${researchModelLabel(row.best_baseline)}` : undefined}>
-          {lift(row.hit_rate_lift)}
+          {pointLift(row.hit_rate_lift)}
         </span>
       ),
     },
@@ -406,17 +395,17 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
           <div className="research-kpis">
             <div>
               <span>Hit rate · top {selected.k}</span>
-              <strong>{pct(selected.hit_rate)}</strong>
+              <strong>{percent(selected.hit_rate, 1)}</strong>
               <small>{selected.folds} reported seasons</small>
             </div>
             <div>
               <span>Ranked value · NDCG</span>
-              <strong>{num(selected.ndcg, 3)}</strong>
+              <strong>{fixed(selected.ndcg, 3)}</strong>
               <small>1.000 is the ideal ordering</small>
             </div>
             <div>
               <span>Δ vs selected benchmark</span>
-              <strong>{score === 'hit_rate' ? lift(meanLift) : num(meanLift, 3)}</strong>
+              <strong>{score === 'hit_rate' ? pointLift(meanLift) : fixed(meanLift, 3)}</strong>
               <small>
                 {paired.length} shared season{paired.length === 1 ? '' : 's'} · equal weight
               </small>
@@ -442,20 +431,20 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
               <b>{focus.season}</b>
               <span>
                 Model{' '}
-                {score === 'hit_rate' ? pct(focus.model?.hit_rate) : num(focus.model?.ndcg, 3)}
+                {score === 'hit_rate' ? percent(focus.model?.hit_rate, 1) : fixed(focus.model?.ndcg, 3)}
               </span>
               <span>
                 Benchmark{' '}
                 {score === 'hit_rate'
-                  ? pct(focus.baseline?.hit_rate)
-                  : num(focus.baseline?.ndcg, 3)}
+                  ? percent(focus.baseline?.hit_rate, 1)
+                  : fixed(focus.baseline?.ndcg, 3)}
               </span>
               <span>
                 Pool N: {focus.model?.n ?? '—'} / {focus.baseline?.n ?? '—'}
               </span>
               <span>
-                Top-K actual mean: {num(focus.model?.top_k_actual_mean)} · ideal{' '}
-                {num(focus.model?.ideal_top_k_actual_mean)}
+                Top-K actual mean: {fixed(focus.model?.top_k_actual_mean, 2)} · ideal{' '}
+                {fixed(focus.model?.ideal_top_k_actual_mean, 2)}
               </span>
             </div>
           )}
@@ -467,8 +456,8 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
                   <>
                     Hit-rate lift interval:{' '}
                     <b>
-                      {lift(selected.hit_rate_lift_ci_low)} to{' '}
-                      {lift(selected.hit_rate_lift_ci_high)}
+                      {pointLift(selected.hit_rate_lift_ci_low)} to{' '}
+                      {pointLift(selected.hit_rate_lift_ci_high)}
                     </b>
                     , versus {researchModelLabel(selected.best_baseline ?? 'unreported baseline')}. This is
                     the report’s fold-based interval, not a prediction interval for a player.
@@ -555,35 +544,35 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
                   title:
                     'Fraction of the outcome universe with a forecast; unavailable in older artifacts.',
                   value: (f) => f.model?.coverage,
-                  render: (f) => pct(f.model?.coverage),
+                  render: (f) => percent(f.model?.coverage, 1),
                 },
                 {
                   key: 'model_hit',
                   label: 'Model hit rate',
                   title: 'Model top-K hit rate.',
                   value: (f) => f.model?.hit_rate,
-                  render: (f) => pct(f.model?.hit_rate),
+                  render: (f) => percent(f.model?.hit_rate, 1),
                 },
                 {
                   key: 'baseline_hit',
                   label: 'Benchmark hit rate',
                   title: 'Benchmark top-K hit rate.',
                   value: (f) => f.baseline?.hit_rate,
-                  render: (f) => pct(f.baseline?.hit_rate),
+                  render: (f) => percent(f.baseline?.hit_rate, 1),
                 },
                 {
                   key: 'model_ndcg',
                   label: 'Model NDCG',
                   title: 'Model ranked value relative to ideal.',
                   value: (f) => f.model?.ndcg,
-                  render: (f) => num(f.model?.ndcg, 3),
+                  render: (f) => fixed(f.model?.ndcg, 3),
                 },
                 {
                   key: 'baseline_ndcg',
                   label: 'Benchmark NDCG',
                   title: 'Benchmark ranked value relative to ideal.',
                   value: (f) => f.baseline?.ndcg,
-                  render: (f) => num(f.baseline?.ndcg, 3),
+                  render: (f) => fixed(f.baseline?.ndcg, 3),
                 },
               ]}
             />
@@ -608,19 +597,19 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
                 </div>
                 <div>
                   <span>Contrarian precision</span>
-                  <strong>{pct(market.contrarian_precision)}</strong>
+                  <strong>{percent(market.contrarian_precision, 1)}</strong>
                   <small>{market.contrarian_false_positives} false positives</small>
                 </div>
                 <div>
                   <span>Market misses recovered</span>
-                  <strong>{pct(market.missed_value_capture_rate)}</strong>
+                  <strong>{percent(market.missed_value_capture_rate, 1)}</strong>
                   <small>Share of actual top-K market misses</small>
                 </div>
               </div>
               <p>
-                Mean common pool: {num(market.common_players_mean, 0)} players · mean top-K overlap:{' '}
-                {num(market.top_k_overlap_mean, 1)} · net swap value per fold:{' '}
-                {num(market.net_swap_value_per_fold)} in the selected outcome’s units.
+                Mean common pool: {fixed(market.common_players_mean, 0)} players · mean top-K overlap:{' '}
+                {fixed(market.top_k_overlap_mean, 1)} · net swap value per fold:{' '}
+                {fixed(market.net_swap_value_per_fold, 2)} in the selected outcome’s units.
               </p>
               {!!market.value_capture_bands?.length && (
                 <DataTable
@@ -648,13 +637,13 @@ export function ResearchExplorer({ report, window }: { report: MetricReport; win
                       key: 'precision',
                       label: 'Precision',
                       title: 'Hits divided by calls.',
-                      render: (row) => pct(row.precision),
+                      render: (row) => percent(row.precision, 1),
                     },
                     {
                       key: 'false_positive_cost',
                       label: 'False-positive cost',
                       title: 'Reported missed value from unsuccessful calls, in outcome units.',
-                      render: (row) => num(row.false_positive_cost),
+                      render: (row) => fixed(row.false_positive_cost, 2),
                     },
                   ]}
                 />

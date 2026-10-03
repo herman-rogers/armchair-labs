@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchOpponents, fetchTransactions } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
 import { boardMetricLabel, SYSTEM_LABELS } from '../metricPresentation'
 import { ComparePanel } from './ComparePanel'
 import { RosterPanel } from './RosterPanel'
+import { opponentsQuery, transactionsQuery } from '../api/queries/archive'
 import { useUrlFlag, useUrlParams, useUrlState } from '../navigation'
 
 type SortKey =
@@ -107,11 +107,8 @@ export function LeagueBoard({
     ? { key: sortKey as SortKey, direction: sortToken.startsWith('-') ? 'desc' : 'asc' }
     : { key: 'team_rank', direction: 'asc' }, [sortKey, sortToken])
 
-  const opponents = useQuery({
-    queryKey: ['opponents', version],
-    queryFn: () => fetchOpponents(version),
-  })
-  const transactions = useQuery({ queryKey: ['transactions'], queryFn: fetchTransactions })
+  const opponents = useQuery(opponentsQuery(version))
+  const transactions = useQuery(transactionsQuery())
 
   const thinByTeam = useMemo(() => {
     const result = new Map<string, { position: string; best_vor: number }[]>()

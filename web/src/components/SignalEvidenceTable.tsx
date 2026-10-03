@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import type { MetricBacktestResult, MetricCatalogEntry } from '../api/types'
 import { DataTable, type Column } from './DataTable'
-
-const signed = (value: number | null | undefined) =>
-  value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
-const pct = (value: number | null | undefined) =>
-  value == null ? '—' : `${(value * 100).toFixed(1)}%`
+import { percent, signed } from '../format'
 
 export function SignalEvidenceTable({
   rows,
@@ -47,25 +43,25 @@ export function SignalEvidenceTable({
       key: 'spearman',
       label: 'Spearman',
       title: 'Rank association with the next-season outcome.',
-      render: (row) => signed(row.spearman),
+      render: (row) => signed(row.spearman, 3),
     },
     {
       key: 'partial_spearman',
       label: 'Partial vs prior',
       title: 'Rank association after controlling for historical PPG prior.',
-      render: (row) => signed(row.partial_spearman),
+      render: (row) => signed(row.partial_spearman, 3),
     },
     {
       key: 'direction_consistency',
       label: 'Consistency',
       title: 'Share of years agreeing with the pooled direction.',
-      render: (row) => pct(row.direction_consistency),
+      render: (row) => percent(row.direction_consistency, 1),
     },
     {
       key: 'coverage',
       label: 'Coverage',
       title: 'Share of eligible observations with this signal.',
-      render: (row) => pct(row.coverage),
+      render: (row) => percent(row.coverage, 1),
     },
     { key: 'n', label: 'N', title: 'Observed player-seasons.' },
     { key: 'folds', label: 'Seasons', title: 'Completed forecast seasons.' },
@@ -104,7 +100,7 @@ export function SignalEvidenceTable({
               <div>
                 <span>Fold 2.5–97.5% interval</span>
                 <strong className="compact-number">
-                  {signed(row.spearman_ci_low)} to {signed(row.spearman_ci_high)}
+                  {signed(row.spearman_ci_low, 3)} to {signed(row.spearman_ci_high, 3)}
                 </strong>
                 <small>Reported Spearman interval</small>
               </div>
@@ -113,11 +109,11 @@ export function SignalEvidenceTable({
                 <strong>
                   {row.n.toLocaleString()} / {row.eligible.toLocaleString()}
                 </strong>
-                <small>{pct(row.coverage)} signal coverage</small>
+                <small>{percent(row.coverage, 1)} signal coverage</small>
               </div>
               <div>
                 <span>Partial versus prior</span>
-                <strong>{signed(row.partial_spearman)}</strong>
+                <strong>{signed(row.partial_spearman, 3)}</strong>
                 <small>Association beyond historical PPG</small>
               </div>
             </div>
@@ -133,7 +129,7 @@ export function SignalEvidenceTable({
                       }}
                     />
                   </div>
-                  <span>{signed(fold.spearman)}</span>
+                  <span>{signed(fold.spearman, 3)}</span>
                   <small>N = {fold.n}</small>
                 </div>
               ))}

@@ -1,15 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchBoard } from '../api/client'
 import { useUrlState } from '../navigation'
+import { boardQuery } from '../api/queries/archive'
 import { BoardTable } from './BoardTable'
 
 /** Saved comparison artifacts, independent of current ESPN ownership and added players. */
 export function ReferenceBoard({ version }: { version: 'v1' | 'adaptive' }) {
   const [search, setSearch] = useUrlState('board_q', '', { replace: true })
-  const board = useQuery({
-    queryKey: ['reference-board', version],
-    queryFn: () => fetchBoard(version, 1000),
-  })
+  const board = useQuery(boardQuery(version, 1000))
 
   if (board.isError) return <div className="notice">{board.error.message}</div>
   if (!board.data) return <div className="notice">Loading the saved board…</div>

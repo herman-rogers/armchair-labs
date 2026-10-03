@@ -1,3 +1,4 @@
+import { QueryError } from './Controls'
 import { useQuery } from '@tanstack/react-query'
 import { similarityQuery } from '../api/queries'
 import { useDataRelease } from '../dataRelease'
@@ -21,7 +22,7 @@ export function SimilarCareers({ playerId, season, week }: { playerId: string; s
   const data = query.data
   return <section aria-label="Similar careers"><h4>Statistically similar careers</h4>
     <p>Closest available same-position career patterns, including historical players. These are descriptive comparisons, not Next Gen rankings or predictions of future success.</p>
-    {query.isError && <p role="alert">{query.error.message}</p>}
+    <QueryError query={query} />
     {!data && !query.isError && <p role="status">Comparing captured career statistics…</p>}
     {data && <>
       {data.reason ? <p className="notice">{data.reason}</p> : <><p>Comparing the first {data.seasons_compared} NFL season(s) against {data.eligible_peers} eligible careers. Only completed seasons through {data.complete_through} are used. Rates use weeks with all comparison statistics available. Open a match for season-by-season statistics.</p>

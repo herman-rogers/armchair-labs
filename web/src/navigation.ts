@@ -5,9 +5,8 @@
  * That gives refresh, shared links, new tabs and the Back/Forward buttons the same view
  * the reader was looking at.
  *
- * 1. Places are paths. A section, tab or sub-page is a route in `routes.tsx`, reached
- *    with `<Link>`/`<NavLink>` (never a button that flips component state). Tab bars
- *    render `<NavLink>`s, which mark the active one with `aria-current="page"`.
+ * 1. Places are paths. A page or profile section is a route in `routes.tsx`, reached
+ *    with `<Link>`/`<NavLink>` (never a button that flips component state). Page navigation renders `<NavLink>`s, which mark the active one with `aria-current="page"`.
  * 2. View configuration is search params. Filters, sort, page, selected week or team:
  *    read and write them with `useUrlState`, `useUrlPage` or `useUrlParams` below.
  *    These push a history entry, so Back undoes them one step at a time. Free-text
@@ -28,7 +27,7 @@
  * Do not pass `location.state` to remember a previous page, and do not call
  * `window.history` or `window.location` directly; the browser history already does it.
  */
-import { createSearchParams, useLocation, useNavigate, useSearchParams, type To } from 'react-router'
+import { createSearchParams, useSearchParams, type To } from 'react-router'
 
 type ParamValue = string | number | boolean | null | undefined
 
@@ -51,13 +50,17 @@ export const playerPath = (playerId: string, section?: ProfileSection) =>
 export const collegePath = (collegeId: string, section?: ProfileSection) =>
   `/college/${encodeURIComponent(collegeId)}${section ? `/${section}` : ''}`
 export const intelligencePath = (view: 'rankings' | 'qb-passing' | 'rookies') => `/intelligence/${view}`
-export const leaguePath = (view: 'overview' | 'rosters' | 'free-agents' | 'transactions' | 'draft') => `/league/${view}`
+export const leaguePath = (view: 'overview' | 'matchups' | 'rosters' | 'free-agents' | 'transactions' | 'draft') => `/league/${view}`
+export const matchupPath = (week: number, homeId: number, awayId: number) => `/league/matchups/${week}/${homeId}/${awayId}`
+export const leagueWeekPath = (week: number) => `/league/overview?week=${week}#matchups`
 export const researchPath = (view: 'evidence' | 'qb-experiments' | 'forecasts' | 'archive') => `/research/${view}`
 /** Views of the archived workspaces, each a route under `/research/archive/<workspace>/:view`. */
 export const ARCHIVED_VIEWS = {
   intelligence: ['players', 'league-impact', 'research'],
   league: ['overview', 'matchups', 'players', 'wire', 'draft'],
 } as const
+export const isArchivedView = <W extends keyof typeof ARCHIVED_VIEWS>(workspace: W, view: string | undefined): view is typeof ARCHIVED_VIEWS[W][number] =>
+  (ARCHIVED_VIEWS[workspace] as readonly string[]).includes(view ?? '')
 export const archivePath = <W extends keyof typeof ARCHIVED_VIEWS>(workspace: W, view?: typeof ARCHIVED_VIEWS[W][number]) =>
   `/research/archive/${workspace}${view ? `/${view}` : ''}`
 
@@ -67,23 +70,21 @@ export type NavigateOptions = { replace?: boolean }
  * Update several search params in one navigation. Values equal to `null`, `undefined`
  * or `''` are removed, so defaults stay out of the URL.
  *
- * The navigation targets the pathname this component rendered for, so a filter changed
- * on the outgoing page during a tab switch cannot land on the incoming page. It commits
- * synchronously (`flushSync`): inputs bound to the URL must show each keystroke at once,
- * or fast typing drops characters.
+ * Built on React Router's `setSearchParams`. It commits synchronously (`flushSync`):
+ * inputs bound to the URL must show each keystroke at once, or fast typing drops
+ * characters. That is also why routes avoid loaders (see `routes.tsx`).
  */
 export function useUrlParams() {
-  const [params] = useSearchParams()
-  const { pathname } = useLocation()
-  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   const update = (changes: Record<string, ParamValue>, { replace = false }: NavigateOptions = {}) => {
-    const next = new URLSearchParams(params)
-    for (const [key, value] of Object.entries(changes)) {
-      if (value == null || value === '' || value === false) next.delete(key)
-      else next.set(key, String(value))
-    }
-    const search = next.toString()
-    void navigate({ pathname, search: search ? `?${search}` : '' }, { replace, preventScrollReset: true, flushSync: true })
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      for (const [key, value] of Object.entries(changes)) {
+        if (value == null || value === '' || value === false) next.delete(key)
+        else next.set(key, String(value))
+      }
+      return next
+    }, { replace, preventScrollReset: true, flushSync: true })
   }
   return [params, update] as const
 }

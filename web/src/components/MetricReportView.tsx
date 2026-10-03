@@ -4,12 +4,15 @@ import { ResearchExplorer } from './ResearchExplorer'
 import { SignalEvidenceTable } from './SignalEvidenceTable'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchMetricReport, fetchResearchReport } from '../api/client'
 import type { MetricAssessment, MetricBacktestResult, ResearchDataset } from '../api/types'
 import { rankerLabel } from '../metricPresentation'
 import { researchModelLabel } from '../researchModels'
 import { useUrlFlag, useUrlState } from '../navigation'
+import { PositionOptions } from './Controls'
+import { positionOrder } from '../positions'
+import { metricReportQuery } from '../api/queries/archive'
 import { EVIDENCE_WINDOWS } from '../researchWindows'
+import { percent, pointLift, signed } from '../format'
 
 const ASSESSMENTS: Array<{ id: MetricAssessment | 'all'; label: string }> = [
   { id: 'all', label: 'All evidence' },
@@ -22,21 +25,6 @@ const ASSESSMENTS: Array<{ id: MetricAssessment | 'all'; label: string }> = [
   { id: 'insufficient', label: 'Insufficient' },
 ]
 
-function correlation(value: number | null) {
-  if (value == null) return '—'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
-}
-
-function percent(value: number | null) {
-  return value == null ? '—' : `${Math.round(value * 100)}%`
-}
-
-function percentagePointLift(value: number | null) {
-  if (value == null) return '—'
-  const points = value * 100
-  return `${points >= 0 ? '+' : ''}${points.toFixed(1)} pp`
-}
-
 function evidenceScore(row: MetricBacktestResult) {
   return Math.abs(row.partial_spearman ?? row.spearman ?? 0)
 }
@@ -48,11 +36,7 @@ function seasonRange(seasons: number[]) {
 }
 
 export function MetricReportView({ available, dataset, source }: { available: boolean; dataset?: string; source?: ResearchDataset }) {
-  const report = useQuery({
-    queryKey: ['metric-report', dataset ?? 'published'],
-    queryFn: () => dataset ? fetchResearchReport(dataset) : fetchMetricReport(),
-    enabled: available,
-  })
+  const report = useQuery({ ...metricReportQuery(dataset), enabled: available })
   // Params are prefixed `report_`: this report shares its page with other research panels.
   const [target, setTarget] = useUrlState('report_outcome', 'actual_availability_value')
   const [position, setPosition] = useUrlState('report_position', 'ALL')
@@ -104,8 +88,7 @@ export function MetricReportView({ available, dataset, source }: { available: bo
         .filter((row) => row.window === window && row.target === rankingTarget)
         .sort(
           (left, right) =>
-            ['QB', 'RB', 'WR', 'TE'].indexOf(left.position) -
-              ['QB', 'RB', 'WR', 'TE'].indexOf(right.position) ||
+            positionOrder(left.position) - positionOrder(right.position) ||
             Number(left.role === 'candidate') - Number(right.role === 'candidate') ||
             right.hit_rate - left.hit_rate,
         ),
@@ -274,12 +257,12 @@ export function MetricReportView({ available, dataset, source }: { available: bo
                   <td>{row.k}</td>
                   <td className="strong">{percent(row.hit_rate)}</td>
                   <td>{percent(row.ndcg)}</td>
-                  <td>{correlation(row.pool_spearman)}</td>
+                  <td>{signed(row.pool_spearman, 3)}</td>
                   <td title={`Ideal: ${row.ideal_top_k_actual_mean.toFixed(1)}`}>
                     {row.top_k_actual_mean.toFixed(1)}
                   </td>
                   <td title={row.best_baseline ? `Versus ${rankerLabel(row.best_baseline)}` : undefined}>
-                    {percentagePointLift(row.hit_rate_lift)}
+                    {pointLift(row.hit_rate_lift)}
                   </td>
                   <td>
                     {row.folds_won == null
@@ -334,9 +317,7 @@ export function MetricReportView({ available, dataset, source }: { available: bo
         <label>
           Position
           <select aria-label="Signal position" value={position} onChange={(event) => setPosition(event.target.value)}>
-            {['ALL', 'QB', 'RB', 'WR', 'TE'].map((entry) => (
-              <option key={entry} value={entry}>{entry}</option>
-            ))}
+            <PositionOptions />
           </select>
         </label>
         <label>
@@ -396,8 +377,8 @@ export function MetricReportView({ available, dataset, source }: { available: bo
                 <td className="left dim">{row.target_label}</td>
                 <td>{row.mae.toFixed(2)}</td>
                 <td>{row.rmse.toFixed(2)}</td>
-                <td>{correlation(row.bias)}</td>
-                <td>{correlation(row.spearman)}</td>
+                <td>{signed(row.bias, 3)}</td>
+                <td>{signed(row.spearman, 3)}</td>
                 <td>{row.n}</td>
               </tr>
             ))}

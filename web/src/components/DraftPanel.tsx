@@ -1,15 +1,11 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchDraft } from '../api/client'
 import type { DraftPickAnalysis, DraftTeamGrade, MetricVersion } from '../api/types'
 import { boardMetricLabel } from '../metricPresentation'
 import { DataTable, type Column } from './DataTable'
 import { useUrlState } from '../navigation'
-
-function signed(value: number | null) {
-  if (value == null) return '—'
-  return `${value > 0 ? '+' : ''}${value}`
-}
+import { draftQuery } from '../api/queries/archive'
+import { signed } from '../format'
 
 /** Sorting verdicts alphabetically is meaningless; order them best-to-worst. */
 const VERDICT_ORDER: Record<DraftPickAnalysis['verdict'], number> = {
@@ -201,7 +197,7 @@ function pickColumns(metric: string): Column<DraftPickAnalysis>[] {
 
 /** The draft recap scored against the board: team grades, then every pick with exact best-available. */
 export function DraftPanel({ version }: { version: MetricVersion }) {
-  const draft = useQuery({ queryKey: ['draft', version], queryFn: () => fetchDraft(version) })
+  const draft = useQuery(draftQuery(version))
   const [teamParam, setTeamParam] = useUrlState('team', 'all')
   const teamId: number | 'all' = teamParam === 'all' ? 'all' : Number(teamParam)
   const setTeamId = (value: number | 'all') => setTeamParam(String(value))

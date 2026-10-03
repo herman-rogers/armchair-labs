@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchCompare } from '../api/client'
 import type { LeagueTeam, MetricVersion } from '../api/types'
+import { compareQuery } from '../api/queries/archive'
 import { TeamCompare } from './TeamCompare'
 
 /**
@@ -24,11 +24,7 @@ export function ComparePanel({
   version: MetricVersion
   onChange: (side: 'left' | 'right', teamId: number) => void
 }) {
-  const comparison = useQuery({
-    queryKey: ['compare', left, right, version],
-    queryFn: () => fetchCompare(left, right, version),
-    enabled: left !== right,
-  })
+  const comparison = useQuery({ ...compareQuery(left, right, version), enabled: left !== right })
 
   const picker = (side: 'left' | 'right', value: number) => (
     <select

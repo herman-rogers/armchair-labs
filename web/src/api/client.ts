@@ -15,14 +15,19 @@ import type {
   UnrankableResponse,
   WireResponse,
 } from './types'
-import { allPages } from './pagination'
 import { presentMetricReport } from '../metricPresentation'
 
-export async function getResponse(path: string, dataCatalog?: string, scope?: 'research', signal?: AbortSignal): Promise<Response> {
+type RequestOptions = { dataCatalog?: string; scope?: 'research'; signal?: AbortSignal; method?: 'GET' | 'POST' }
+
+/**
+ * Every API call goes through here: it pins the verified data release and analysis
+ * scope, signals a stale catalog, and turns failures into the API's `detail` message.
+ */
+async function request(path: string, { dataCatalog, scope, signal, method = 'GET' }: RequestOptions = {}) {
   const headers: Record<string, string> = {}
   if (dataCatalog) headers['X-Data-Catalog'] = dataCatalog
   if (scope) headers['X-Analysis-Scope'] = scope
-  const response = await fetch(path, { headers, signal })
+  const response = await fetch(path, { method, headers, signal })
   if (!response.ok) {
     if (response.headers.get('X-Data-Catalog-Stale') === 'true') {
       window.dispatchEvent(new Event('data-catalog-changed'))
@@ -33,16 +38,21 @@ export async function getResponse(path: string, dataCatalog?: string, scope?: 'r
   return response
 }
 
+export const getResponse = (path: string, dataCatalog?: string, scope?: 'research', signal?: AbortSignal) =>
+  request(path, { dataCatalog, scope, signal })
+
 export async function get<T>(path: string, dataCatalog?: string, scope?: 'research', signal?: AbortSignal): Promise<T> {
   return (await getResponse(path, dataCatalog, scope, signal)).json() as Promise<T>
+}
+
+export async function post<T>(path: string, options: Pick<RequestOptions, 'dataCatalog' | 'scope'> = {}): Promise<T> {
+  return (await request(path, { ...options, method: 'POST' })).json() as Promise<T>
 }
 
 export const archiveGet = <T,>(path: string, dataCatalog?: string) => get<T>(path, dataCatalog, 'research')
 
 export const fetchStatus = () => get<Status>('/api/status')
 
-export const fetchProfiles = (params: URLSearchParams, dataCatalog?: string) =>
-  allPages<import('./profiles').ProfileDirectory>(params, p => get<import('./profiles').ProfileDirectory>(`/api/profiles?${p}`, dataCatalog), 'players')
 export const fetchPlayerProfile = (params: URLSearchParams, dataCatalog?: string, signal?: AbortSignal) =>
   get<import('./profiles').PlayerProfileData>(`/api/profiles/player?${params}`, dataCatalog, undefined, signal)
 export const fetchDataCatalog = () => get<import('./types').DataCatalog>('/api/research/data-catalog')
@@ -53,17 +63,6 @@ export const fetchBoard = (version: MetricVersion, limit = 400) =>
   archiveGet<BoardResponse>(`/api/board?version=${version}&limit=${limit}`)
 
 // ---------------------------------------------------------------- league state
-
-async function post<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: 'POST', headers: { 'X-Analysis-Scope': 'research' } })
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { detail?: string }
-    throw new Error(body.detail ?? `${response.status} ${response.statusText}`)
-  }
-  return response.json() as Promise<T>
-}
-
-export const fetchLeagueStatus = () => archiveGet<LeagueStatus>('/api/league/status')
 
 export const fetchLeague = (version: MetricVersion) =>
   archiveGet<LeagueResponse>(`/api/league?version=${version}`)
@@ -91,7 +90,7 @@ export const fetchDraft = (version: MetricVersion) => archiveGet<DraftResponse>(
 
 /** Force a pull from ESPN, ignoring the TTL. */
 export const refreshLeague = (version: MetricVersion) =>
-  post<LeagueStatus>(`/api/league/refresh?version=${version}`)
+  post<LeagueStatus>(`/api/league/refresh?version=${version}`, { scope: 'research' })
 
 export const fetchMatchups = (version: MetricVersion, week?: number) =>
   archiveGet<MatchupsResponse>(
@@ -111,5 +110,4 @@ export const fetchResearchPlayers = (params: URLSearchParams, current = false) =
 export const fetchLeagueImpact = (params: URLSearchParams) =>
   archiveGet<import('./types').LeagueImpact>(`/api/research/league-impact?${params}`)
 
-export const fetchRookieWatch = () => archiveGet<import('./types').RookieWatch>('/api/research/rookies')
 export const fetchPlayerOutlook = (dataCatalog?: string) => archiveGet<import('./types').PlayerOutlookReport>('/api/research/outlook', dataCatalog)

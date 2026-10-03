@@ -1,19 +1,20 @@
 /**
  * Every place in the app is a route here. Conventions for paths, search params and
  * scroll live in `navigation.ts`.
+ *
+ * Loaders are only used for redirects (index routes, old URLs). React Router re-runs a
+ * route's loaders on every navigation to it, search-param changes included, which would
+ * make URL-bound inputs asynchronous; pages validate their own params and redirect with
+ * `<Navigate replace>` instead.
  */
 import { createBrowserRouter, redirect, type LoaderFunctionArgs } from 'react-router'
 import App, { NotFound, RouteError } from './App'
-import { ARCHIVED_VIEWS, collegePath, isProfileSection, playerPath } from './navigation'
 
 const workspace = () => import('./components/NextGenView')
 const league = () => import('./components/LeagueWorkspace')
 const archivedIntelligence = () => import('./components/IntelligenceView')
 const archivedLeague = () => import('./components/LeagueView')
 const profile = () => import('./components/PlayerPage')
-
-/** Section routes carry their heading; layouts read it with `useMatches()`. */
-export type RouteHandle = { title?: string }
 
 const go = (path: string) => () => redirect(path)
 
@@ -34,18 +35,6 @@ function dashboardIndex({ request }: LoaderFunctionArgs) {
   return redirect(`/intelligence/rankings${params.size ? `?${params}` : ''}`)
 }
 
-/** Unknown archived views fall back to the workspace's first view. */
-function archivedView(workspace: keyof typeof ARCHIVED_VIEWS) {
-  const views: readonly string[] = ARCHIVED_VIEWS[workspace]
-  return ({ params }: LoaderFunctionArgs) => views.includes(params.view!) ? null : redirect(`/research/archive/${workspace}/${views[0]}`)
-}
-
-/** Unknown profile sections fall back to the top of the profile, keeping view params. */
-function profileSection(base: (id: string) => string, idParam: 'playerId' | 'collegeId') {
-  return ({ params, request }: LoaderFunctionArgs) =>
-    params.section && !isProfileSection(params.section) ? redirect(base(params[idParam]!) + new URL(request.url).search) : null
-}
-
 export const router = createBrowserRouter([{
   path: '/',
   Component: App,
@@ -58,8 +47,7 @@ export const router = createBrowserRouter([{
       children: [
         {
           path: 'intelligence',
-          handle: { title: 'Intelligence' } satisfies RouteHandle,
-          lazy: () => workspace().then(m => ({ Component: m.IntelligenceSection })),
+          lazy: () => workspace().then(m => ({ Component: m.AnalysisSection })),
           children: [
             { index: true, loader: go('/intelligence/rankings') },
             { path: 'rankings', lazy: () => import('./components/NextGenRankings').then(m => ({ Component: m.NextGenRankings })) },
@@ -69,11 +57,12 @@ export const router = createBrowserRouter([{
         },
         {
           path: 'league',
-          handle: { title: 'League' } satisfies RouteHandle,
           lazy: () => league().then(m => ({ Component: m.LeagueWorkspace })),
           children: [
             { index: true, loader: go('/league/overview') },
             { path: 'overview', lazy: () => league().then(m => ({ Component: m.LeagueOverviewPage })) },
+            { path: 'matchups/:matchupWeek/:homeId/:awayId', lazy: () => league().then(m => ({ Component: m.LeagueMatchups })) },
+            { path: 'matchups', loader: ({ request }) => redirect(`/league/overview${new URL(request.url).search}#matchups`) },
             { path: 'rosters', lazy: () => league().then(m => ({ Component: m.LeagueRosters })) },
             { path: 'free-agents', lazy: () => league().then(m => ({ Component: m.LeagueFreeAgents })) },
             { path: 'transactions', lazy: () => league().then(m => ({ Component: m.LeagueTransactions })) },
@@ -82,8 +71,7 @@ export const router = createBrowserRouter([{
         },
         {
           path: 'research',
-          handle: { title: 'Research' } satisfies RouteHandle,
-          lazy: () => workspace().then(m => ({ Component: m.ResearchSection })),
+          lazy: () => workspace().then(m => ({ Component: m.AnalysisSection })),
           children: [
             { index: true, loader: go('/research/evidence') },
             { path: 'evidence', lazy: () => workspace().then(m => ({ Component: m.ResearchEvidence })) },
@@ -98,7 +86,7 @@ export const router = createBrowserRouter([{
                   lazy: () => archivedIntelligence().then(m => ({ Component: m.ArchivedIntelligence })),
                   children: [
                     { index: true, loader: go('/research/archive/intelligence/players') },
-                    { path: ':view', loader: archivedView('intelligence'), lazy: () => archivedIntelligence().then(m => ({ Component: m.ArchivedIntelligenceView })) },
+                    { path: ':view', lazy: () => archivedIntelligence().then(m => ({ Component: m.ArchivedIntelligenceView })) },
                   ],
                 },
                 {
@@ -106,7 +94,7 @@ export const router = createBrowserRouter([{
                   lazy: () => archivedLeague().then(m => ({ Component: m.LeagueView })),
                   children: [
                     { index: true, loader: go('/research/archive/league/overview') },
-                    { path: ':view', loader: archivedView('league'), lazy: () => archivedLeague().then(m => ({ Component: m.LeagueViewTab })) },
+                    { path: ':view', lazy: () => archivedLeague().then(m => ({ Component: m.LeagueViewTab })) },
                   ],
                 },
               ],
@@ -117,12 +105,10 @@ export const router = createBrowserRouter([{
     },
     {
       path: 'players/:playerId/:section?',
-      loader: profileSection(playerPath, 'playerId'),
       lazy: () => profile().then(m => ({ Component: m.PlayerPage })),
     },
     {
       path: 'college/:collegeId/:section?',
-      loader: profileSection(collegePath, 'collegeId'),
       lazy: () => profile().then(m => ({ Component: m.PlayerPage })),
     },
     { path: '*', Component: NotFound },
