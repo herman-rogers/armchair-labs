@@ -1,14 +1,19 @@
-# Refresh and publish data
+# Refresh and publish application data
+
+The [data pipeline guide](tables.md) defines the supported generation → tables →
+GCS workflow. This page covers application/forecast eligibility and serving details.
+Use `just data-refresh --upload` on the publisher; omit `--upload` for local work.
 
 The backend serves a verified release selected by `data/current.json`. It reads
-versioned Parquet and research artifacts; there is no database service to start.
+native DuckDB tables built from versioned Parquet and published products; research
+scope retains its artifact readers. There is no database service to start.
 The [pipeline contract](../architecture/data_pipeline.md) describes the storage layers.
 
 ## Normal weekly refresh
 
 ```bash
-just nextgen-refresh
-just nextgen-refresh --status
+just data-refresh
+just data-refresh --status
 ```
 
 The refresh checks for a newly completed regular-season week. Every scheduled game
@@ -23,7 +28,7 @@ An unchanged week is a no-op. To incorporate same-week scoring corrections or ne
 reviewed injury evidence:
 
 ```bash
-just nextgen-refresh --force
+just data-refresh --force
 ```
 
 Injury inputs still require dated reviewed evidence; refresh does not infer return
@@ -35,6 +40,16 @@ validates the complete immutable release before atomically replacing `data/curre
 a failed build retains the previous selection. `--status` reports progress and the
 log path. Use `--version <run-id>` to resume completed stages; a partially written
 stage requires a new run ID. The command does not install a background schedule.
+
+After source/product publication, the refresh builds every refreshable registered
+table and its dependents. With `--upload`, it then publishes the query catalog and
+consumer inventory to GCS through the same workflow as `tables refresh --upload`. Unchanged-week runs
+check those recipes too. Selected application products and published ranking history
+are also promoted into `app_*` query tables. Analysis routes require the table catalog
+to match the application/weekly product selection. If the table step fails after
+source publication, affected analysis reports unavailable until a retry succeeds;
+resume the run or run `just tables refresh`.
+Previously published table versions remain available for explicit historical SQL.
 
 The weekly forecaster fits QB/RB/WR/TE separately using earlier seasons, with weekly
 scoring, workload, snaps, and prior opponent results as inputs. It evaluates ridge
@@ -54,11 +69,20 @@ snapshots in `data/research/<unique-weekly-version>`. The selected product lives
 `data/weekly/current.json` and must match the exact current analysis. The normal
 refresh activates it after catalog publication; an interrupted activation can be
 resumed with the same run ID. The API withholds forecasts during a release mismatch.
+After a standalone weekly build, run `just tables refresh --upload` to update the
+application query catalog and shared tables.
 League overview shows historical player errors and this season's conditional lineup
 replay separately from actual timestamped pregame captures. Week 1 replay totals
 may be unavailable because there is no prior captured K/DST history.
 
 ## Precompute frontend responses
+
+The normal weekly workflow updates Team analysis tables automatically. After a
+manual source publication, run `just tables refresh`. Other
+scheduled SQL tables use `just tables refresh --due`. Add `--upload` to share the
+resulting catalog through GCS. This does not replace application catalog
+publication or the serving bundle step below.
+See [analytical tables](tables.md) for daily/weekly scheduling and frozen studies.
 
 After publishing a catalog or changing backend Python code:
 
@@ -69,7 +93,7 @@ just data-serving
 This builds disposable JSON responses for the profile directory, both ranking
 horizons, all four measurement periods, current candidate profiles, career comparisons,
 and observed completed-season profiles. `just data-serving --no-history` produces
-a smaller bundle. It does not train models or alter gold/research artifacts.
+a smaller bundle. It does not train models or alter table/research artifacts.
 
 Bundles are immutable under `data/serving/releases/`; `data/serving/current.json`
 selects one. A bundle is bound to the analytical catalog and backend implementation.
@@ -84,14 +108,14 @@ Use the CLI help before a manual build; required inputs depend on retained captu
 and the products being published:
 
 ```bash
-uv run python research/data_pipeline.py build --help
-uv run python research/data_pipeline.py products --help
-uv run python research/data_pipeline.py publish --help
-uv run python research/data_pipeline.py verify --help
+uv run engine data build --help
+uv run engine data products --help
+uv run engine data publish --help
+uv run engine data verify --help
 uv run python research/build_read_models.py --help
 ```
 
-Build into new version IDs, verify gold and its raw/enriched dependencies, and publish
+Build into new version IDs, verify tables and their raw/enriched dependencies, and publish
 only a consistent product/analysis set. Dated migration documents retain example
 release IDs for reproduction; those are not fresh-clone bootstrap instructions.
 Use the weekly refresh for normal advancement of an existing NextGen catalog.

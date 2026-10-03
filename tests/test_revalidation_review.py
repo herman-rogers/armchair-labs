@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from research.review_revalidation import apply_decisions, stat_decision
 
-from patron.data.nextgen import eligible
+from engine.data.nextgen import eligible
 
 
 def pending(kind="legacy_model"):

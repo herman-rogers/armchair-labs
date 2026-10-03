@@ -392,6 +392,6 @@ or compelling player example in this report constitutes a validated new advantag
 
 Local evidence: `data/outputs/metric_report.json`,
 `data/outputs/feature_discovery_report.md`,
-`data/static/market_backfill_manifest.md`, `src/patron/config/scoring.yaml`,
-`src/patron/metrics/enrichment.py`, and the
+`data/static/market_backfill_manifest.md`, `src/engine/config/scoring.yaml`,
+`src/engine/metrics/enrichment.py`, and the
 [earlier stat-system review](stat_system_review_2026-09-22.md).

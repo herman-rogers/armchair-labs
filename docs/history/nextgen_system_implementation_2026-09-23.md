@@ -114,7 +114,7 @@ explicitly labelled reference policy; they do not grant those decision claims.
 
 ## Archive and serving enforcement
 
-`src/patron/data/nextgen.py` is the common eligibility gate. It checks input validity,
+`src/engine/data/nextgen.py` is the common eligibility gate. It checks input validity,
 allowed use, target, position, population, horizon and open source incidents. The
 published analysis binds exact gold, profile and research hashes. Tampered,
 incomplete or mixed releases fail closed. Nothing selects a model because its

@@ -4,6 +4,8 @@ import { allPages } from '../pagination'
 import type { ProfileDirectory } from '../profiles'
 import { nextgenWeeklyEvidence, nextgenWeeklyForecasts, nextgenForecastAccuracy, nextgenRankingHistory, nextgenCatalog, nextgenLeague, nextgenMatchups, nextgenPlayers, nextgenRankings, nextgenRankingEvidence, nextgenForecasts, nextgenRegistry, nextgenRookies, nextgenEvidence } from '../nextgen'
 import { passingForecasts, passingEvidence, passingVariations } from '../qbPassing'
+import { nextgenTeamStrength } from '../teamStrength'
+import { fetchTeamAnalysis, fetchTeamAnalysisCatalog } from '../teamAnalysis'
 
 // The catalog provider polls and verifies the release; changing its token selects
 // new cache entries. Live observations use their own freshness and invalidation.
@@ -33,12 +35,34 @@ export const registryQuery = (params: URLSearchParams, token?: string) => ({ ...
 export const rookiesQuery = (params: URLSearchParams, token?: string) => ({ ...paramsQuery('nextgen-rookies', params, token, nextgenRookies), placeholderData: keepWithinRelease(token) })
 export const evidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-evidence', params, token, nextgenEvidence)
 export const passingQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-passing', params, token, passingForecasts)
+export const teamAnalysisCatalogQuery = (token?: string) => queryOptions({
+  queryKey: ['team-analysis-catalog', token],
+  queryFn: ({ signal }) => fetchTeamAnalysisCatalog(token, signal),
+  refetchInterval: 60_000, staleTime: 30_000, retry: false,
+})
+export const teamAnalysisQuery = (params: URLSearchParams, token?: string, tableVersion?: string) => ({
+  ...published,
+  queryKey: ['team-analysis', token, canonicalParams(params), tableVersion],
+  enabled: Boolean(tableVersion),
+  queryFn: ({ signal }: { signal: AbortSignal }) => {
+    const request = new URLSearchParams(params)
+    if (tableVersion) request.set('table_version', tableVersion)
+    return fetchTeamAnalysis(request, token, signal)
+  },
+  placeholderData: (previous: Awaited<ReturnType<typeof fetchTeamAnalysis>> | undefined, query?: { queryKey: readonly unknown[] }) => {
+    if (!query || query.queryKey[1] !== token || query.queryKey[3] !== tableVersion || typeof query.queryKey[2] !== 'string') return undefined
+    const before = new URLSearchParams(query.queryKey[2]); const after = new URLSearchParams(params)
+    before.delete('players'); after.delete('players')
+    return canonicalParams(before) === canonicalParams(after) ? previous : undefined
+  },
+})
 export const passingEvidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-passing-evidence', params, token, passingEvidence)
 export const variationsQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-variations', params, token, passingVariations)
 export const similarityQuery = <T,>(params: URLSearchParams, token?: string) => paramsQuery('similar-careers', params, token,
   (p, t, signal) => get<T>(`/api/profiles/similar?${p}`, t, undefined, signal))
 export const leagueQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token], queryFn: ({ signal }) => nextgenLeague(token, signal), staleTime: 30_000, gcTime: 10 * 60_000, refetchInterval: 60_000, retry: false })
 export const matchupsQuery = (week: number | null, token?: string) => queryOptions({ queryKey: ['league-observations', token, 'matchups', week], queryFn: ({ signal }) => nextgenMatchups(week, token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false })
+export const teamStrengthQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token, 'team-strength'], queryFn: ({ signal }) => nextgenTeamStrength(token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false })
 
 export function filterDirectory(data: ProfileDirectory, filters: { search: string; position: string; population: string; scope: string }): ProfileDirectory {
   const players = data.players.filter(p =>

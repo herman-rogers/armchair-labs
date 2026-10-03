@@ -12,12 +12,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from patron.api import app as api
-from patron.api import nextgen_routes as routes
-from patron.data import nextgen as policy
-from patron.data.catalog import publish_catalog
-from patron.data.releases import digest, reference, write_json
-from patron.metrics.nextgen import COUNTERS, build_panel, distribution, fit_fold, paired_summary
+from engine.api import app as api
+from engine.api import nextgen_routes as routes
+from engine.data import nextgen as policy
+from engine.data.catalog import publish_catalog
+from engine.data.releases import digest, reference, write_json
+from engine.metrics.nextgen import COUNTERS, build_panel, distribution, fit_fold, paired_summary
 
 
 def entry(model="baseline"):
@@ -247,7 +247,7 @@ def test_legacy_boundary_requires_explicit_archive_scope_and_labels_response(mon
 
 
 def test_catalog_cannot_silently_drop_nextgen_policy(tmp_path, monkeypatch):
-    import patron.data.catalog as catalog
+    import engine.data.catalog as catalog
 
     monkeypatch.setattr(
         catalog,

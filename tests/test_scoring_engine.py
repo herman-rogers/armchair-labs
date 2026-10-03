@@ -10,8 +10,8 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.scoring.columns import MissingColumnsError
-from patron.scoring.engine import (
+from engine.scoring.columns import MissingColumnsError
+from engine.scoring.engine import (
     BASE_POINTS,
     COMPONENT_POINTS,
     LEAGUE_POINTS,

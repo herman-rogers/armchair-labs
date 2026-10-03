@@ -1,0 +1,134 @@
+{
+  "release": "tables_eaa1052409a13b406c3a25e0_67c5cd90",
+  "verified_at": "2026-10-03T18:21:18.706763+00:00",
+  "store": "gs://armchair-labs-data/armchair-labs/tables",
+  "manifest_sha256": "4cc80112e03fd52c8abd849afcb80f1757f3196a82672cfdd559dd2f888a5e51",
+  "independent_cache": true,
+  "downloaded_tables": 93,
+  "native_duckdb_tables": 93,
+  "consumer_catalog_verified": true,
+  "all_table_hashes_verified": true,
+  "offline_fetch_verified": true,
+  "source_archives_required_for_sql": false,
+  "application_api_parity": {
+    "endpoints": [
+      {
+        "path": "/api/status",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/catalog",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/rankings?limit=3",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/rankings/history",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/qb-passing?limit=3",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/qb-passing/evidence",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/qb-passing/variations",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/qb-passing/variations?target=league_points",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/evidence",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/evidence?target=passing_yards&position=QB",
+        "status": 200,
+        "matches_artifact_reader": true,
+        "float_comparison_relative_tolerance": 1e-12,
+        "maximum_absolute_float_difference": 2.2737367544323206e-13
+      },
+      {
+        "path": "/api/nextgen/players?limit=3",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/rookies?limit=3",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/profiles/directory",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/profiles/player?player_id=00-0026498",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/profiles/similar?player_id=00-0026498",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/team-analysis?team=LA",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league/matchups",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league/forecasts",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league/forecast-accuracy",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league/forecast-evidence",
+        "status": 200,
+        "matches_artifact_reader": true
+      },
+      {
+        "path": "/api/nextgen/league/team-strength",
+        "status": 200,
+        "matches_artifact_reader": true
+      }
+    ],
+    "ignored_fields": [
+      "age_seconds"
+    ],
+    "league_network": "disabled; reused captured snapshot"
+  },
+  "browser_smoke": "Passed: serving_smoke.py"
+}

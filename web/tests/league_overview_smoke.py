@@ -7,10 +7,10 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from playwright.sync_api import expect, sync_playwright
-from patron.api.nextgen_routes import league
-from patron.api.ranking_routes import history, rankings
-from patron.espn.observations import weekly_matchups
-from patron.espn.sync import LeagueSnapshot
+from engine.api.nextgen_routes import league
+from engine.api.ranking_routes import history, rankings
+from engine.espn.observations import weekly_matchups
+from engine.espn.sync import LeagueSnapshot
 
 
 def main():
@@ -69,9 +69,12 @@ def main():
         assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
         page.screenshot(path='/tmp/league-overview-mobile.png',full_page=True)
         page.set_viewport_size({'width':1440,'height':1000})
-        page.get_by_role('link',name='View player forecasts',exact=True).click()
-        expect(page).to_have_url(re.compile(rf"/league/rosters\?team={team['team_id']}$"))
-        expect(tabs.get_by_role('link',name='Rosters & comparisons',exact=True)).to_have_attribute('aria-current','page')
+        team_link = page.get_by_role('link',name='View player forecasts',exact=True)
+        team_path = team_link.get_attribute('href')
+        assert team_path.startswith(f"/league/teams/{team['team_id']}/") and '?' not in team_path
+        team_link.click()
+        expect(page).to_have_url(re.compile(re.escape(team_path) + '$'))
+        expect(tabs.get_by_role('link',name='Team Strength',exact=True)).to_have_attribute('aria-current','page')
         expect(page.get_by_role('heading',name=team['team_name'],exact=True)).to_be_visible()
         expect(page.get_by_role('columnheader',name='NextGen · overall',exact=False)).to_be_visible()
         tabs.get_by_role('link',name='Free agents',exact=True).click()
@@ -89,9 +92,9 @@ def main():
         page.go_back()
         expect(page).to_have_url(re.compile(r'/league/free-agents\?q=[^&]+$'))
         expect(page.get_by_label('Find league player')).to_have_value(free['player_display_name'])
-        # The search replaced the free-agents entry, so one more step reaches Rosters.
+        # The search replaced the free-agents entry, so one more step reaches the team.
         page.go_back()
-        expect(page).to_have_url(re.compile(rf"/league/rosters\?team={team['team_id']}$"))
+        expect(page).to_have_url(re.compile(re.escape(team_path) + '$'))
         tabs.get_by_role('link',name='League overview',exact=True).click()
         future=min(snap.week+1,snap.regular_season_weeks)
         page.get_by_label('Matchup week', exact=True).select_option(str(future))

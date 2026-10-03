@@ -11,8 +11,8 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.historical_evidence import EvidenceCapture, article_content
-from patron.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import EvidenceCapture, article_content
+from engine.metrics.experimental import _normalized_name, _transaction_aliases
 
 ROOT = Path(__file__).resolve().parents[1]
 

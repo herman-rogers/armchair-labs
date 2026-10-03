@@ -1,0 +1,75 @@
+{
+  "audited_at": "2026-10-03T17:53:52.314864+00:00",
+  "bucket": "gs://armchair-labs-data",
+  "objects": 43409,
+  "bytes": 8924432007,
+  "releases": [
+    {
+      "release": "bootstrap_20261002_r2",
+      "files": 81859,
+      "objects": 42975,
+      "manifest_sha256": "2af31d3d6ce886970095c444e79d6fc18247013b749239233703b8eb7982ef62"
+    },
+    {
+      "release": "bootstrap_20261002_r4",
+      "files": 82496,
+      "objects": 43290,
+      "manifest_sha256": "57d97bb2493d3ab00ad14ebb6a055e869e28a3135ef63b40fd7b100e28ee2b47"
+    },
+    {
+      "release": "analytics_tables_20261003_r1",
+      "files": 209,
+      "objects": 95,
+      "manifest_sha256": "8ba02b7609d5aae354ae7fb26541e51a3a8d2302d5e65618e45c4e2404cd41c4"
+    },
+    {
+      "release": "analytics_tables_20261003_r2",
+      "files": 209,
+      "objects": 95,
+      "manifest_sha256": "f06068f98705b4eb53bd32da836c423930a935938f8bf770fd4f836a443d440a"
+    },
+    {
+      "release": "correlation_tables_20261003_r1",
+      "files": 47,
+      "objects": 40,
+      "manifest_sha256": "2f942538f1fdd35567eadd8c20a74099853b65025003a1ceae0fbdc90cdb22e6"
+    },
+    {
+      "release": "correlation_tables_20261003_r2",
+      "files": 47,
+      "objects": 40,
+      "manifest_sha256": "d671d3c1b27fd82c194d9ee045f96711e5a92723fae1519735e3cfae4cb75e9e"
+    }
+  ],
+  "local_references_verified": [
+    "data/releases/bootstrap_20261002_r4.json",
+    "data/releases/current.json",
+    "data/releases/bootstrap_20261002_r2.json",
+    "data/releases/tables/analytics_tables_20261003_r1.json",
+    "data/releases/tables/correlation_tables_20261003_r1.json",
+    "data/releases/tables/current.json",
+    "data/releases/tables/correlation_tables_20261003_r2.json",
+    "data/releases/tables/analytics_tables_20261003_r2.json"
+  ],
+  "integrity_errors": [],
+  "unreferenced_objects": [
+    {
+      "name": "armchair-labs/objects/77/778ed6f5af683626bf09a63588878236d54dc26beae591f8fb5abf76e8e60fa0",
+      "size": 1729,
+      "generation": "1790975234913569",
+      "sha256": "778ed6f5af683626bf09a63588878236d54dc26beae591f8fb5abf76e8e60fa0",
+      "updated": "2026-10-02T21:07:14.918000+00:00"
+    }
+  ],
+  "current_table_release": "analytics_tables_20261003_r2",
+  "current_tables": 31,
+  "local_catalog_matches_published": true,
+  "verification": "Downloaded and hashed all release metadata; checked referenced object presence, size, SHA-256 metadata and pinned generation. Did not redownload all payloads.",
+  "deleted_objects": 1,
+  "completed_at": "2026-10-03T17:55:31.897339+00:00",
+  "deleted_bytes": 1729,
+  "deletion_reason": "Obsolete source_catalog.json from unpublished bootstrap_20261002_r3; unreferenced by all six published releases. Release generations rechecked before generation-conditional deletion.",
+  "remaining_unreferenced_objects": 0,
+  "remaining_objects": 43408,
+  "remaining_bytes": 8924430278
+}

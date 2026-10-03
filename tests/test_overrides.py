@@ -10,7 +10,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.board.overrides import (
+from engine.board.overrides import (
     ADJUSTED_VOR,
     OVERRIDE_DELTA,
     OVERRIDE_REASON,
@@ -21,7 +21,7 @@ from patron.board.overrides import (
     UnmatchedOverrideError,
     apply_overrides,
 )
-from patron.config.settings import load_overrides_config
+from engine.config.settings import load_overrides_config
 
 
 def board(*players: tuple[str, str, float]) -> pl.DataFrame:

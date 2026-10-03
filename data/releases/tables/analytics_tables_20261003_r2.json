@@ -1,0 +1,18 @@
+{
+  "consumer_catalog": {
+    "generation": "1791049408806044",
+    "key": "releases/analytics_tables_20261003_r2/catalog.json",
+    "sha256": "0a96f96155cba659dcd539ad0bbe478e032c6be2d1cf2bccb22fb69104d5417e",
+    "size": 130592,
+    "uri": "gs://armchair-labs-data/armchair-labs/tables/releases/analytics_tables_20261003_r2/catalog.json"
+  },
+  "manifest_generation": "1791049406446587",
+  "manifest_key": "releases/analytics_tables_20261003_r2/manifest.json",
+  "manifest_sha256": "f06068f98705b4eb53bd32da836c423930a935938f8bf770fd4f836a443d440a",
+  "release": "analytics_tables_20261003_r2",
+  "store": "gs://armchair-labs-data/armchair-labs/tables",
+  "table_catalog": {
+    "path": "tables/catalogs/ec33234452376d59278c1f7d7ae6a523f3405df3bd3889272ac12eacb67d5e55.json",
+    "sha256": "ec33234452376d59278c1f7d7ae6a523f3405df3bd3889272ac12eacb67d5e55"
+  }
+}

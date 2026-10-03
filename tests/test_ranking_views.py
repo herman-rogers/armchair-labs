@@ -4,7 +4,7 @@ from datetime import date
 
 import polars as pl
 
-from patron.data.ranking_views import market_references, with_ranks
+from engine.data.ranking_views import market_references, with_ranks
 
 
 def test_ranks_survive_search_and_ties_do_not_invent_order():
@@ -52,9 +52,9 @@ def test_ecr_is_original_dated_value_never_after_cutoff_or_wrong_position():
 
 
 def test_search_and_export_use_same_rank_and_suspended_baseline_disappears(tmp_path, monkeypatch):
-    from patron.api import nextgen_routes as routes
-    from patron.data.ranking_views import baseline_ranks
-    from patron.data.releases import write_json
+    from engine.api import nextgen_routes as routes
+    from engine.data.ranking_views import baseline_ranks
+    from engine.data.releases import write_json
 
     entry = dict(
         id="forecast:baseline:season_points",

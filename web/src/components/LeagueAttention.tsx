@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import type { AttentionFlag, LeagueObservations } from '../api/nextgen'
-import { leaguePath, to } from '../navigation'
+import { leaguePath, teamPath, to } from '../navigation'
 
 type Player = LeagueObservations['players'][number]
 export function AttentionBadges({ flags }: { flags?: AttentionFlag[] }) {
@@ -19,6 +19,7 @@ export function InjuryNotes({ player, compact = false }: { player: Player; compa
     <ul>{player.injury_news.map((note, i) => <li key={i}><strong>{note.known_on}</strong> · {note.evidence_status.replaceAll('_', ' ')}: {note.summary} <a href={note.source_url} target="_blank" rel="noreferrer">Source</a></li>)}</ul></div></details>}</>
 }
 export function LeagueAttention({ data }: { data: LeagueObservations }) {
+  const mine = data.teams.find(t => t.team_id === data.my_team_id)
   const players = data.players.filter(p => p.is_mine && p.attention?.length)
     .sort((a, b) => Number(b.attention?.some(f => f.severity === 'urgent')) - Number(a.attention?.some(f => f.severity === 'urgent')))
   const urgent = players.filter(p => p.attention?.some(flag => flag.severity === 'urgent')).length
@@ -37,6 +38,6 @@ export function LeagueAttention({ data }: { data: LeagueObservations }) {
     {!!players.length && <ul className="attention-players">{players.map(p => <li key={p.espn_id}><strong>{p.player_display_name}</strong> <span className="faint">{p.lineup_slot ?? 'Slot unknown'}</span> <AttentionBadges flags={p.attention} /><InjuryNotes player={p} /></li>)}</ul>}
     {!players.length && <p>No player alerts found in the captured roster. This is not an all-clear; verify statuses and lineup locks in ESPN.</p>}
     </details>
-    {!!players.length && <Link className="button" to={to(leaguePath('rosters'), { attention: 1 })}>Review players</Link>}
+    {!!players.length && <Link className="button" to={to(mine ? teamPath(mine) : leaguePath('teams'), { attention: 1 })}>Review players</Link>}
   </section>
 }

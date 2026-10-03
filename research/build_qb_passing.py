@@ -12,10 +12,10 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
-from patron.espn.attention import reviewed_news
-from patron.metrics.qb_passing import (
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.espn.attention import reviewed_news
+from engine.metrics.qb_passing import (
     CHALLENGERS,
     HORIZONS,
     MODELS,
@@ -139,12 +139,12 @@ def build(data, version, sources, analysis_version=None):
     season, through = observations["season"], observations["through_week"]
     shutil.copyfile(ROOT / "research/qb_passing_run_protocol.md", root / "protocol.md")
     for name in (
-        "src/patron/metrics/qb_passing.py",
+        "src/engine/metrics/qb_passing.py",
         "research/build_qb_passing.py",
-        "src/patron/metrics/experimental.py",
-        "src/patron/metrics/transaction_events.py",
-        "src/patron/metrics/current_rankings.py",
-        "src/patron/metrics/nextgen.py",
+        "src/engine/metrics/experimental.py",
+        "src/engine/metrics/transaction_events.py",
+        "src/engine/metrics/current_rankings.py",
+        "src/engine/metrics/nextgen.py",
         "pyproject.toml",
     ):
         path = root / "implementation" / name

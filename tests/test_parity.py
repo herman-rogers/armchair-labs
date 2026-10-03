@@ -17,8 +17,8 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.data import nflverse
-from patron.scoring.engine import (
+from engine.data import nflverse
+from engine.scoring.engine import (
     BASE_POINTS,
     COMPONENT_POINTS,
     base_points_from_nflverse,

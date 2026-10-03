@@ -36,7 +36,7 @@ hash. Missing publication times remain unknown. An `ACTIVE` tag does not certify
 health, starting status, or the absence of an injury.
 
 The manifest's `assets` map resolves logical filenames to raw object paths. It is
-compatible with `patron.data.releases.load_manifest`, including hash verification.
+compatible with `engine.data.releases.load_manifest`, including hash verification.
 Repeated capture requires a fresh version; source failures cannot publish an
 accepted snapshot.
 

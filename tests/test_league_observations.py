@@ -2,9 +2,9 @@
 
 from types import SimpleNamespace
 
-from patron.api.league_observation_routes import matchups, refresh
-from patron.espn.observations import weekly_matchups
-from patron.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
+from engine.api.league_observation_routes import matchups, refresh
+from engine.espn.observations import weekly_matchups
+from engine.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
 
 
 def snapshot():
@@ -85,9 +85,9 @@ def test_routes_use_observations_only_and_refresh_is_explicit():
 def test_draft_identity_is_linked_even_after_player_leaves_current_pool(monkeypatch, tmp_path):
     import polars as pl
 
-    from patron.api import nextgen_routes as routes
-    from patron.espn.crosswalk import JoinReport
-    from patron.espn.sync import DraftPick
+    from engine.api import nextgen_routes as routes
+    from engine.espn.crosswalk import JoinReport
+    from engine.espn.sync import DraftPick
 
     snap = snapshot()
     snap.draft = [DraftPick(1, 1, 1, 1, "Mine", 99, "Drafted then dropped")]

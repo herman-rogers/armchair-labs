@@ -13,9 +13,9 @@ import numpy as np
 import polars as pl
 import yaml
 
-from patron.data.nextgen import verify_evidence
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
-from patron.metrics.nextgen import (
+from engine.data.nextgen import verify_evidence
+from engine.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.metrics.nextgen import (
     COUNTERS,
     POSITIONS,
     TARGETS,
@@ -24,8 +24,8 @@ from patron.metrics.nextgen import (
     fit_fold,
     paired_summary,
 )
-from patron.metrics.player_profile import summarize
-from patron.metrics.profile_tracking import TRACKING_METRICS, TRACKING_NOTE
+from engine.metrics.player_profile import summarize
+from engine.metrics.profile_tracking import TRACKING_METRICS, TRACKING_NOTE
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL = """# NextGen multi-outcome release protocol
@@ -226,7 +226,13 @@ def archive_inventory(data: Path, current: str, gold, evidence_ref, profile_root
     """Inventory is archival metadata, never discovery of serving-eligible models."""
     current_dependencies = {gold.root.resolve(), profile_root.resolve()}
     records = []
-    for parent, kind in ((data / "gold/releases", "data_release"), (data / "research", "study")):
+    for parent, kind in (
+        (data / "tables/batches", "data_release"),
+        (data / "gold/releases", "data_release"),
+        (data / "research", "study"),
+    ):
+        if not parent.exists():
+            continue
         for root in sorted(parent.iterdir()):
             if not root.is_dir() or root.name == current or root.resolve() in current_dependencies:
                 continue
@@ -552,7 +558,7 @@ def build(data: Path, version: str, gold_version: str, profile_version: str, evi
             )
         )
     registry.extend(archive_inventory(data, version, gold, evidence_ref, profile_root))
-    config = yaml.safe_load((ROOT / "src/patron/config/metric_report.yaml").read_text())
+    config = yaml.safe_load((ROOT / "src/engine/config/metric_report.yaml").read_text())
     for spec in config["fit"]["models"]:
         registry.append(
             dict(
@@ -627,11 +633,11 @@ def build(data: Path, version: str, gold_version: str, profile_version: str, evi
     write_json(root / "report.json", report)
     for path in (
         Path(__file__),
-        ROOT / "src/patron/metrics/nextgen.py",
-        ROOT / "src/patron/data/nextgen.py",
-        ROOT / "src/patron/data/target_quality.py",
-        ROOT / "src/patron/metrics/player_profile.py",
-        ROOT / "src/patron/metrics/profile_tracking.py",
+        ROOT / "src/engine/metrics/nextgen.py",
+        ROOT / "src/engine/data/nextgen.py",
+        ROOT / "src/engine/data/target_quality.py",
+        ROOT / "src/engine/metrics/player_profile.py",
+        ROOT / "src/engine/metrics/profile_tracking.py",
     ):
         destination = root / "implementation" / path.relative_to(ROOT)
         destination.parent.mkdir(parents=True, exist_ok=True)

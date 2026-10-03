@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.metrics.fit import (
+from engine.metrics.fit import (
     FitConfig,
     ModelSpec,
     apply_fitted_models,
@@ -233,7 +233,7 @@ def test_missing_features_are_skipped_not_fatal() -> None:
 
 def test_serialized_pending_models_reproduce_the_fold_scores() -> None:
     """Live-board parity: re-applying the stored artifact gives the parquet's numbers."""
-    from patron.metrics.fit import apply_fitted_models, models_for_season
+    from engine.metrics.fit import apply_fitted_models, models_for_season
 
     config = FitConfig(
         features=("signal", "other", "noise"),
@@ -276,7 +276,7 @@ def test_report_only_model_is_fitted_but_not_applied_to_live_board() -> None:
 
 
 def test_artifact_contract_rejects_mismatched_models() -> None:
-    from patron.metrics.fit import FittedArtifactError, build_fit_artifact, check_fit_artifact
+    from engine.metrics.fit import FittedArtifactError, build_fit_artifact, check_fit_artifact
 
     config = FitConfig(features=("signal",), positions=("RB", "WR"))
     frame = synthetic().with_columns(pl.lit("2011-08-30T12:00:00Z").alias("depth_chart_date"))
@@ -299,7 +299,7 @@ def test_artifact_contract_rejects_mismatched_models() -> None:
 
 def test_required_features_restrict_training_and_scoring() -> None:
     """A feature that exists only from some season trains and scores only where present."""
-    from patron.metrics.fit import ModelSpec
+    from engine.metrics.fit import ModelSpec
 
     frame = synthetic().with_columns(
         pl.when(pl.col("forecast_season") >= 2008)
@@ -363,7 +363,7 @@ def test_prefix_feature_pool_is_selected_inside_each_outer_training_window() -> 
 
 
 def test_selector_missing_best_player_is_a_miss() -> None:
-    from patron.metrics.fit import _selector_fold_score
+    from engine.metrics.fit import _selector_fold_score
 
     rows = [
         {"actual": 100.0, "sparse": None},
@@ -374,7 +374,7 @@ def test_selector_missing_best_player_is_a_miss() -> None:
 
 
 def test_selector_compares_sources_on_shared_folds() -> None:
-    from patron.metrics.fit import _choose_adaptive_source
+    from engine.metrics.fit import _choose_adaptive_source
 
     def fold(sparse: bool, good: bool) -> list[dict]:
         return [

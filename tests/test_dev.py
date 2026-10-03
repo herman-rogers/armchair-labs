@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from patron import dev
+from engine import dev
 
 
 def test_state_round_trip(tmp_path: Path) -> None:
@@ -18,7 +18,7 @@ def test_state_round_trip(tmp_path: Path) -> None:
         repo_root="/repo",
         api_port=8000,
         web_port=5173,
-        children=[dev.ChildRecord("api", 11, 11, "patron.api.app:app")],
+        children=[dev.ChildRecord("api", 11, 11, "engine.api.app:app")],
     )
     path = tmp_path / "runtime" / "dev.json"
 
@@ -38,8 +38,8 @@ def test_corrupt_state_is_treated_as_stale(tmp_path: Path) -> None:
 def test_legacy_cleanup_only_accepts_a_validated_project_listener() -> None:
     root = str(dev.REPO_ROOT)
     processes = {
-        100: (1, 90, "uv run patron serve --port 8000"),
-        101: (100, 90, f"{root}/.venv/bin/patron serve --port 8000"),
+        100: (1, 90, "uv run engine serve --port 8000"),
+        101: (100, 90, f"{root}/.venv/bin/engine serve --port 8000"),
         102: (101, 90, "python worker"),
         200: (1, 200, "/usr/bin/python -m http.server 8000"),
     }
@@ -63,14 +63,14 @@ def test_active_project_vite_owned_by_a_terminal_is_not_called_an_orphan() -> No
 def test_recorded_process_group_is_terminated(monkeypatch) -> None:
     monkeypatch.setattr(dev, "SHUTDOWN_GRACE_SECONDS", 1.0)
     process = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)", "patron-dev-test"],
+        [sys.executable, "-c", "import time; time.sleep(60)", "engine-dev-test"],
         start_new_session=True,
     )
     record = dev.ChildRecord(
         name="test",
         pid=process.pid,
         pgid=os.getpgid(process.pid),
-        marker="patron-dev-test",
+        marker="engine-dev-test",
     )
 
     try:

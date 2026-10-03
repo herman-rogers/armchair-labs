@@ -1,7 +1,10 @@
 # Disposable player signals lab
 
+Current runs use protocol 2 with the `engine` package and updated source pins.
+Saved runs retain their original protocol, configuration, and hashes.
+
 This directory owns every experiment, configuration, test, cache, and result it creates.
-It imports Patron's verified gold reader, preseason panel, reference baseline, and fixed
+It imports Armchair Labs's verified gold reader, preseason panel, reference baseline, and fixed
 NextGen challengers as read-only dependencies. It has no model registration, publishing,
 API, CLI, frontend, or package-build integration. **Delete this directory to remove the lab.**
 

@@ -297,6 +297,6 @@ Integration checks verify cohort preservation, source/version invariants, the
 original market reconciliation and unchanged protected artifacts. The final
 [validation record](../../data/research/profile_history_20260923_r1/validation.json)
 also checks every frozen implementation snapshot. Concurrent workspace edits
-changed `src/patron/data/releases.py` after the run; the saved implementation
+changed `src/engine/data/releases.py` after the run; the saved implementation
 records the version actually used, and the experiment's input and output hashes
 still match.

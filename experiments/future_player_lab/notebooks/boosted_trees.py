@@ -835,7 +835,7 @@ def _(mo, wb):
     cohort, eligibility and ranking checks. This notebook does not publish predictions.
 
     **Local sources:** `deep_readout.md`, `deep/README.md`,
-    `src/patron/metrics/current_rankings.py`, and the manifests for
+    `src/engine/metrics/current_rankings.py`, and the manifests for
     `{wb.DATA.name}`, `{wb.FITS.name}`, `{wb.CAPACITY.name}`, `{wb.REPORT.name}`.
 
     **Model documentation:** [sklearn histogram boosting](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingRegressor.html),

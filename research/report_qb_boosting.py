@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
-from patron.data.releases import digest
+from engine.data.releases import digest
 
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = {

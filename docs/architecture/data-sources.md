@@ -72,7 +72,7 @@ Searches across official NFL, Kaggle, nflverse, SportsDataverse, GitHub, dataset
 
 ## How these sources fit our pipeline
 
-Implemented in [tracking.py](../../src/patron/data/tracking.py) and [tracking_sources.py](../../src/patron/data/tracking_sources.py):
+Implemented in [tracking.py](../../src/engine/data/tracking.py) and [tracking_sources.py](../../src/engine/data/tracking_sources.py):
 
 1. Preserve provider bytes in existing content-addressed `data/raw/objects`, with a source-scoped raw snapshot, acquisition metadata, hashes and coverage description.
 2. Parse every source CSV/Parquet into enriched Parquet, preserving provider columns. This is where extra competition fields and labels remain inspectable.

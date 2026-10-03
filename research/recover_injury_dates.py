@@ -14,8 +14,8 @@ from html import unescape
 import polars as pl
 from build_injury_archive import CACHE, GOLD, OUT, ensure_open
 
-from patron.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
-from patron.metrics.experimental import _normalized_name
+from engine.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
+from engine.metrics.experimental import _normalized_name
 
 
 def text_of(html):

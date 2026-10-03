@@ -43,7 +43,7 @@ def protected_paths():
             ROOT / "data/static/experimental_2026_predictions.csv",
             *(ROOT / "data/outputs").glob("board*.json"),
             ROOT / "data/outputs/metric_backtest_predictions.parquet",
-            ROOT / "src/patron/config/experimental_freeze_2026.yaml",
+            ROOT / "src/engine/config/experimental_freeze_2026.yaml",
         }
         - {p for p in (ROOT / "data/static/draft_2026").rglob("*") if p.is_dir()}
     )
@@ -120,8 +120,8 @@ def main():
             if p.is_file()
         }
         shutil.copytree(
-            ROOT / "src/patron",
-            version / "implementation/patron",
+            ROOT / "src/engine",
+            version / "implementation/engine",
             ignore=shutil.ignore_patterns("__pycache__"),
         )
         shutil.copytree(
@@ -144,10 +144,10 @@ def main():
         socket.socket.connect = no_network
         socket.socket.connect_ex = no_network
 
-        from patron import pipeline
-        from patron.config.settings import Settings, get_settings
-        from patron.data import nflverse
-        from patron.metrics.backtest import MetricReportConfig
+        from engine.board import pipeline
+        from engine.config.settings import Settings, get_settings
+        from engine.data import nflverse
+        from engine.metrics.backtest import MetricReportConfig
 
         get_settings.cache_clear()
         settings = Settings(data_dir=version, nflverse_cache_duration=3153600000)
@@ -159,7 +159,7 @@ def main():
             settings=settings, report_config=config, analyze=False
         )
         inputs.predictions.write_parquet(settings.outputs_dir / "historical_inputs.parquet")
-        from patron.metrics.availability import coverage_audit
+        from engine.metrics.availability import coverage_audit
 
         coverage, review = coverage_audit(inputs.predictions)
         write_json(settings.outputs_dir / "availability_coverage.json", coverage)

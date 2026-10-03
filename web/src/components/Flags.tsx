@@ -11,7 +11,7 @@ const CLASSES: Record<string, string> = {
 
 const TITLES: Record<string, string> = {
   age: 'Running back at or past 27.5. V2 uses a gradual age curve; this historical flag is supporting evidence only.',
-  'ESPN-only': 'No prior NFL production is available to Patron. This row is placed by ESPN’s current PPR draft-room rank, and its model metrics are intentionally blank.',
+  'ESPN-only': 'No prior NFL production is available to Armchair Labs. This row is placed by ESPN’s current PPR draft-room rank, and its model metrics are intentionally blank.',
 }
 
 export function Flags({ value }: { value: string }) {

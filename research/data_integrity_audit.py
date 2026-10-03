@@ -18,18 +18,18 @@ from pathlib import Path
 import polars as pl
 import yaml
 
-from patron.artifacts import artifact_status, verify_draft
-from patron.data.historical_evidence import load_transaction_backfill
-from patron.data.market_backfill import extend_crosswalk
-from patron.metrics.availability import EVIDENCE_FILE, audit_absence_constraints, load_absences
-from patron.metrics.backtest import MetricReportConfig
-from patron.metrics.experimental import build_contract_features, build_transaction_features
-from patron.metrics.positions import repair_player_week_positions
-from patron.metrics.roster_evidence import supplement_identity_names
-from patron.metrics.transaction_events import normalize_transaction_sources
-from patron.scoring.bonuses import extract_touchdown_bonuses
-from patron.scoring.columns import PBP_TOUCHDOWN_COLUMNS
-from patron.scoring.engine import score_components
+from engine.artifacts import artifact_status, verify_draft
+from engine.data.historical_evidence import load_transaction_backfill
+from engine.data.market_backfill import extend_crosswalk
+from engine.metrics.availability import EVIDENCE_FILE, audit_absence_constraints, load_absences
+from engine.metrics.backtest import MetricReportConfig
+from engine.metrics.experimental import build_contract_features, build_transaction_features
+from engine.metrics.positions import repair_player_week_positions
+from engine.metrics.roster_evidence import supplement_identity_names
+from engine.metrics.transaction_events import normalize_transaction_sources
+from engine.scoring.bonuses import extract_touchdown_bonuses
+from engine.scoring.columns import PBP_TOUCHDOWN_COLUMNS
+from engine.scoring.engine import score_components
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "data/cache/nflverse"
@@ -116,7 +116,7 @@ def main():
             next(DERIVED.glob("metric_report_position_history_v1_*.parquet"))
         )
         league = yaml.safe_load(
-            (args.data_dir / "implementation/patron/config/league.yaml").read_text()
+            (args.data_dir / "implementation/engine/config/league.yaml").read_text()
         )
         weeks = repair_player_week_positions(
             weeks, positions, overrides=league.get("position_overrides")
@@ -366,10 +366,10 @@ def main():
         "implementation_sha256": {
             str(p.relative_to(ROOT)): digest(p)
             for p in [
-                ROOT / "src/patron/metrics/experimental.py",
-                ROOT / "src/patron/metrics/rich_weekly.py",
-                ROOT / "src/patron/scoring/engine.py",
-                ROOT / "src/patron/scoring/bonuses.py",
+                ROOT / "src/engine/metrics/experimental.py",
+                ROOT / "src/engine/metrics/rich_weekly.py",
+                ROOT / "src/engine/scoring/engine.py",
+                ROOT / "src/engine/scoring/bonuses.py",
             ]
         },
         "prediction_sha256": digest(prediction_path),

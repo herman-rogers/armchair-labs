@@ -1,7 +1,7 @@
 """End-to-end validation: a live rebuild against the published draft board.
 
 This is Phase 1's actual deliverable expressed as a test. It builds the board from
-current nflverse data and runs the staged comparison in `patron.validation` against
+current nflverse data and runs the staged comparison in `engine.validation` against
 `data/static/2026_draft_list.md`.
 
 Network-marked and slow (it pulls three seasons of play-by-play on a cold cache).
@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import pytest
 
-from patron import pipeline
-from patron.config.league import get_league
-from patron.config.settings import get_settings
-from patron.validation import compare_to_fixture, load_fixture_board
+from engine.board import pipeline
+from engine.config.league import get_league
+from engine.config.settings import get_settings
+from engine.validation import compare_to_fixture, load_fixture_board
 
 pytestmark = pytest.mark.network
 
@@ -141,7 +141,7 @@ def test_position_overrides_reclassify_two_way_players(league_config) -> None:
     """A receiver nflverse files as CB reaches the board when league.yaml says so."""
     import polars as pl
 
-    from patron.board.builder import build_player_seasons
+    from engine.board.builder import build_player_seasons
 
     weeks = pl.DataFrame(
         {

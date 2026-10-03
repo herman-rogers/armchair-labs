@@ -5,7 +5,7 @@
 > support and scenario risk are uncalibrated heuristics. Older descriptions below
 > document the original implementation and are superseded where they conflict.
 
-# Patron metrics: the goal, the surviving catalog, and the graveyard
+# Armchair Labs metrics: the goal, the surviving catalog, and the graveyard
 
 This document is the contract for the player-ranking metrics. It states the one goal
 every metric serves, separates what the engine observed from what it projects, and
@@ -314,7 +314,7 @@ role adjustment: rank one is neutral, while ranks two and below progressively re
 opportunity. The snapshot date is exported because a dated depth chart is evidence,
 not timeless truth.
 
-[`projections.yaml`](../../src/patron/config/projections.yaml) supplies facts historical
+[`projections.yaml`](../../src/engine/config/projections.yaml) supplies facts historical
 data cannot know. A player entry can set `projected_team`, `opportunity_multiplier`,
 and a visible reason. A team entry can adjust pass/rush volume or scoring for every
 player on that team. Unmatched player entries fail the build so a misspelled trade or
@@ -336,7 +336,7 @@ per-active-game `proj_ppg`.
 
 ### 10. Fitted rankers and the board sort
 
-`src/patron/metrics/fit.py` fits walk-forward per-position ridge models on the
+`src/engine/metrics/fit.py` fits walk-forward per-position ridge models on the
 completed backtest folds (`metric_report.yaml` → `fit.models`): `fitted_ppg`
 (per-active-game), `fitted_games` (calibrated availability on the full population),
 `fitted_season_points = fitted_ppg × fitted_games`, plus the direct and two-stage
@@ -372,7 +372,7 @@ Players without a frozen model score retain the same explicitly tagged consensus
 fallback as v2. Current team, ownership, and injury display can update, but the model
 score cannot: the build verifies the snapshot's SHA-256 against
 `experimental_freeze_2026.yaml`. Using the shadow board therefore does not mutate the
-predictions that `patron grade-prospective` will evaluate after the season.
+predictions that `engine grade-prospective` will evaluate after the season.
 
 ### 13. Next-generation shadow challenger
 
@@ -424,7 +424,7 @@ nflverse-first.
 
 An ESPN skill player with no usable NFL production remains visible in the connected
 player and roster tables as an `ESPN-only` row. Its model fields stay null rather than
-receiving a fake zero; `espn_draft_rank` places it into the otherwise unchanged Patron
+receiving a fake zero; `espn_draft_rank` places it into the otherwise unchanged Armchair Labs
 order, while `espn_adp`, `rank_source`, and the row note make that fallback auditable.
 
 ### League team-strength rating
@@ -561,7 +561,7 @@ VOR should not be presented as materially precise rank gaps.
 
 ## Version selection and artifacts
 
-`patron board` writes:
+`engine board` writes:
 
 - `board.json`: compatibility alias for v1;
 - `board_v1.json` and `board_v1.md`: historical board;

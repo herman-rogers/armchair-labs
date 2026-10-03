@@ -10,7 +10,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.espn.lineup import LineupSlot, best_lineup, value_column_for
+from engine.espn.lineup import LineupSlot, best_lineup, value_column_for
 
 SLOTS = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "RB/WR/TE": 1, "K": 1, "D/ST": 1}
 
@@ -147,7 +147,7 @@ class TestRankableSlots:
     two empty rows — noise, and a total that looked like it was missing something."""
 
     def test_unrankable_slots_are_dropped(self) -> None:
-        from patron.espn.lineup import rankable_slots
+        from engine.espn.lineup import rankable_slots
 
         assert rankable_slots(SLOTS) == {
             "QB": 1,
@@ -158,7 +158,7 @@ class TestRankableSlots:
         }
 
     def test_a_flex_survives_only_if_every_position_it_accepts_is_ranked(self) -> None:
-        from patron.espn.lineup import rankable_slots
+        from engine.espn.lineup import rankable_slots
 
         assert "RB/WR/TE" in rankable_slots({"RB/WR/TE": 1})
         assert "QB/RB/WR/TE/K" not in rankable_slots({"QB/RB/WR/TE/K": 1})

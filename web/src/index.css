@@ -1170,10 +1170,10 @@ header.masthead h1 a { color: inherit; text-decoration: none; }
 
 /* A compact league hub, with one aligned week browser instead of two schedules. */
 .league-outlook { gap: 20px; }
-.league-outlook .outlook-kpis { margin: 0; gap: 10px; }
-.league-outlook .outlook-kpis > section { padding: 12px 14px; border-radius: 7px; }
-.league-outlook .outlook-kpis h3 { margin: 8px 0; font-size: 21px; }
-.league-outlook .outlook-kpis p { margin: 5px 0 0; font-size: 12px; }
+.league-update-cards.outlook-kpis { margin: 0; gap: 10px; }
+.league-update-cards.outlook-kpis > section { padding: 12px 14px; border-radius: 7px; }
+.league-update-cards.outlook-kpis h3 { margin: 8px 0; font-size: 21px; }
+.league-update-cards.outlook-kpis p { margin: 5px 0 0; font-size: 12px; }
 .league-matchup-week { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 16px; }
 .outlook-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
 .outlook-section-head h3 { margin: 0; font-size: 16px; }
@@ -1209,7 +1209,83 @@ header.masthead h1 a { color: inherit; text-decoration: none; }
 .outlook-standings .outlook-cell small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .outlook-standings .detail-toggle { padding: 5px 7px; }
 @media (max-width: 600px) {
-  .league-outlook .outlook-kpis { grid-template-columns: 1fr; }
+  .league-update-cards.outlook-kpis { grid-template-columns: 1fr; }
   .outlook-week-controls { width: 100%; }
   .outlook-week-controls select { flex: 1; }
 }
+
+/* Selected-team diagnostics: compact cards and scroll-contained tables. */
+.team-strength { display: grid; gap: 24px; min-width: 0; }
+.team-strength > section, .strength-insights > section { min-width: 0; }
+.strength-insights { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.strength-insights h4 { margin-top: 0; }
+.strength-insights li { margin: 8px 0; }
+.strength-sections { flex-wrap: wrap; margin: 0; }
+.team-strength > section { scroll-margin-top: 20px; }
+.team-strength .table-wrap { max-width: 100%; }
+
+.strength-insights > section { padding: 16px; border: 1px solid var(--border); background: var(--surface); }
+
+.league-update-cards.stat-cards-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.league-update-cards h3 small { font-size: 13px; font-weight: normal; }
+@media (max-width: 1100px) { .league-update-cards.stat-cards-four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .league-update-cards.stat-cards-four, .strength-insights { grid-template-columns: minmax(0, 1fr); } }
+
+/* Shared compact statistics and chart primitives. */
+.league-update-cards.stat-cards-compact { gap: 8px; }
+.league-update-cards.stat-cards-compact > section { padding: 9px 12px; }
+.league-update-cards.stat-cards-compact h3 { font-size: 20px; margin: 5px 0; }
+.league-update-cards.stat-cards-compact p { font-size: 11px; line-height: 1.4; }
+.stat-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin: 12px 0; align-content: start; }
+.stat-list > div { min-width: 0; }
+.stat-list dt { color: var(--text-dim); font-size: 11px; line-height: 1.4; }
+.stat-list dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat-list small { display: block; color: var(--text-dim); font-size: 10px; line-height: 1.4; margin-top: 2px; }
+:root { --chart-amber: #9b651c; --chart-purple: #7861a1; --chart-rose: #ae657a; --chart-slate: #738792; --chart-lime: #7b8536; --chart-cyan: #3196a4; --chart-orange: #bc743d; --chart-blue: #557eb6; --chart-magenta: #9e5c98; --chart-brown: #81745e; }
+[data-theme='dark'] { --chart-amber: #dfb575; --chart-purple: #b19ad9; --chart-rose: #df96ae; --chart-slate: #a2b2bd; --chart-lime: #b4bd72; --chart-cyan: #6fc1cc; --chart-orange: #e99e69; --chart-blue: #8eade0; --chart-magenta: #cf93c7; --chart-brown: #bcae95; }
+.chart-frame { margin: 0; min-width: 0; }
+.chart-frame figcaption { display: flex; flex-direction: column; gap: 3px; padding: 4px 0; font-size: 12px; }
+.chart-frame figcaption span { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+.chart-canvas { min-width: 0; width: 100%; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 5px 0 10px; padding: 0; list-style: none; font-size: 11px; color: var(--text-dim); }
+.chart-legend li { display: flex; align-items: center; gap: 5px; }
+.chart-legend li > span { width: 13px; border-top-width: 3px; }
+.chart-tooltip { max-width: 280px; padding: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; border-radius: 4px; }
+.chart-tooltip p { margin: 5px 0 0; }
+.sticky-footer { position: sticky; bottom: 0; z-index: 20; margin-top: 16px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); background: var(--surface); border: 1px solid var(--border); box-shadow: 0 -3px 12px #0000000a; }
+.sticky-footer .analysis-controls { padding: 0; align-items: center; justify-content: space-between; }
+.sticky-footer .analysis-controls label { flex-direction: row; align-items: center; gap: 10px; min-width: 0; }
+.sticky-footer select { min-width: 180px; }
+.sticky-footer .button { white-space: nowrap; font-size: 11px; padding: 8px 10px; }
+
+/* Team strength leads with the two complementary views of scoring. */
+.team-strength { gap: 16px; }
+.team-strength h3 { margin: 0 0 8px; }
+.team-strength .analysis-panel-heading h3 { margin: 0; }
+.strength-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.strength-chart-grid > * { min-width: 0; }
+.strength-chart-grid > section { scroll-margin-top: 12px; }
+.strength-chart-grid .legend { font-size: 11px; line-height: 1.5; margin: 8px 0; }
+.strength-chart-grid .outlook-method { font-size: 12px; }
+.strength-insights { gap: 16px; }
+.strength-insights > section { padding: 0; border: 0; background: transparent; font-size: 12px; }
+.strength-insights h4 { margin: 0 0 4px; }
+.strength-insights ul { padding-left: 17px; margin: 0; }
+.strength-insights li { margin: 3px 0; }
+.strength-insights p { margin: 0; }
+@media (max-width: 1050px) { .strength-chart-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .league-update-cards.stat-cards-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .league-update-cards.stat-cards-compact > section { padding: 8px; }
+  .league-update-cards.stat-cards-compact .eyebrow { font-size: 9px; letter-spacing: .04em; }
+  .stat-list { gap: 10px; }
+  .stat-list dd { font-size: 15px; }
+  .sticky-footer { padding-left: 8px; padding-right: 8px; }
+  .sticky-footer .analysis-controls { gap: 8px; flex-wrap: nowrap; }
+  .sticky-footer .analysis-controls label { flex: 1; flex-direction: column; align-items: stretch; gap: 3px; }
+  .sticky-footer select { min-width: 0; width: 100%; }
+}
+.team-heading { margin: 10px 0; }
+.team-heading .page-links { margin: 5px 0 0; font-size: 12px; }
+.team-heading .analysis-controls { padding: 4px 0; }
+@media (max-width: 600px) { .team-heading .analysis-controls { flex: 1; min-width: 175px; } .team-heading .analysis-controls label { width: 100%; } }

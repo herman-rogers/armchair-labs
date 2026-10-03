@@ -6,14 +6,14 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from patron.metrics.backtest import candidate_outcomes
-from patron.metrics.experimental import build_contract_features, build_transaction_features
-from patron.metrics.positions import (
+from engine.metrics.backtest import candidate_outcomes
+from engine.metrics.experimental import build_contract_features, build_transaction_features
+from engine.metrics.positions import (
     canonical_positions,
     historical_positions,
     repair_player_week_positions,
 )
-from patron.metrics.transaction_events import normalize_transaction_sources
+from engine.metrics.transaction_events import normalize_transaction_sources
 
 
 def replay(name, prior_team, descriptions):

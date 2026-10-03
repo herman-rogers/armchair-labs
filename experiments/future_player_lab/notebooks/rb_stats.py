@@ -19,11 +19,11 @@ def _():
     import numpy as np
     import plotly.express as px
     import polars as pl
+    from experiments.future_player_lab.notebooks import rb_availability as availability
+    from experiments.future_player_lab.notebooks import rb_probability as probability
 
     # Reuse verified data loading and outcome definitions, not the old experiments.
     from experiments.future_player_lab.notebooks import workbench as data
-    from experiments.future_player_lab.notebooks import rb_availability as availability
-    from experiments.future_player_lab.notebooks import rb_probability as probability
     from threadpoolctl import threadpool_limits
 
     px.defaults.template = "plotly_white"

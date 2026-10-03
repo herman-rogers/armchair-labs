@@ -5,11 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright, expect
-from patron.espn.sync import LeagueSnapshot
-from patron.espn.observations import weekly_matchups
-from patron.espn.forecast_log import accuracy
-from patron.api.nextgen_routes import league
-from patron.api.league_observation_routes import forecasts, forecast_evidence
+from engine.espn.sync import LeagueSnapshot
+from engine.espn.observations import weekly_matchups
+from engine.espn.forecast_log import accuracy
+from engine.api.nextgen_routes import league
+from engine.api.league_observation_routes import forecasts, forecast_evidence
 
 
 def main():

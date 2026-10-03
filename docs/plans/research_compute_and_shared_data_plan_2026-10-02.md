@@ -9,7 +9,7 @@ implement storage, train models, upload data, or commit the workspace.
 
 Application and repository name: **Armchair Labs** / **`armchair-labs`**, selected by
 the user. Repository: `git@github.com:herman-rogers/armchair-labs.git`. The existing
-Python package and CLI remain `patron` for compatibility.
+Python package and CLI remain `engine` for compatibility.
 
 ## Objective and scope
 

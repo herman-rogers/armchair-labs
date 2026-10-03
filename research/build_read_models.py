@@ -15,15 +15,23 @@ from pathlib import Path
 import polars as pl
 from fastapi.params import Param
 
-from patron.api import nextgen_routes, profile_routes, ranking_routes
-from patron.config.settings import get_settings
-from patron.data.frames import read_frame
-from patron.data.releases import atomic_json, digest
-from patron.data.serving import SCHEMA_VERSION, encode, generation, model_key
-from patron.data.verification import verification_batch
+from engine.api import nextgen_routes, profile_routes, ranking_routes
+from engine.config.settings import get_settings
+from engine.data.frames import read_frame
+from engine.data.releases import atomic_json, digest
+from engine.data.serving import SCHEMA_VERSION, encode, generation, model_key
+from engine.data.verification import verification_batch
 
 
 def build(*, history=True, player_limit=None):
+    """Precompute the same DuckDB-backed responses served by application requests."""
+    from engine.tables.application import query_scope
+
+    with query_scope(get_settings().data_dir):
+        return _build(history=history, player_limit=player_limit)
+
+
+def _build(*, history=True, player_limit=None):
     data = get_settings().data_dir
     current = generation(data)
     if current is None:

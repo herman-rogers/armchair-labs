@@ -10,6 +10,14 @@ The September 23 corrected catalog used gold `canonical_nextgen_20260923_r1` wit
 See [the profile migration](../history/profile_gold_migration_2026-09-23.md) for the published
 dependencies, tracking coverage, and forecast serving rules.
 
+## Current query system
+
+The active system uses one named-table catalog and native DuckDB tables, with
+Parquet releases in GCS. New pipeline batches write to `data/tables/batches/`;
+`data/gold/` is retained for immutable historical releases. See
+[querying and refreshing tables](../operations/tables.md) for current commands.
+The historical “gold” terminology below describes the original migration.
+
 ## Original r5 migration record
 
 The following documents the initial migration. Its release versions and serving
@@ -162,19 +170,19 @@ Use a new version for each build. Failed or superseded candidates are retained;
 only the current catalog selects what the application serves.
 
 ```bash
-uv run python research/data_pipeline.py build \
+uv run engine data build \
   --version NEW_VERSION \
   --history historical_backfill_20260923_r2 \
   --college-source college_source_20260922_r1 \
   --current-report data/outputs/rookie_watch_2026.json
 
-uv run python research/data_pipeline.py products \
+uv run engine data products \
   --version NEW_VERSION --prefix NEW_PRODUCTS
 
-uv run python research/data_pipeline.py publish \
+uv run engine data publish \
   --version NEW_VERSION --prefix NEW_PRODUCTS
 
-uv run python research/data_pipeline.py verify --version NEW_VERSION
+uv run engine data verify --version NEW_VERSION
 ```
 
 `just data-build`, `just data-products`, `just data-publish`, and `just data-verify`
@@ -183,8 +191,8 @@ release, use `gold --version NEW_GOLD --enriched-version EXISTING_ENRICHED`.
 The original gold release used enriched/raw version `canonical_20260923_r4`.
 
 ```python
-from patron.config.settings import get_settings
-from patron.data.releases import load_gold
+from engine.config.settings import get_settings
+from engine.data.releases import load_gold
 
 gold = load_gold(get_settings().data_dir)  # pin the current verified release
 features = gold.read("preseason_features")

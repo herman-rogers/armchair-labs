@@ -1,8 +1,8 @@
 import polars as pl
 import pytest
 
-from patron.data import weekly_points
-from patron.data.releases import digest, reference, write_json
+from engine.data import weekly_points
+from engine.data.releases import digest, reference, write_json
 
 
 def test_weekly_product_verifies_artifacts_and_analysis_binding(tmp_path, monkeypatch):

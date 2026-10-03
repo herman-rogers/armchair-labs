@@ -76,7 +76,7 @@ estimate the causal effect of a starting role or isolate talent.
 
 ## Canonical measures and refactoring
 
-`src/patron/metrics/player_profile.py` owns the observed-history formulas. Career,
+`src/engine/metrics/player_profile.py` owns the observed-history formulas. Career,
 season, role-band, and consecutive-period summaries all call the same aggregator.
 The frontend reads its metric catalog rather than recomputing rates. The profile
 replaces the separate college career renderer, and college release verification is

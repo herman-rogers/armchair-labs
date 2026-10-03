@@ -89,5 +89,9 @@ def test_prediction_detail_cell_exports_csv_with_injury_evidence(with_availabili
     assert exported["Absolute error"].to_list() == [10.0, 20.0, 10.0]
     if with_availability:
         assert exported["availability_evidence_ids"].to_list() == ["e1; e2", "", None]
-        assert exported["availability_conflicts"].to_list() == ["", 'Review, "dated" evidence', None]
+        assert exported["availability_conflicts"].to_list() == [
+            "",
+            'Review, "dated" evidence',
+            None,
+        ]
         assert forecasts["availability_evidence_ids"].dtype == pl.List(pl.String)

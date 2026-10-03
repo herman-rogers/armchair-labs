@@ -3,9 +3,9 @@ from copy import deepcopy
 import polars as pl
 import pytest
 
-from patron.data.college import normalize_season
-from patron.data.college_identity import build_links
-from patron.metrics.college_translation import (
+from engine.data.college import normalize_season
+from engine.data.college_identity import build_links
+from engine.metrics.college_translation import (
     COLLEGE_FEATURES,
     NFL_TARGETS,
     features,

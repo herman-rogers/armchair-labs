@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.board.rank import (
+from engine.board.rank import (
     OVERALL_VOR,
     POSITION_RANK,
     RANK_KEY,
@@ -13,7 +13,7 @@ from patron.board.rank import (
     apply_rank_key,
     resolve_rank_keys,
 )
-from patron.metrics.fit import FitConfig, RidgeModel, apply_fitted_models, models_for_season
+from engine.metrics.fit import FitConfig, RidgeModel, apply_fitted_models, models_for_season
 
 
 def board() -> pl.DataFrame:
@@ -126,7 +126,7 @@ def test_fitted_models_apply_to_a_live_board_from_their_record() -> None:
 
 def test_market_only_players_are_rank_matched_and_tagged(league_config) -> None:
     """A rookie the market ranks lands where the board already places similar market ranks."""
-    from patron.board.rank import OVERALL_VOR, RANK_SOURCE
+    from engine.board.rank import OVERALL_VOR, RANK_SOURCE
 
     rows = []
     # Five rated WRs with market ranks 1..5 and VOR 10..2.

@@ -21,7 +21,7 @@ from preseason_role_workload import ROLE, interval
 from sklearn.linear_model import LogisticRegression
 from value_capture_audit import finite, model_values, rank_ids, score, summarize
 
-from patron.metrics.outlook import fit, unique
+from engine.metrics.outlook import fit, unique
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / "research/qb_role_evidence_20260923.csv"
@@ -524,7 +524,7 @@ def main():
     )
     schedule = sources(["game_id", "home_qb_id", "away_qb_id", "gameday"])
     schedule = schedule.filter(pl.col("season").is_between(2014, 2025))
-    scoring_path = history / "implementation/patron/config/scoring.yaml"
+    scoring_path = history / "implementation/engine/config/scoring.yaml"
     source_paths.append(scoring_path)
     rows = enrich_history(
         frame.to_dicts(), raw, snaps, schedule, yaml.safe_load(scoring_path.read_text())
@@ -577,7 +577,7 @@ def main():
                 ROOT / "research/value_capture_audit.py",
                 ROOT / "research/artifact_inputs.py",
                 ROOT / "research/data_integrity_audit.py",
-                ROOT / "src/patron/metrics/outlook.py",
+                ROOT / "src/engine/metrics/outlook.py",
                 ROOT / "research/test_qb_role_transition.py",
             )
         },

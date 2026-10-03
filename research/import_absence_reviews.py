@@ -7,9 +7,9 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.historical_evidence import EvidenceCapture, article_content
-from patron.metrics.availability import validate_absences
-from patron.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import EvidenceCapture, article_content
+from engine.metrics.availability import validate_absences
+from engine.metrics.experimental import _normalized_name, _transaction_aliases
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     for decision in json.loads(args.reviews.read_text()):
         url = decision["source_url"]
         # Import is offline: collection and source review must have happened first.
-        from patron.data.historical_evidence import sha256
+        from engine.data.historical_evidence import sha256
 
         if not (capture.root / f"{sha256(url.encode())}.json").exists():
             raise ValueError(f"Uncaptured review source: {url}")

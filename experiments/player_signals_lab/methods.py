@@ -1,4 +1,4 @@
-"""Fixed experimental methods. Nothing is registered in Patron."""
+"""Fixed experimental methods. Nothing is registered in Armchair Labs."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from scipy.optimize import minimize
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from patron.metrics.nextgen import constrained
+from engine.metrics.nextgen import constrained
 
 
 def matrix(rows, columns):

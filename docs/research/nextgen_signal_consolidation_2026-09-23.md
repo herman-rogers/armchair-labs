@@ -210,7 +210,7 @@ explicitly filters position and population before fitting and comparison.
 ## The existing Next-gen model and the consolidation decision
 
 There **is** an existing Next-gen family in
-[`metric_report.yaml`](../../src/patron/config/metric_report.yaml):
+[`metric_report.yaml`](../../src/engine/config/metric_report.yaml):
 
 - Returner PPG uses historical PPG, previous PPG, age, depth-role and component
   projection inputs. A separate games model uses prior/expected games and dated

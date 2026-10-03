@@ -55,7 +55,7 @@ historical publication times, or establish predictive accuracy.
 
 **Subsequent workflow context:** the workspace now contains
 [`research/refresh_nextgen.py`](../../research/refresh_nextgen.py),
-[`src/patron/data/weekly.py`](../../src/patron/data/weekly.py), and the documented
+[`src/engine/data/weekly.py`](../../src/engine/data/weekly.py), and the documented
 `just nextgen-refresh` workflow. It coordinates completed-week capture, rebuilding
 and publication. The catalog still selected the reviewed Week 2 release when this
 document was written. The collector captures weekly production, snaps, schedules
@@ -176,9 +176,9 @@ evaluation on new players.
 
 ### Preserve the complete captured NGS tables
 
-[`build_nextgen_features`](../../src/patron/metrics/enrichment.py) currently filters
+[`build_nextgen_features`](../../src/engine/metrics/enrichment.py) currently filters
 to regular-season summary rows and selects four metrics. Gold and
-[`profile_tracking.py`](../../src/patron/metrics/profile_tracking.py) inherit that
+[`profile_tracking.py`](../../src/engine/metrics/profile_tracking.py) inherit that
 projection. Recover the full captured passing, receiving and rushing tables
 before deriving this existing convenience view.
 
@@ -251,8 +251,8 @@ contract rather than relying on the historical 2016–2025 bundle.
 
 ### Bind caches to inputs and transformations
 
-[`cached_frame`](../../src/patron/data/derived.py) keys artifacts by name and season
-list. [`pipeline.py`](../../src/patron/pipeline.py) uses that cache for NGS, while
+[`cached_frame`](../../src/engine/data/derived.py) keys artifacts by name and season
+list. [`pipeline.py`](../../src/engine/board/pipeline.py) uses that cache for NGS, while
 [`data_pipeline.py`](../../research/data_pipeline.py) restores historical derived
 artifacts before enrichment. Unchanged season lists do not prove unchanged data.
 

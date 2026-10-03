@@ -37,9 +37,9 @@ selected values are season points. The saved source choices are athletic models 
 QB/TE, full-stack RB, and cutoff-rostered WR. The snapshot contains 611 players; the
 live modeled pool contains 610 after the existing removal override.
 
-References: `src/patron/config/league.yaml`,
-`src/patron/config/metric_report.yaml`, `src/patron/pipeline.py`,
-`src/patron/config/experimental_freeze_2026.yaml`.
+References: `src/engine/config/league.yaml`,
+`src/engine/config/metric_report.yaml`, `src/engine/board/pipeline.py`,
+`src/engine/config/experimental_freeze_2026.yaml`.
 
 ## Findings, in priority order
 
@@ -50,7 +50,7 @@ are present, all PPG and VOR values are within tolerance, top-25 overlap is 25/2
 rank correlation rounds to 1.000. The advisory flag comparison matches 159/160.
 `board.json` and `board_v1.json` are byte-identical.
 
-However, `patron board` rewrites both files on every build. Shared scoring,
+However, `engine board` rewrites both files on every build. Shared scoring,
 aggregation, configuration, and overrides can change the result. The full build also
 requires the Adaptive snapshot and manifest before it returns any board; a missing
 experimental artifact can therefore prevent a V1/V2 rebuild.
@@ -60,8 +60,8 @@ a dedicated draft snapshot. Keep the existing V1 selector/API behavior compatibl
 Separate optional experiment builds from the ability to serve or rebuild production
 artifacts. Preserving a version name alone does not preserve the draft's numbers.
 
-Evidence: `src/patron/cli.py:73`, `src/patron/pipeline.py:412`,
-`data/static/2026_draft_list.md`, `src/patron/validation.py`.
+Evidence: `src/engine/cli.py:73`, `src/engine/board/pipeline.py:412`,
+`data/static/2026_draft_list.md`, `src/engine/validation.py`.
 
 ### 2. Rookie research data enters production-model training
 
@@ -86,9 +86,9 @@ rookie model or a declared market fallback, then combine the two populations at 
 forecast-output boundary. Production artifacts should depend only on the approved
 model and its dependencies; the current fit fingerprint includes all research specs.
 
-Evidence: `src/patron/metrics/backtest.py:318`,
-`src/patron/config/metric_report.yaml:85`, `src/patron/metrics/fit.py:324`,
-`src/patron/metrics/fit.py:340`, `src/patron/metrics/fit.py:914`.
+Evidence: `src/engine/metrics/backtest.py:318`,
+`src/engine/config/metric_report.yaml:85`, `src/engine/metrics/fit.py:324`,
+`src/engine/metrics/fit.py:340`, `src/engine/metrics/fit.py:914`.
 
 ### 3. The headline ranking comparisons use different player populations
 
@@ -112,8 +112,8 @@ Freeze the outcome universe for each comparison. The existing market-disagreemen
 analysis already intersects player coverage and is a useful foundation. It still
 needs coverage reporting and a separate complete-pool evaluation.
 
-Evidence: `src/patron/metrics/backtest.py:706`,
-`src/patron/metrics/backtest.py:813`, `src/patron/metrics/backtest.py:1113`.
+Evidence: `src/engine/metrics/backtest.py:706`,
+`src/engine/metrics/backtest.py:813`, `src/engine/metrics/backtest.py:1113`.
 
 ### 4. Saved boards, model artifacts, and documented evidence have drifted
 
@@ -155,7 +155,7 @@ of demonstrated market outperformance pending a corrected deployment-level test.
 
 Evidence: `data/outputs/metric_report.json`,
 `data/outputs/metric_backtest_predictions.parquet`, `data/outputs/board_v2.json`,
-`docs/reference/v2_metrics_review.md`, `src/patron/metrics/fit.py:929`.
+`docs/reference/v2_metrics_review.md`, `src/engine/metrics/fit.py:929`.
 
 ### 5. The interface mixes several forecast definitions
 
@@ -181,8 +181,8 @@ the retained V2 simulation as a separate estimate. A frozen season total alone
 cannot identify both PPG and expected games.
 
 Evidence: `web/src/components/RosterPanel.tsx:77`,
-`web/src/components/BoardTable.tsx:190`, `src/patron/pipeline.py:210`,
-`src/patron/espn/reports.py:293`, `src/patron/metrics/enrichment.py:527`.
+`web/src/components/BoardTable.tsx:190`, `src/engine/board/pipeline.py:210`,
+`src/engine/espn/reports.py:293`, `src/engine/metrics/enrichment.py:527`.
 
 ### 6. Waiver replacement does not match its stated meaning
 
@@ -199,8 +199,8 @@ Define draft replacement, waiver replacement, and improvement over a specific ro
 player as separate quantities. For add/drop decisions, marginal lineup benefit is
 more useful than applying preseason positional ranks to the remaining wire.
 
-Evidence: `src/patron/espn/reports.py:94`,
-`src/patron/api/league_routes.py:214`.
+Evidence: `src/engine/espn/reports.py:94`,
+`src/engine/api/league_routes.py:214`.
 
 ## Statistical critique and simplification
 

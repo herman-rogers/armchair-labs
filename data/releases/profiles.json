@@ -18,7 +18,8 @@
         "experiments/future_player_lab/runs/deep_diagnostics_001",
         "experiments/future_player_lab/runs/raw_distributions_001",
         "data/source_catalog.json"
-      ]
+      ],
+      "optional_include": ["data/tables/batches"]
     },
     "rebuild": {
       "description": "Notebook inputs plus preserved source collections and the inputs used by data_pipeline build.",

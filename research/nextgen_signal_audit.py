@@ -17,10 +17,10 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from threadpoolctl import threadpool_limits
 
-from patron.data.gold import FORECAST_KEY, unique
-from patron.data.player_profiles import prepare_weeks
-from patron.data.releases import digest, load_gold, write_json
-from patron.metrics.player_profile import KEYS, TOTALS, career_features
+from engine.data.player_profiles import prepare_weeks
+from engine.data.releases import digest, load_gold, write_json
+from engine.metrics.player_profile import KEYS, TOTALS, career_features
+from engine.tables.contracts import FORECAST_KEY, unique
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL = ROOT / "research/nextgen_signal_protocol.md"
@@ -564,12 +564,12 @@ def main():
     gold = load_gold(ROOT / "data", args.gold)
     if gold.manifest["input"]["version"] != "canonical_20260923_r4":
         raise ValueError("Protocol pins enriched canonical_20260923_r4")
-    from patron.data.releases import identifier
+    from engine.data.releases import identifier
 
     output = ROOT / "data/research" / identifier(args.version)
     output.mkdir(parents=True, exist_ok=False)
     protected_paths = list((ROOT / "data/outputs").glob("board*.json"))
-    protected_paths += [ROOT / "src/patron/config/experimental_freeze_2026.yaml"]
+    protected_paths += [ROOT / "src/engine/config/experimental_freeze_2026.yaml"]
     protected_paths += [ROOT / "data/static/experimental_2026_predictions.csv"]
     protected = {str(p.relative_to(ROOT)): digest(p) for p in protected_paths if p.exists()}
     implementation = output / "implementation"
@@ -578,10 +578,10 @@ def main():
         Path(__file__),
         PROTOCOL,
         ROOT / "research/test_nextgen_signal_audit.py",
-        ROOT / "src/patron/metrics/player_profile.py",
-        ROOT / "src/patron/data/player_profiles.py",
-        ROOT / "src/patron/data/releases.py",
-        ROOT / "src/patron/data/gold.py",
+        ROOT / "src/engine/metrics/player_profile.py",
+        ROOT / "src/engine/data/player_profiles.py",
+        ROOT / "src/engine/data/releases.py",
+        ROOT / "src/engine/tables/contracts.py",
         ROOT / "uv.lock",
         ROOT / "pyproject.toml",
     ]

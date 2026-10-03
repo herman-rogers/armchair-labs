@@ -12,7 +12,7 @@ from pathlib import Path
 import polars as pl
 from individual_stat_registry import build_registry
 
-from patron.data.releases import write_json
+from engine.data.releases import write_json
 
 PAGE = r"""<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">

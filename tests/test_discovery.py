@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from patron.metrics.discovery import (
+from engine.metrics.discovery import (
     DISCOVERY_COLUMNS,
     DiscoveryConfig,
     automated_feature_pool,

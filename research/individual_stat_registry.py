@@ -9,7 +9,7 @@ import numpy as np
 import polars as pl
 import yaml
 
-from patron.data.gold import RICH_SERIES
+from engine.tables.contracts import RICH_SERIES
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = {
@@ -141,7 +141,7 @@ def family(name, catalog):
 
 def definition(name, catalog):
     if name in catalog:
-        return catalog[name]["description"], "src/patron/config/metric_report.yaml"
+        return catalog[name]["description"], "src/engine/config/metric_report.yaml"
     if name.startswith("distribution_"):
         suffix = name.removeprefix("distribution_").split("_", 1)[1]
         meanings = dict(
@@ -204,7 +204,7 @@ def definition(name, catalog):
             "s0/s1/s2 are preceding 1/2/3 seasons; cross-year terms use these three. "
             "Calendar-week coverage and zero-fill follow the pinned rich_weekly implementation, "
             "not observed-game denominators.",
-            "src/patron/metrics/rich_weekly.py",
+            "src/engine/metrics/rich_weekly.py",
         )
     summary_prefixes = [
         "basic_prior",
@@ -305,15 +305,15 @@ def definition(name, catalog):
         "Named historical gold observation or deterministic formula: "
         + name
         + ". See pinned implementation and source table schema; missing remains unknown.",
-        "src/patron/data/gold.py + src/patron/metrics/backtest.py + "
-        "src/patron/metrics/projection.py",
+        "src/engine/tables/contracts.py + src/engine/metrics/backtest.py + "
+        "src/engine/metrics/projection.py",
     )
 
 
 def build_registry(frame, root):
     catalog = {
         r["key"]: r
-        for r in yaml.safe_load((ROOT / "src/patron/config/metric_report.yaml").read_text())[
+        for r in yaml.safe_load((ROOT / "src/engine/config/metric_report.yaml").read_text())[
             "metrics"
         ]
     }

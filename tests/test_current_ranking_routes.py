@@ -4,16 +4,16 @@ import polars as pl
 import pytest
 from fastapi import HTTPException
 
-from patron.api import ranking_routes as routes
-from patron.data.releases import write_json
-from patron.metrics.current_rankings import rank_frame
+from engine.api import ranking_routes as routes
+from engine.data.releases import write_json
+from engine.metrics.current_rankings import rank_frame
 
 
 @pytest.fixture
 def ranking_api(tmp_path, monkeypatch):
     # Route policy fixtures are independent of a real catalog and its response cache.
     monkeypatch.setattr(
-        "patron.data.serving.get_settings", lambda: SimpleNamespace(data_dir=tmp_path)
+        "engine.data.serving.get_settings", lambda: SimpleNamespace(data_dir=tmp_path)
     )
     entry = dict(
         id="ranking:rest_of_season:QB",

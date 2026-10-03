@@ -20,7 +20,7 @@ import polars as pl
 from artifact_inputs import require_audited_version
 from data_integrity_audit import ROOT, catalog, digest, read_sources, select_sources
 
-from patron.metrics.positions import canonical_positions
+from engine.metrics.positions import canonical_positions
 
 BASE = ["last3_points", "season_points_pg", "observed_games", "log_adp"]
 USAGE = [*BASE, "snap_last2", "last3_carries", "last3_targets"]

@@ -13,8 +13,8 @@ import polars as pl
 from build_injury_archive import CACHE, GOLD, OUT, ensure_open
 from recover_injury_dates import text_of
 
-from patron.data.historical_evidence import EvidenceCapture
-from patron.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import EvidenceCapture
+from engine.metrics.experimental import _normalized_name, _transaction_aliases
 
 
 def parse_official(html, season, week, source, identities):

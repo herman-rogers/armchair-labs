@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from patron.data import shared
-from patron.data.notebook_clean import clean
+from engine.data import shared
+from engine.data.notebook_clean import clean
 
 
 @pytest.fixture
@@ -56,6 +56,30 @@ def published(release, tmp_path):
     reference = shared.publish(manifest, store, cache, tmp_path / "published.json", workers=2)
     final = json.loads((tmp_path / "published.json").read_text())
     return store, reference, final
+
+
+def test_source_batches_do_not_capture_the_query_catalog(release, tmp_path):
+    root, cache, _ = release
+    config = {
+        "profiles": {
+            "source": {
+                "include": ["data/raw"],
+                "optional_include": ["data/tables/batches"],
+            }
+        }
+    }
+    before = shared.snapshot(root, config, "before", cache, tmp_path / "before.json")
+    assert all(name.startswith("data/raw/") for name in before["files"])
+    batch = root / "data/tables/batches/new"
+    batch.mkdir(parents=True)
+    (batch / "table.parquet").write_bytes(b"source batch")
+    (root / "data/tables/current.json").write_text('{"query": "do not distribute here"}')
+    after = shared.snapshot(root, config, "after", cache, tmp_path / "after.json")
+    assert "data/tables/batches/new/table.parquet" in after["files"]
+    assert "data/tables/current.json" not in after["files"]
+    config["profiles"]["source"]["include"].append("data/required_missing")
+    with pytest.raises(FileNotFoundError, match="Required"):
+        shared.snapshot(root, config, "missing", cache, tmp_path / "missing.json")
 
 
 def test_round_trip_dedup_models_and_offline(release, tmp_path):
@@ -162,7 +186,7 @@ def test_reject_symlink_and_source_code_restore(release, tmp_path):
     (root / "data").symlink_to(tmp_path / "outside", target_is_directory=True)
     with pytest.raises(ValueError, match="Symlink"):
         shared.fetch(manifest, root, tmp_path / "cache", "notebooks", store)
-    manifest["files"]["src/patron/cli.py"] = next(iter(manifest["files"].values()))
+    manifest["files"]["src/engine/cli.py"] = next(iter(manifest["files"].values()))
     with pytest.raises(ValueError, match="outside data/run"):
         shared.validate_manifest(manifest)
 

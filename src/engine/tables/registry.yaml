@@ -1,0 +1,375 @@
+schema_version: 1
+tables:
+  team_player_games:
+    description: Participation-backed regular-season QB/WR/TE game observations, 2013 onward.
+    grain: One player on one team in one game.
+    primary_key: [game_id, team, player_id]
+    kind: python
+    builder: engine.tables.builders:team_player_games
+    dependencies: [nfl_player_weeks, current_weeks, nfl_snap_counts, current_snaps, players, current_players, nfl_observed_schedule, current_observed_schedule]
+    refresh_hours: 24
+    parameters: {start_season: 2013}
+    code_modules: [engine.data.team_analysis, engine.data.frames, engine.data.releases]
+    required_columns: {player_id: String, team: String, league_points: Float64}
+    limitations:
+      - Descriptive postgame observations; snap participation is not a pregame starter signal.
+      - Missing appearances are absent rows. Verified positive-snap zero-stat games score zero.
+
+  player_pair_correlations:
+    description: Same-team QB/WR/TE pair correlations, by season and pooled since 2013.
+    grain: One unordered pair per team, period, participation sample, and centering basis.
+    primary_key: [team, scope, start_season, end_season, qb_scope, sample, basis, player_a_id, player_b_id]
+    kind: python
+    builder: engine.tables.builders:player_pair_correlations
+    dependencies: [team_player_games]
+    refresh_hours: 24
+    code_modules: [engine.metrics.team_correlations]
+    required_columns: {correlation: Float64, n: Int64}
+    limitations:
+      - All starting-QB regimes are pooled; use team_player_games for a specific QB or date window.
+      - Players need three starter games in the period; pairs need three shared appearances.
+      - Season centering is within the pair's shared games; undefined correlations remain null.
+      - Fisher intervals are approximate, exploratory, and not adjusted for multiple comparisons.
+      - Pairwise covariances cannot be combined into a coherent multi-player lineup covariance.
+      - No causal or out-of-sample predictive claim. League scoring includes configured bonuses.
+
+  rams_pair_correlations:
+    description: Frozen accepted Rams/Stafford 2021–2026 Week 3 study, including permutation and BH metrics.
+    grain: One named player pair in the saved Stafford-start study.
+    primary_key: [player_a, player_b]
+    kind: parquet
+    source: research/rams_correlations_20261003/tables/pair_correlations.parquet
+    inputs: [research/rams_correlations_20261003/manifest.json, research/rams_correlations_20261003/originals/methodology.json]
+    observation_cutoff: {season: 2026, through_week: 3}
+    required_columns: {player_a: String, player_b: String, season_adjusted_r: Float64}
+    limitations:
+      - Frozen historical study; manual refresh only. Names preserve original study keys.
+      - Detailed methodology and exact original CSVs remain in the research run.
+      - P-values and BH q-values are exploratory, not causal or predictive validation.
+
+  rams_pair_correlations_by_season:
+    description: Frozen per-season breakdown of the accepted Rams/Stafford study.
+    grain: One named player pair per season in the saved study.
+    primary_key: [player_a, player_b, season]
+    kind: parquet
+    source: research/rams_correlations_20261003/tables/pair_correlations_by_season.parquet
+    inputs: [research/rams_correlations_20261003/manifest.json, research/rams_correlations_20261003/originals/methodology.json]
+    observation_cutoff: {season: 2026, through_week: 3}
+    limitations:
+      - Frozen historical study; not updated by the daily refresh job.
+
+  # Cleaned pipeline outputs are ordinary SQL tables in this same catalog.
+  forecast_quarantine:
+    description: Candidate folds with only later market admission evidence; excluded from features.
+    grain: One row per player_id, forecast_season, forecast_cutoff_date.
+    primary_key:
+    - player_id
+    - forecast_season
+    - forecast_cutoff_date
+    kind: source
+    source: forecast_quarantine
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: quarantine
+  preseason_features:
+    description: One player / forecast season / cutoff; production statistics refer to source_season.
+    grain: One row per player_id, forecast_season, forecast_cutoff_date.
+    primary_key:
+    - player_id
+    - forecast_season
+    - forecast_cutoff_date
+    kind: source
+    source: preseason_features
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: asof_features
+  season_outcomes:
+    description: Realized outcomes for the same candidate keys; incomplete seasons remain null.
+    grain: One row per player_id, forecast_season, forecast_cutoff_date.
+    primary_key:
+    - player_id
+    - forecast_season
+    - forecast_cutoff_date
+    kind: source
+    source: season_outcomes
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: labels
+  players:
+    description: Stable NFL identities and biographical/draft fields; not historical roster states.
+    grain: One row per gsis_id.
+    primary_key:
+    - gsis_id
+    kind: source
+    source: players
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: identity
+  nfl_player_weeks_quarantine:
+    description: Source observations missing a primary-key identity; retained without inventing IDs.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: nfl_player_weeks_quarantine
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: quarantine
+  nfl_player_weeks:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id, season, week.
+    primary_key:
+    - player_id
+    - season
+    - week
+    kind: source
+    source: nfl_player_weeks
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_player_seasons:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id, season.
+    primary_key:
+    - player_id
+    - season
+    kind: source
+    source: nfl_player_seasons
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_team_seasons:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per team, season.
+    primary_key:
+    - team
+    - season
+    kind: source
+    source: nfl_team_seasons
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_weekly_usage:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id, season, week.
+    primary_key:
+    - player_id
+    - season
+    - week
+    kind: source
+    source: nfl_weekly_usage
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  absence_events:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per evidence_id.
+    primary_key:
+    - evidence_id
+    kind: source
+    source: absence_events
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  college_seasons:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per college_id, season, team_id.
+    primary_key:
+    - college_id
+    - season
+    - team_id
+    kind: source
+    source: college_seasons
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  college_annual:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per college_id, season.
+    primary_key:
+    - college_id
+    - season
+    kind: source
+    source: college_annual
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  college_identity_links:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per college_id.
+    primary_key:
+    - college_id
+    kind: source
+    source: college_identity_links
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  current_weeks_quarantine:
+    description: Source observations missing a primary-key identity; retained without inventing IDs.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: current_weeks_quarantine
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: quarantine
+  current_weeks:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id, season, week.
+    primary_key:
+    - player_id
+    - season
+    - week
+    kind: source
+    source: current_weeks
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  current_snaps:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id, season, week.
+    primary_key:
+    - player_id
+    - season
+    - week
+    kind: source
+    source: current_snaps
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  current_players:
+    description: Observed records; filter by event/known date before joining a forecast cutoff.
+    grain: One row per player_id.
+    primary_key:
+    - player_id
+    kind: source
+    source: current_players
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_transactions:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: nfl_transactions
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_injuries:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: nfl_injuries
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_snap_counts:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: nfl_snap_counts
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  college_games:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: college_games
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  college_identity_registry:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: college_identity_registry
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_identity_crosswalk:
+    description: Source records with a release-local row key; unresolved evidence is retained.
+    grain: One row per record_id.
+    primary_key:
+    - record_id
+    kind: source
+    source: nfl_identity_crosswalk
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  current_schedule:
+    description: Schedule from the captured current observation release; no result fields.
+    grain: One row per game_id.
+    primary_key:
+    - game_id
+    kind: source
+    source: current_schedule
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_schedule:
+    description: Captured schedule context; scores, realized starters, weather and betting results excluded.
+    grain: One row per game_id.
+    primary_key:
+    - game_id
+    kind: source
+    source: nfl_schedule
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+  nfl_observed_schedule:
+    description: Observed game results and starting QB identities; postgame evidence only.
+    grain: One game.
+    primary_key:
+    - game_id
+    kind: source
+    source: nfl_observed_schedule
+    refresh_hours: 24
+    limitations:
+    - Includes realized scores and starting QBs; not a forecast-cutoff feature table.
+  current_observed_schedule:
+    description: Observed game results and starting QB identities; postgame evidence only.
+    grain: One game.
+    primary_key:
+    - game_id
+    kind: source
+    source: current_observed_schedule
+    refresh_hours: 24
+    limitations:
+    - Includes realized scores and starting QBs; not a forecast-cutoff feature table.

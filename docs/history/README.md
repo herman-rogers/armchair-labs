@@ -8,7 +8,7 @@ implementation plan is retained here as historical planning, not an active backl
 - [Career comparison coverage repair](career_similarity_coverage_2026-09-24.md)
 - [College → NFL pathways](college_nfl_pathways_2026-09-22.md)
 - [Current injury capture — September 23, 2026](current_injury_capture_2026-09-23.md)
-- [Patron Saints Analytics Engine — Implementation Plan](fantasy_engine_implementation_plan.md)
+- [Armchair Labs Analytics Engine — Implementation Plan](fantasy_engine_implementation_plan.md)
 - [Historical absence evidence and coverage](historical_availability_2026-09-23.md)
 - [Systematic historical public-evidence backfill](historical_backfill_2026-09-23.md)
 - [Historical data repairs and isolated rebuild](historical_data_repairs_2026-09-22.md)

@@ -7,13 +7,13 @@ from typing import Any
 
 import yaml
 
-from patron.config.settings import load_metric_report_config
-from patron.metrics.prospective import file_sha256
+from engine.config.settings import load_metric_report_config
+from engine.metrics.prospective import file_sha256
 
 
 def test_2026_selector_definitions_match_prospective_freeze() -> None:
     freeze_path = (
-        Path(__file__).parents[1] / "src/patron/config/experimental_freeze_2026.yaml"
+        Path(__file__).parents[1] / "src/engine/config/experimental_freeze_2026.yaml"
     )
     freeze: dict[str, Any] = yaml.safe_load(freeze_path.read_text())
     configured = {

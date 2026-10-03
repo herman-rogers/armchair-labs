@@ -44,7 +44,7 @@ export function LeagueView() {
         <h2>{needsAuth ? 'Not signed in to ESPN' : 'League data unavailable'}</h2>
         {needsAuth ? (
           <>
-            Run <code>uv run patron auth login</code> — it opens a browser, you sign in
+            Run <code>uv run engine auth login</code> — it opens a browser, you sign in
             normally, and it captures the session.
           </>
         ) : (
@@ -106,7 +106,7 @@ export function LeagueViewTab() {
       {view === 'overview' && !hasMyTeam && (
         <div className="notice">
           <h2>Choose your team</h2>
-          Re-run <code>uv run patron auth login</code> to identify your team, or set{' '}
+          Re-run <code>uv run engine auth login</code> to identify your team, or set{' '}
           <code>ESPN_TEAM_ID</code> in <code>.env</code>.
         </div>
       )}

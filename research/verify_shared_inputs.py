@@ -5,7 +5,7 @@ import json
 import socket
 from pathlib import Path
 
-from patron.data.releases import load_gold
+from engine.data.releases import load_gold
 
 
 def verify(root: Path) -> dict:

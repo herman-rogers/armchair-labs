@@ -12,7 +12,7 @@ export const IDENTITY: PlayerColumn[] = [
   {
     key: 'rank',
     label: '#',
-    title: 'Combined display rank. Patron model order is preserved; flagged ESPN-only players enter at ESPN’s current PPR draft rank.',
+    title: 'Combined display rank. Armchair Labs model order is preserved; flagged ESPN-only players enter at ESPN’s current PPR draft rank.',
     initial: 'asc',
     render: (p) => <span className="rank">{p.rank}</span>,
   },

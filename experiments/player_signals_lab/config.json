@@ -1,13 +1,13 @@
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "gold_version": "canonical_nextgen_20260923_r1",
   "gold_manifest_sha256": "4280cc721e9b5ff56b63a8b61effad964cacaadb7f61b777fb0dc2f5963c3f6b",
   "source_sha256": {
-    "src/patron/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "src/patron/data/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "src/patron/metrics/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "src/patron/data/releases.py": "9bd43041f7b6d7d5c342e73706ec4dd5a40aa3d3f674f9a5b8387c3fdcef120c",
-    "src/patron/metrics/nextgen.py": "e0b86f8cddd7c493eca0c23e7711d95bf4cab9b01bacb72eeb17942d178e8392"
+    "src/engine/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/engine/data/__init__.py": "3e6d90002d6fe0737fd7e247bc76972e828764a809969b050cd20eb00b5f3b36",
+    "src/engine/metrics/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/engine/data/releases.py": "bab62f8e3003989cd0048dc46cb14209e1a66b5d8b16b61ae6f0150650d553db",
+    "src/engine/metrics/nextgen.py": "e0b86f8cddd7c493eca0c23e7711d95bf4cab9b01bacb72eeb17942d178e8392"
   },
   "training_start": 2004,
   "evaluation_start": 2007,
@@ -18,19 +18,55 @@
   "calibration_min_seasons": 3,
   "calibration_min_rows": 100,
   "calibration_window_seasons": 5,
-  "interval_levels": [0.8, 0.9],
+  "interval_levels": [
+    0.8,
+    0.9
+  ],
   "tasks": [
-    ["QB", "attempts"],
-    ["QB", "carries"],
-    ["QB", "season_points"],
-    ["RB", "carries"],
-    ["RB", "rushing_efficiency"],
-    ["RB", "season_points"],
-    ["WR", "targets"],
-    ["WR", "receiving_yards"],
-    ["WR", "season_points"],
-    ["TE", "targets"],
-    ["TE", "season_points"]
+    [
+      "QB",
+      "attempts"
+    ],
+    [
+      "QB",
+      "carries"
+    ],
+    [
+      "QB",
+      "season_points"
+    ],
+    [
+      "RB",
+      "carries"
+    ],
+    [
+      "RB",
+      "rushing_efficiency"
+    ],
+    [
+      "RB",
+      "season_points"
+    ],
+    [
+      "WR",
+      "targets"
+    ],
+    [
+      "WR",
+      "receiving_yards"
+    ],
+    [
+      "WR",
+      "season_points"
+    ],
+    [
+      "TE",
+      "targets"
+    ],
+    [
+      "TE",
+      "season_points"
+    ]
   ],
   "booster": {
     "max_iter": 120,
@@ -41,5 +77,6 @@
     "max_bins": 63,
     "early_stopping": false,
     "random_state": 20260923
-  }
+  },
+  "source_migration": "Package renamed to engine; source pins reviewed for the table-batch loader. Existing saved runs retain their original configs and hashes."
 }

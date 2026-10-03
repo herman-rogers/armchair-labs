@@ -1,4 +1,4 @@
-# Patron Saints analytics engine.
+# Armchair Labs analytics engine.
 # Every recipe is a plain command — run them directly if you'd rather not install just.
 
 default:
@@ -34,23 +34,23 @@ typecheck:
 
 # Sign in to ESPN. Opens Chrome; sign in there and it captures the session.
 auth-login *ARGS:
-    uv run patron auth login {{ARGS}}
+    uv run engine auth login {{ARGS}}
 
 # Check the stored ESPN session still works.
 auth-status:
-    uv run patron auth status
+    uv run engine auth status
 
 # Build the draft board into data/outputs/.
 board *ARGS:
-    uv run patron board {{ARGS}}
+    uv run engine board {{ARGS}}
 
 # Rebuild the rolling v2 metric backtest and frontend report.
 metric-report *ARGS:
-    uv run patron metric-report {{ARGS}}
+    uv run engine metric-report {{ARGS}}
 
 # Run report-only automated feature discovery on the retained historical folds.
 feature-discovery *ARGS:
-    uv run patron feature-discovery {{ARGS}}
+    uv run engine feature-discovery {{ARGS}}
 
 # Refresh rookie production, historical analogs, and walk-forward checks.
 rookie-watch history *ARGS:
@@ -72,25 +72,29 @@ college-translation source history version:
 player-profiles version season="2026":
     uv run python research/player_profiles.py --version {{version}} --season {{season}}
 
-# Preserve captured sources, replay enrichment, and validate a create-only gold release.
+# Preserve captured sources, replay enrichment, and validate a create-only table batch.
 data-build *ARGS:
-    uv run python research/data_pipeline.py build {{ARGS}}
+    uv run engine data build {{ARGS}}
 
-# Build downstream products against one gold release, without publishing the catalog.
+# Build downstream products against one table batch, without publishing the catalog.
 data-products version prefix:
-    uv run python research/data_pipeline.py products --version {{version}} --prefix {{prefix}}
+    uv run engine data products --version {{version}} --prefix {{prefix}}
 
 # Validate the complete data/product set and atomically make it current.
 data-publish version prefix:
-    uv run python research/data_pipeline.py publish --version {{version}} --prefix {{prefix}}
+    uv run engine data publish --version {{version}} --prefix {{prefix}}
 
-# Verify a gold release and every raw/enriched dependency.
+# Verify a table batch and every raw/enriched dependency.
 data-verify version:
-    uv run python research/data_pipeline.py verify --version {{version}}
+    uv run engine data verify --version {{version}}
 
-# Refresh completed-week observations and all NextGen products; publish after validation.
+# Full generation → validation → table build → optional GCS upload. Use --upload on the publisher.
+data-refresh *ARGS:
+    uv run --extra shared-data engine data refresh {{ARGS}}
+
+# Compatibility alias for existing automation; same implementation as data-refresh.
 nextgen-refresh *ARGS:
-    uv run python research/refresh_nextgen.py {{ARGS}}
+    @just data-refresh {{ARGS}}
 
 # Fit cutoff-safe ranking candidates; retains every historical evaluation and decision.
 nextgen-rankings version *ARGS:
@@ -114,23 +118,23 @@ qb-variations-score source version:
 
 # Grade the frozen 2026 prospective forecast against final outcomes (post-season only).
 grade-prospective *ARGS:
-    uv run patron grade-prospective {{ARGS}}
+    uv run engine grade-prospective {{ARGS}}
 
 # Rebuild ignoring every cache.
 rebuild:
-    uv run patron board --force
+    uv run engine board --force
 
 # Compare a fresh build against the published 2026 draft board.
 validate:
-    uv run patron validate
+    uv run engine validate
 
 # Drop cached nflverse downloads and derived artifacts.
-refresh:
-    uv run patron refresh
+clear-cache:
+    uv run engine clear-cache
 
 # Serve the API at :8000. It owns ESPN syncing; the frontend reads from it.
 api:
-    uv run patron serve --reload
+    uv run engine serve --reload
 
 # React dev server at :5173, proxying /api to the backend.
 web:
@@ -138,19 +142,19 @@ web:
 
 # Backend and frontend together.
 dev:
-    uv run patron dev
+    uv run engine dev
 
 # Stop supervised services and reclaim project-owned orphans from the old shell recipe.
 stop:
-    uv run patron dev-stop
+    uv run engine dev-stop
 
 # Safely replace any recorded or legacy API/Vite processes, then run in the foreground.
 restart:
-    uv run patron dev --restart
+    uv run engine dev --restart
 
 # Show the supervisor PID, ports, and live children.
 dev-status:
-    uv run patron dev-status
+    uv run engine dev-status
 
 # Everything CI would run.
 check: lint typecheck test
@@ -161,24 +165,36 @@ data-serving *ARGS:
 
 # Strip embedded Jupyter outputs; marimo source files already contain code only.
 notebooks-clean:
-    uv run python -m patron.data.notebook_clean
+    uv run python -m engine.data.notebook_clean
 
 # Fail if versionable notebooks contain outputs or session caches.
 notebooks-check:
-    uv run python -m patron.data.notebook_clean --check
+    uv run python -m engine.data.notebook_clean --check
 
 # Fetch a pinned shared release and restore its inputs to notebook-compatible paths.
-data-fetch profile="notebooks" *ARGS:
-    uv run --extra shared-data python -m patron.data.shared fetch --profile {{profile}} {{ARGS}}
+source-fetch profile="notebooks" *ARGS:
+    uv run --extra shared-data python -m engine.data.shared fetch --profile {{profile}} {{ARGS}}
 
 # Verify the downloaded transport release, without contacting GCS.
-data-cache-verify profile="notebooks":
-    uv run python -m patron.data.shared verify --offline --profile {{profile}}
+source-verify profile="notebooks":
+    uv run python -m engine.data.shared verify --offline --profile {{profile}}
 
 # Freeze local inputs into a deduplicated snapshot (does not upload or train).
-data-snapshot release:
-    uv run python -m patron.data.shared snapshot --release {{release}} --output data/.shared/staging/{{release}}/manifest.json
+source-snapshot release:
+    uv run python -m engine.data.shared snapshot --release {{release}} --output data/.shared/staging/{{release}}/manifest.json
 
 # Upload immutable objects first, publish the completion manifest last.
-data-upload release store:
-    uv run --extra shared-data python -m patron.data.shared publish --manifest data/.shared/staging/{{release}}/manifest.json --store {{store}} --reference data/releases/{{release}}.json
+source-upload release store:
+    uv run --extra shared-data python -m engine.data.shared publish --manifest data/.shared/staging/{{release}}/manifest.json --store {{store}} --reference data/releases/{{release}}.json
+
+# Named analytical tables: inspect, refresh, query, cache, publish, or fetch.
+tables *ARGS:
+    uv run --extra shared-data engine tables {{ARGS}}
+
+# Local recipe-only refresh from captured inputs; source acquisition/upload use data-refresh.
+tables-refresh:
+    uv run engine tables refresh --due
+
+# Fetch the published query catalog; no training/source archives required.
+data-fetch *ARGS:
+    uv run --extra shared-data engine tables fetch {{ARGS}}

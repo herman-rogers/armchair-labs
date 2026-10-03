@@ -10,7 +10,7 @@ from datetime import datetime
 import polars as pl
 from build_injury_archive import CACHE, OUT, ensure_open
 
-from patron.data.historical_evidence import EvidenceCapture, article_content
+from engine.data.historical_evidence import EvidenceCapture, article_content
 
 # player, season, known date, first unavailable calendar week, certainty, source,
 # verification phrase and date basis. Last week is regular-season calendar end.

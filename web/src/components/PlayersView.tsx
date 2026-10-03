@@ -135,7 +135,7 @@ export function PlayersView({ version }: { version: MetricVersion }) {
       {!connected && (
         <p className="legend tight faint">
           Showing the metric board only — ESPN is not connected, so ownership is unknown.
-          Sign in with <code>uv run patron auth login</code> to cross-reference against your
+          Sign in with <code>uv run engine auth login</code> to cross-reference against your
           league.
         </p>
       )}

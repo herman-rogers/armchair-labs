@@ -1,4 +1,4 @@
-/** Shapes returned by the Patron read API. Mirrors `patron.pipeline.BOARD_EXPORT_COLUMNS`. */
+/** Shapes returned by the Armchair Labs read API. Mirrors `engine.board.pipeline.BOARD_EXPORT_COLUMNS`. */
 
 export type Position = 'QB' | 'RB' | 'WR' | 'TE'
 export type MetricVersion = 'v1' | 'v2' | 'adaptive'
@@ -430,7 +430,7 @@ export interface LeaguePlayer extends Player {
   espn_position_rank: number | null
   /** ESPN average draft position, retained separately from its rank ordering. */
   espn_adp: number | null
-  /** `model` for Patron rows; `espn_ppr` for players without model history. */
+  /** `model` for Armchair Labs rows; `espn_ppr` for players without model history. */
   rank_source: 'model' | 'market' | 'espn_ppr'
   espn_fallback: boolean
   /** True when ESPN's current team disagrees with the team the metrics came from. */
@@ -714,9 +714,9 @@ export interface ResearchSources {
 }
 
 export type DataReleaseReference = { version: string; manifest_sha256: string }
-export type DataCatalog = { available: false; gold: null } | {
+export type DataCatalog = { available: false; table_release: null } | {
   available: true
-  gold: DataReleaseReference
+  table_release: DataReleaseReference
   published_at: string
   current_observations: { season: number; through_week: number; saved_at: string }
   products: Record<string, DataReleaseReference>

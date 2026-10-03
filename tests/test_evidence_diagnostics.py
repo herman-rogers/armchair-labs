@@ -3,9 +3,9 @@
 import polars as pl
 import pytest
 
-from patron.api import nextgen_routes as routes
-from patron.data.releases import write_json
-from patron.metrics.evidence_diagnostics import passing_workload_diagnostics
+from engine.api import nextgen_routes as routes
+from engine.data.releases import write_json
+from engine.metrics.evidence_diagnostics import passing_workload_diagnostics
 
 
 def test_workload_groups_use_prior_attempts_keep_unknowns_and_weight_seasons_equally():

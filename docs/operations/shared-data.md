@@ -1,11 +1,21 @@
 # Shared research data
 
+This runbook is for larger source/research archives needed to reproduce builds.
+For accepted SQL tables use [the data pipeline](tables.md) and `just data-fetch`.
+New source archives include validated batches when present; they exclude the
+active query catalog. Only `engine tables fetch` selects queryable tables.
+
+
+For named DuckDB tables and selected research archives, use the separate
+[analytical-table workflow](tables.md). It reuses this transport and cache while
+keeping small query-only bundles separate from the broader notebook inputs below.
+
 Notebooks and training run locally. Shared data uses a private GCS bucket, immutable
 release manifests, and a verified local SSD cache. Git stores source, cleaned
 notebooks, profile definitions, and small release references. It does not store
 research tables, saved model binaries, cached sessions, or generated notebook exports.
 
-The transport is implemented in `patron.data.shared`. The Google Cloud project is
+The transport is implemented in `engine.data.shared`. The Google Cloud project is
 `armchair-labs` (project number `1062502564356`), and its private Standard-storage
 bucket is `gs://armchair-labs-data` in `us-east1`. Shared objects use the
 `armchair-labs/` prefix. Uniform bucket-level access and public access prevention
@@ -21,8 +31,8 @@ Install Python 3.12+, uv, and Google Cloud CLI, then from the checkout:
 ```sh
 uv sync --extra shared-data
 gcloud auth login
-just data-fetch notebooks
-just data-cache-verify notebooks
+just source-fetch notebooks
+just source-verify notebooks
 bash experiments/future_player_lab/notebooks/launch.sh
 ```
 
@@ -31,14 +41,14 @@ one immutable remote manifest with its SHA-256 and GCS generation. To use a
 particular release:
 
 ```sh
-just data-fetch notebooks --reference data/releases/RELEASE.json
+just source-fetch notebooks --reference data/releases/RELEASE.json
 ```
 
 Available download profiles (each larger profile includes the previous one):
 
 | Profile | Contents |
 |---|---|
-| `notebooks` | Preserved raw objects, gold/enriched releases, auxiliary source catalog and its selected datasets, prepared feature matrices, injury archive, original benchmark inputs, saved tree/ensemble comparisons and distribution results |
+| `notebooks` | Preserved raw objects, table batches, enriched releases, legacy source archives, auxiliary source catalog and its selected datasets, prepared feature matrices, injury archive, original benchmark inputs, saved tree/ensemble comparisons and distribution results |
 | `rebuild` | Notebook inputs plus accepted historical source collections, captured college sources, source evidence, and captured current-season reports/snapshots |
 | `archive` | Rebuild inputs plus the broader research and experiment history, provider cache and saved catalog references |
 
@@ -59,7 +69,7 @@ launchers and build pipeline.
 
 ```sh
 # Restore deleted working copies using cached bytes, without GCS/network access:
-just data-fetch notebooks --offline
+just source-fetch notebooks --offline
 # Independently check the real notebook readers, without fitting models:
 uv run python -m research.verify_shared_inputs
 ```
@@ -104,10 +114,10 @@ access and public access prevention keep access controlled at the bucket level.
 Stop writers to the selected inputs before freezing a release:
 
 ```sh
-just data-snapshot RELEASE
-uv run python -m patron.data.shared inventory \
+just source-snapshot RELEASE
+uv run python -m engine.data.shared inventory \
   --manifest data/.shared/staging/RELEASE/manifest.json
-just data-upload RELEASE gs://armchair-labs-data/armchair-labs
+just source-upload RELEASE gs://armchair-labs-data/armchair-labs
 ```
 
 Snapshot copies selected bytes into the content-addressed cache, detects files
@@ -143,12 +153,21 @@ Remote publication is immutable; changing the default Git reference selects a ne
 release without changing any existing one. No automated remote deletion or cache
 eviction is configured. Source data is not deleted after upload.
 
+The [2026-10-03 GCS audit](../../data/releases/gcs-audit-20261003.json) checked all
+six published releases against the bucket inventory, including object sizes,
+SHA-256 metadata and pinned generations. All references passed. One unreferenced
+1,729-byte source catalog from the unpublished `bootstrap_20261002_r3` attempt was
+removed with a generation precondition; published historical releases were kept.
+The selected 31-table release matches the local query catalog. This metadata audit
+complements the independent download verification below; it did not redownload
+every payload.
+
 ## Rebuilding and refreshing
 
 Downloading a preserved release reproduces captured inputs. Re-fetching provider
 APIs collects their current revisions and is a different operation.
 
-After `just data-fetch rebuild`, inspect the preserved current report and create a
+After `just source-fetch rebuild`, inspect the preserved current report and create a
 new output release (the IDs below are existing accepted source IDs):
 
 ```sh
@@ -201,7 +220,7 @@ the entire archive. For example:
 }
 ```
 
-Pass it with `python -m patron.data.shared snapshot --profiles PROFILE.json
+Pass it with `python -m engine.data.shared snapshot --profiles PROFILE.json
 --release MODEL_RELEASE --output data/.shared/staging/MODEL_RELEASE/manifest.json`,
 then use the normal upload command. Include required data/preprocessing paths in
 the profile if they are not already independently pinned and available. Keep

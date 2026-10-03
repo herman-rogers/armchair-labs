@@ -14,7 +14,7 @@ export function DataReleaseProvider({ children }: { children: ReactNode }) {
   if (query.isError) return <p className="notice" role="alert">Current data catalog unavailable: {query.error.message}</p>
   if (!query.data) return <p role="status">Checking the current data release…</p>
   const catalog = query.data
-  const token = catalog.available ? `${catalog.gold.version}@${catalog.published_at}` : undefined
+  const token = catalog.available ? `${catalog.table_release.version}@${catalog.published_at}` : undefined
   return <ReleaseContext.Provider value={{ token, catalog }}>{children}</ReleaseContext.Provider>
 }
 
@@ -34,7 +34,7 @@ export function DataReleaseStatus() {
     </dl>
     <p className="legend">Integrity checks passed. Missing evidence remains unknown; no recorded absence is not proof that a player is available.</p>
     <details><summary>Included tables and remaining gaps</summary>
-      <p className="legend">Release: <code>{catalog.gold.version}</code>. Current observations were captured {new Date(observations.saved_at).toLocaleDateString()}.</p>
+      <p className="legend">Release: <code>{catalog.table_release.version}</code>. Current observations were captured {new Date(observations.saved_at).toLocaleDateString()}.</p>
       <div className="data-table-scroll"><table><thead><tr><th>Table</th><th>Rows</th><th>Use</th></tr></thead><tbody>
         {catalog.tables.map(table => <tr key={table.name}><td title={table.description}>{table.name.replaceAll('_', ' ')}</td><td>{table.rows.toLocaleString()}</td><td>{table.role.replaceAll('_', ' ')}</td></tr>)}
       </tbody></table></div>

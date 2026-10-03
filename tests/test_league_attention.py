@@ -1,7 +1,7 @@
 from dataclasses import asdict
 
-from patron.espn.attention import annotate_players, flags_for, reviewed_news, roster_attention
-from patron.espn.sync import PlayerState
+from engine.espn.attention import annotate_players, flags_for, reviewed_news, roster_attention
+from engine.espn.sync import PlayerState
 from tests.test_league_observations import snapshot
 
 

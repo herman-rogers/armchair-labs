@@ -9,7 +9,7 @@ from urllib.parse import urlparse, parse_qs
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from test_league_observations import snapshot
-from patron.espn.observations import weekly_matchups
+from engine.espn.observations import weekly_matchups
 
 from playwright.sync_api import expect, sync_playwright
 

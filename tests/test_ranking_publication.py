@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from patron.data import catalog, nextgen
-from patron.data.releases import reference, write_json
+from engine.data import catalog, nextgen
+from engine.data.releases import reference, write_json
 
 
 @pytest.mark.parametrize("ranking_schema", [None, 1])
@@ -19,7 +19,7 @@ from patron.data.releases import reference, write_json
     ],
 )
 def test_ranking_publication_continuity(tmp_path, monkeypatch, ranking_schema, schema_key, message):
-    from patron.api import college_sources, outlook_sources, profile_sources
+    from engine.api import college_sources, outlook_sources, profile_sources
 
     gold = SimpleNamespace(
         ref={"version": "gold", "manifest_sha256": "gold-hash"},

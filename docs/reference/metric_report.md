@@ -11,7 +11,7 @@ Run it with:
 
 ```bash
 just metric-report
-# or: uv run patron metric-report
+# or: uv run engine metric-report
 ```
 
 The command writes three gitignored artifacts under `data/outputs/`:
@@ -33,7 +33,7 @@ residual formulas, and out-of-fold stacks. Its rich weekly layer adds source-awa
 snap share, route participation, targets per route, expected opportunity,
 injury/practice and roster status, team volume, red-zone work, and EPA rates. Feed
 availability is explicit: for example, route descriptors are null before the source
-begins rather than being backfilled as zero. Run `patron feature-discovery
+begins rather than being backfilled as zero. Run `engine feature-discovery
 --force-rich` when the underlying weekly data changes. Every transformation and
 feature search is refitted inside its expanding historical window. Its artifacts use the
 `feature_discovery_*` prefix and cannot be loaded by the live board.
@@ -41,7 +41,7 @@ feature search is refitted inside its expanding historical window. Its artifacts
 ## Forecast construction
 
 The seasons and metrics are declared in
-[`src/patron/config/metric_report.yaml`](../../src/patron/config/metric_report.yaml). With
+[`src/engine/config/metric_report.yaml`](../../src/engine/config/metric_report.yaml). With
 the default configuration, each forecast uses exactly three prior seasons:
 
 | Forecast seasons | Input seasons | Status |
@@ -179,13 +179,13 @@ choice can inspect only earlier completed folds, needs at least three, and is re
 with its selected source and choice history in `fitted_model_summary`. Adaptive models
 remain report-only; the live scorer rejects an adaptive spec marked `apply_live: true`.
 The 2026 selector definitions and prediction digest are locked in
-`src/patron/config/experimental_freeze_2026.yaml`; a test rejects accidental changes
+`src/engine/config/experimental_freeze_2026.yaml`; a test rejects accidental changes
 before that prospective outcome is graded. The complete 611-row snapshot lives at
 `data/static/experimental_2026_predictions.csv`, rather than in the replaceable report
 output. After the regular season and source data are complete, run:
 
 ```bash
-uv run patron grade-prospective
+uv run engine grade-prospective
 ```
 
 The command verifies the snapshot digest, refuses to run before January 15, 2027 or

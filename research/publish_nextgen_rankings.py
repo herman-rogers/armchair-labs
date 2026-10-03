@@ -6,9 +6,9 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from patron.data.catalog import publish_catalog
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.data.catalog import publish_catalog
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, load_gold, reference, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,9 +79,9 @@ def package(source: str, version: str, *, publish: bool = False):
     # Preserve exactly the fit code in its research snapshot; bind delivery code separately.
     for source_path in [
         Path(__file__),
-        ROOT / "src/patron/api/ranking_routes.py",
-        ROOT / "src/patron/data/nextgen.py",
-        ROOT / "src/patron/data/catalog.py",
+        ROOT / "src/engine/api/ranking_routes.py",
+        ROOT / "src/engine/data/nextgen.py",
+        ROOT / "src/engine/data/catalog.py",
         ROOT / "web/src/components/NextGenRankings.tsx",
         ROOT / "web/src/components/PlayerRanking.tsx",
         ROOT / "web/src/components/PlayerProfile.tsx",

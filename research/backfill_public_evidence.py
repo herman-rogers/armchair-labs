@@ -15,8 +15,8 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.historical_evidence import ArticleIndexParser, EvidenceCapture, archive_rows
-from patron.data.nfl_transactions import _OFFICIAL_TEAM_DOMAINS, _empty
+from engine.data.historical_evidence import ArticleIndexParser, EvidenceCapture, archive_rows
+from engine.data.nfl_transactions import _OFFICIAL_TEAM_DOMAINS, _empty
 
 ROOT = Path(__file__).resolve().parents[1]
 

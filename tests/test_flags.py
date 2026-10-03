@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.board.flags import FLAGS_COLUMN, add_flags
+from engine.board.flags import FLAGS_COLUMN, add_flags
 
 
 def flags(

@@ -1,12 +1,12 @@
 # Capture and use NFL tracking sources
 
-Use the existing Python environment from the repository root. Source definitions are in [`tracking_sources.py`](../../src/patron/data/tracking_sources.py); coverage and access limitations are in the [source inventory](../architecture/data-sources.md).
+Use the existing Python environment from the repository root. Source definitions are in [`tracking_sources.py`](../../src/engine/data/tracking_sources.py); coverage and access limitations are in the [source inventory](../architecture/data-sources.md).
 
 ```sh
-.venv/bin/python -m patron.data.tracking inventory
-.venv/bin/python -m patron.data.tracking status
-.venv/bin/python -m patron.data.tracking ingest bdb_2019_sample --version tracking_sample_YYYYMMDD_r1
-.venv/bin/python -m patron.data.tracking ingest nflverse_ngs --version tracking_ngs_YYYYMMDD_r1
+.venv/bin/python -m engine.data.tracking inventory
+.venv/bin/python -m engine.data.tracking status
+.venv/bin/python -m engine.data.tracking ingest bdb_2019_sample --version tracking_sample_YYYYMMDD_r1
+.venv/bin/python -m engine.data.tracking ingest nflverse_ngs --version tracking_ngs_YYYYMMDD_r1
 ```
 
 Other directly downloadable IDs: `nflverse_rosters`, `nflverse_players`, `nflverse_participation`, `nflverse_ftn`. Replace version placeholders with a new immutable identifier for each acquisition. `--data-dir PATH` goes before the subcommand when using another data root.
@@ -20,13 +20,13 @@ The follow-up environment check installed Kaggle CLI 2.2.4 with `uv tool install
 ```sh
 uv tool install kaggle
 kaggle competitions files -c nfl-big-data-bowl-2025
-.venv/bin/python -m patron.data.tracking ingest bdb_2025 --version tracking_bdb2025_YYYYMMDD_r1 --kaggle
+.venv/bin/python -m engine.data.tracking ingest bdb_2025 --version tracking_bdb2025_YYYYMMDD_r1 --kaggle
 ```
 
 The CLI downloads the competition archive, extracts it with path/size checks, and imports CSV/Parquet companions. Alternatively, import an already authorized, extracted directory:
 
 ```sh
-.venv/bin/python -m patron.data.tracking ingest bdb_2025 --version tracking_bdb2025_YYYYMMDD_r1 --local /absolute/path/to/extracted/archive
+.venv/bin/python -m engine.data.tracking ingest bdb_2025 --version tracking_bdb2025_YYYYMMDD_r1 --local /absolute/path/to/extracted/archive
 ```
 
 Keep one competition vintage per input directory. The importer rejects duplicate frame keys across files and metadata-only BDB packages. Local imports preserve the bytes and input origin; they cannot independently prove those files constitute the full official archive. For safety/video competitions, prefer a directory of tabular companions: `--kaggle` downloads the entire available archive, including videos, although only tabular files are ingested. There is no video decoding or sensor-camera alignment implementation yet.
@@ -37,7 +37,7 @@ CSV ingestion currently holds one source file in memory; large weekly tracking f
 
 ```python
 from pathlib import Path
-from patron.data.tracking import load_source, scan_tracking, link_tracking_players
+from engine.data.tracking import load_source, scan_tracking, link_tracking_players
 
 root = Path("data")
 release = load_source(root, "bdb_2019_sample")
@@ -56,7 +56,7 @@ Legacy sample IDs intentionally remain unmapped. Modern competition rows use the
 Inspect `release.manifest['tables']` for table names, roles, row counts, schemas, missingness and available coverage. Original extra provider fields remain in enriched tables even when they are not canonical gold frame columns.
 
 ```sh
-.venv/bin/python -m patron.data.tracking verify --version YOUR_SELECTED_VERSION
+.venv/bin/python -m engine.data.tracking verify --version YOUR_SELECTED_VERSION
 .venv/bin/pytest tests/test_tracking_sources.py tests/test_data_pipeline.py
 ```
 

@@ -262,7 +262,7 @@ def main():
     }
     with (version / "acceptance.json").open("x") as stream:
         stream.write(json.dumps(acceptance, indent=2) + "\n")
-    from patron.api.research_sources import accepted_version
+    from engine.api.research_sources import accepted_version
 
     accepted_version(version.name)
     print(

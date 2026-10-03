@@ -14,7 +14,7 @@ from safety import sha256, snapshot, verify_source_pins, write_json
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from patron.data.releases import load_gold
+from engine.data.releases import load_gold
 
 LAB = Path(__file__).resolve().parent
 REPO = LAB.parents[1]

@@ -24,7 +24,7 @@ base = subprocess.check_output(
     [sys.argv[1], '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))'],
     text=True,
 ).strip()
-(Path(sysconfig.get_path('purelib')) / 'patron_workspace.pth').write_text(base + '\n')
+(Path(sysconfig.get_path('purelib')) / 'engine_workspace.pth').write_text(base + '\n')
 PY
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1

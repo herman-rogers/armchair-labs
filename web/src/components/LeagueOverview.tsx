@@ -5,15 +5,15 @@ import { weeklyForecastsQuery, rankingHistoryQuery } from '../api/queries'
 import { useDataRelease } from '../dataRelease'
 import { leagueOutlook } from '../leagueOutlook'
 import { currentWeeklyForecasts, weeklyForecastLabel } from '../weeklyForecasts'
-import { leaguePath, to } from '../navigation'
+import { teamPath } from '../navigation'
 import { fixed, rank } from '../format'
 import { DataTable } from './DataTable'
 import { RankMovement } from './RankMovement'
 import { QueryError } from './Controls'
 import { WeeklyForecastReview } from './WeeklyForecastReview'
+import { StatCard, StatCards } from './StatCards'
 import { LeagueMatchupWeek } from './LeagueMatchupWeek'
 
-const rosterLink = (teamId: number) => to(leaguePath('rosters'), { team: teamId })
 function PointsChange({ value, label }: { value: number | null; label: string }) {
   if (value == null) return <small className="faint">No prior week</small>
   const rounded = Math.round(value * 10) / 10
@@ -33,22 +33,22 @@ export function LeagueOverview({data, rankings}: { data: LeagueObservations; ran
   const margin = myGame?.margin
   const favoriteText = myGame ? myGame.favorite ? `${myGame.favorite.team_name} by ${Math.abs(margin ?? 0) < .1 ? '<0.1' : fixed(Math.abs(margin ?? 0))}` : margin === 0 ? 'Even projection' : 'Projection unavailable' : 'Projection unavailable'
   return <section className="league-outlook" aria-label="League overview">
-    <div className="league-update-cards outlook-kpis">
-      <section><span className="eyebrow">Your roster forecast rank</span><h3>{rank(mine?.nextgen_team_rank)} <RankMovement current={mine?.nextgen_team_rank} previous={mine?.previous_forecast_rank} /></h3><p>{mine?.team_name ?? 'Team not identified'} · {mine?.record ?? '—'}</p><p>{prior_week != null ? `Forecasts through W${prior_week} → W${rankings?.report.through_week}` : 'Weekly rank comparison unavailable'}</p></section>
-      <section><span className="eyebrow">Your Week {data.week} matchup</span><h3>{fixed(mine?.weekly_projection)} <span className="faint">vs</span> {fixed(mine?.opponent?.model_projection)}</h3><p>Projected winner: {favoriteText}</p><p>{weeklyForecastLabel(forecasts)} · Current starters</p></section>
-      <section><span className="eyebrow">Your projected season pace</span><h3>{fixed(mine?.season_pace)} <span className="faint">pts</span></h3><PointsChange value={mine?.season_pace_change ?? null} label="Season pace change" /><p>{fixed(mine?.ppg)} points/week · {data.regular_season_weeks}-week regular season</p></section>
-    </div>
+    <StatCards>
+      <StatCard label="Your roster forecast rank" value={<>{rank(mine?.nextgen_team_rank)} <RankMovement current={mine?.nextgen_team_rank} previous={mine?.previous_forecast_rank} /></>}><p>{mine?.team_name ?? 'Team not identified'} · {mine?.record ?? '—'}</p><p>{prior_week != null ? `Forecasts through W${prior_week} → W${rankings?.report.through_week}` : 'Weekly rank comparison unavailable'}</p></StatCard>
+      <StatCard label={`Your Week ${data.week} matchup`} value={<>{fixed(mine?.weekly_projection)} <span className="faint">vs</span> {fixed(mine?.opponent?.model_projection)}</>}><p>Projected winner: {favoriteText}</p><p>{weeklyForecastLabel(forecasts)} · Current starters</p></StatCard>
+      <StatCard label="Your projected season pace" value={<>{fixed(mine?.season_pace)} <span className="faint">pts</span></>}><PointsChange value={mine?.season_pace_change ?? null} label="Season pace change" /><p>{fixed(mine?.ppg)} points/week · {data.regular_season_weeks}-week regular season</p></StatCard>
+    </StatCards>
 
     <QueryError query={matchups} label="NextGen weekly forecasts unavailable" />
     <LeagueMatchupWeek data={data} forecasts={forecasts} />
 
     <section className="outlook-standings" aria-label="Current league outlook">
-    <div className="outlook-section-head"><div><h3>League outlook</h3><p>Current Patron ranks · Scoring through Week {completed_weeks} · Changes vs previous week</p></div></div>
+    <div className="outlook-section-head"><div><h3>League outlook</h3><p>Current Armchair Labs ranks · Scoring through Week {completed_weeks} · Changes vs previous week</p></div></div>
     <QueryError query={history} label="Previous forecast ranks unavailable">. Current ranks and matchup projections remain available.</QueryError>
     <DataTable rows={teams} columns={[
-      {key:'nextgen_team_rank',label:'Rank',title:'Patron rank by remaining-season points across the full QB/RB/WR/TE roster. Includes bench and IR; not a win probability.',initial:'asc',align:'left',render:r=>rank(r.nextgen_team_rank)},
+      {key:'nextgen_team_rank',label:'Rank',title:'Armchair Labs rank by remaining-season points across the full QB/RB/WR/TE roster. Includes bench and IR; not a win probability.',initial:'asc',align:'left',render:r=>rank(r.nextgen_team_rank)},
       {key:'forecast_change',label:'Change',align:'left',title:prior_week != null ? `Current rosters scored with W${prior_week} and W${rankings?.report.through_week} forecasts. Up is a better rank; #2 → #4 is down two.` : 'No comparable previous-week forecast available.',render:r=><RankMovement current={r.nextgen_team_rank} previous={r.previous_forecast_rank} />},
-      {key:'team_name',label:'Team',title:'Open this team’s roster.',align:'left',render:r=><Link className="player-profile-link" to={rosterLink(r.team_id)}>{r.team_name}{r.is_mine ? ' · You' : ''}</Link>},
+      {key:'team_name',label:'Team',title:'Open this team’s roster.',align:'left',render:r=><Link className="player-profile-link" to={teamPath(r)}>{r.team_name}{r.is_mine ? ' · You' : ''}</Link>},
       {key:'record',label:'Record',title:'Completed regular-season wins–losses–ties.',align:'left'},
       {key:'weekly_projection',label:`Week ${data.week} projected`,title:'Dedicated weekly model points for the current starting lineup; K/DST and unpromoted positions use labeled references.',render:r=><div className="outlook-cell"><strong>{fixed(r.weekly_projection)}</strong><small title={r.opponent?.team_name}>{r.opponent ? `vs ${r.opponent.team_name}` : 'No matchup captured'}</small></div>},
       {key:'ppg',label:'Points / week',title:'Actual completed regular-season points divided by weeks played. Change compares the average through the prior week.',render:r=><div className="outlook-cell"><strong>{fixed(r.ppg)}</strong><PointsChange value={r.ppg_change} label="Weekly scoring average change" /></div>},
@@ -57,9 +57,9 @@ export function LeagueOverview({data, rankings}: { data: LeagueObservations; ran
       <h4>Weekly scoring history</h4>
       <ol className="standings-history">{(r.schedule ?? []).filter(g => g.week >= 1 && g.week <= completed_weeks && ['W','L','T'].includes(g.outcome)).map(g => <li key={g.week}>Week {g.week}: <strong>{fixed(g.score)} pts</strong> · {g.outcome} vs {data.teams.find(t=>t.team_id===g.opponent_team_id)?.team_name ?? 'Unknown opponent'}</li>)}</ol>
       <p>{fixed(r.completed_points)} points scored · {fixed(r.ppg)} per week · {fixed(r.season_pace)} projected at this pace over {data.regular_season_weeks} weeks.</p>
-      <p>Patron roster forecast: {rank(r.nextgen_team_rank)}{r.previous_forecast_rank != null ? `, previously #${r.previous_forecast_rank} on the same roster` : ''}. {fixed(r.forecast_points)} remaining player points across {r.forecast_count}/{r.skill_count} skill players, including bench and IR. This total is separate from your starting-lineup season pace.</p>
+      <p>Armchair Labs roster forecast: {rank(r.nextgen_team_rank)}{r.previous_forecast_rank != null ? `, previously #${r.previous_forecast_rank} on the same roster` : ''}. {fixed(r.forecast_points)} remaining player points across {r.forecast_count}/{r.skill_count} skill players, including bench and IR. This total is separate from your starting-lineup season pace.</p>
       <p>{r.reference_count} reference forecasts · {r.constrained_count} availability constraints · FAAB: {r.faab_remaining == null ? 'Unknown' : `$${r.faab_remaining}`}</p>
-      <Link className="button" to={rosterLink(r.team_id)}>View player forecasts</Link>
+      <Link className="button" to={teamPath(r)}>View player forecasts</Link>
     </div>} />
     </section>
     <WeeklyForecastReview forecasts={forecasts} />

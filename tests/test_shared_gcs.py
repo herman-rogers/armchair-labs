@@ -10,8 +10,8 @@ pytest.importorskip("google.cloud.storage")
 
 from google.api_core.exceptions import NotFound  # noqa: E402
 
-from patron.data.shared import sha256  # noqa: E402
-from patron.data.shared_gcs import GCSStore, crc32c  # noqa: E402
+from engine.data.shared import sha256  # noqa: E402
+from engine.data.shared_gcs import GCSStore, crc32c  # noqa: E402
 
 
 class Blob:
@@ -72,7 +72,7 @@ def test_gcloud_no_clobber_checksum_and_pinned_download(tmp_path, monkeypatch):
         install_object(blob, command)
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr("patron.data.shared_gcs.subprocess.run", run)
+    monkeypatch.setattr("engine.data.shared_gcs.subprocess.run", run)
     assert store.put("objects/aa/file", source, spec) == "123"
     assert commands[0][4] == "gs://test-bucket/armchair-labs/objects/aa/file"
     assert store.put("objects/aa/file", source, spec) == "123"
@@ -97,7 +97,7 @@ def test_concurrent_create_is_verified_before_reuse(tmp_path, monkeypatch):
         install_object(blob, command)
         return SimpleNamespace(returncode=1, stderr="precondition failed")
 
-    monkeypatch.setattr("patron.data.shared_gcs.subprocess.run", run)
+    monkeypatch.setattr("engine.data.shared_gcs.subprocess.run", run)
     assert store.put("objects/aa/file", source, spec) == "123"
     blob.metadata = {}
     with pytest.raises(ValueError, match="differs"):
@@ -110,7 +110,7 @@ def test_failed_gcloud_upload_cannot_publish(tmp_path, monkeypatch):
     spec = {"size": source.stat().st_size, "sha256": sha256(source)}
     store, _ = store_with(Blob())
     monkeypatch.setattr(
-        "patron.data.shared_gcs.subprocess.run",
+        "engine.data.shared_gcs.subprocess.run",
         lambda *a, **kw: SimpleNamespace(returncode=1, stderr="transfer failed"),
     )
     with pytest.raises(RuntimeError, match="transfer failed"):
@@ -142,7 +142,7 @@ def test_gcloud_uploads_run_in_bounded_parallel(tmp_path, monkeypatch):
             with guard:
                 state["active"] -= 1
 
-    monkeypatch.setattr("patron.data.shared_gcs.subprocess.run", run)
+    monkeypatch.setattr("engine.data.shared_gcs.subprocess.run", run)
     with ThreadPoolExecutor(max_workers=12) as pool:
         results = list(pool.map(lambda i: store.put(f"objects/item-{i}", source, spec), range(12)))
     assert results == ["123"] * 12

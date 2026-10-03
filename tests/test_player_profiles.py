@@ -3,8 +3,8 @@ import copy
 import polars as pl
 import pytest
 
-from patron.data.player_profiles import prepare_weeks
-from patron.metrics.player_profile import (
+from engine.data.player_profiles import prepare_weeks
+from engine.metrics.player_profile import (
     career_features,
     college_history,
     nfl_seasons,

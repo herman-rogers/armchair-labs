@@ -78,7 +78,7 @@ names that season and count instead of implying that his entire history is absen
 
 ```sh
 uv run pytest tests/test_career_similarity.py tests/test_profile_routes.py tests/test_player_profiles.py
-uv run ruff check src/patron/metrics/career_similarity.py src/patron/metrics/career_stat_evidence.py tests/test_career_similarity.py web/tests/career_similarity_smoke.py
+uv run ruff check src/engine/metrics/career_similarity.py src/engine/metrics/career_stat_evidence.py tests/test_career_similarity.py web/tests/career_similarity_smoke.py
 cd web
 npm run build
 npx oxlint src/components/SimilarCareers.tsx

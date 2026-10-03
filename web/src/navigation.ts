@@ -49,8 +49,13 @@ export const playerPath = (playerId: string, section?: ProfileSection) =>
   `/players/${encodeURIComponent(playerId)}${section ? `/${section}` : ''}`
 export const collegePath = (collegeId: string, section?: ProfileSection) =>
   `/college/${encodeURIComponent(collegeId)}${section ? `/${section}` : ''}`
-export const intelligencePath = (view: 'rankings' | 'qb-passing' | 'rookies') => `/intelligence/${view}`
-export const leaguePath = (view: 'overview' | 'matchups' | 'rosters' | 'free-agents' | 'transactions' | 'draft') => `/league/${view}`
+export const intelligencePath = (view: 'rankings' | 'teams' | 'qb-passing' | 'rookies') => `/intelligence/${view}`
+export const leaguePath = (view: 'overview' | 'matchups' | 'teams' | 'free-agents' | 'transactions' | 'draft') => `/league/${view}`
+/** Stable team identity plus a readable, rename-safe URL. */
+export const teamPath = (team: { team_id: number; team_name: string }) => {
+  const slug = team.team_name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'team'
+  return `${leaguePath('teams')}/${team.team_id}/${slug}`
+}
 export const matchupPath = (week: number, homeId: number, awayId: number) => `/league/matchups/${week}/${homeId}/${awayId}`
 export const leagueWeekPath = (week: number) => `/league/overview?week=${week}#matchups`
 export const researchPath = (view: 'evidence' | 'qb-experiments' | 'forecasts' | 'archive') => `/research/${view}`

@@ -53,18 +53,18 @@ def main():
         expect(page.get_by_role("heading", name="Lamar Jackson", exact=True)).to_be_visible()
         catalog = observed["/api/research/data-catalog"]
         assert catalog["available"]
-        assert observed["/api/profiles"]["report"]["gold"] == catalog["gold"]
+        assert observed["/api/profiles"]["report"]["gold"] == catalog["table_release"]
         expect(
             panel.get_by_text(f"{catalog['coverage']['forecast_rows']:,}", exact=True).first
         ).to_be_visible()
         page.get_by_label("Player view", exact=True).select_option("outlook")
         page.get_by_role("button", name="Show details for Lamar Jackson", exact=True).click()
-        assert observed["/api/research/outlook"]["gold"] == catalog["gold"]
+        assert observed["/api/research/outlook"]["gold"] == catalog["table_release"]
         page.get_by_label("Population", exact=True).select_option("college")
         expect(
             page.get_by_role("heading", name="NFL translation forecasts", exact=True)
         ).to_be_visible()
-        assert observed["/api/research/college"]["gold"] == catalog["gold"]
+        assert observed["/api/research/college"]["gold"] == catalog["table_release"]
         page.get_by_role("tab", name="Research", exact=True).click()
         expect(page.get_by_label("Research dataset", exact=True)).to_have_value(
             catalog["historical_research_reference"]["version"]
@@ -75,7 +75,7 @@ def main():
         page.get_by_label("Player view", exact=True).select_option("profiles")
         page.set_viewport_size({"width": 390, "height": 844})
         panel.get_by_text("Included tables and remaining gaps", exact=True).click()
-        expect(panel.get_by_text(catalog["gold"]["version"], exact=True)).to_be_visible()
+        expect(panel.get_by_text(catalog["table_release"]["version"], exact=True)).to_be_visible()
         assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
         assert panel.evaluate("el => el.scrollWidth <= el.clientWidth")
         page.screenshot(path="/tmp/canonical-data-mobile.png", full_page=True)

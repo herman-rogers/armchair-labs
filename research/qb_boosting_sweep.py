@@ -18,8 +18,8 @@ import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, write_json
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGES = (30, 60, 120, 240, 480)
@@ -118,7 +118,7 @@ def select_config(annual, configs, year, policy, probability=False):
 
 def saved_module(source):
     spec = importlib.util.spec_from_file_location(
-        "frozen_qb_boost_source", source / "implementation/src/patron/metrics/nextgen.py"
+        "frozen_qb_boost_source", source / "implementation/src/engine/metrics/nextgen.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -523,7 +523,7 @@ def run(data, version, workers):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, dest)
     shutil.copyfile(
-        source / "implementation/src/patron/metrics/nextgen.py", out / "canonical_nextgen.py"
+        source / "implementation/src/engine/metrics/nextgen.py", out / "canonical_nextgen.py"
     )
     shutil.copyfile(ROOT / "research/qb_boosting_protocol.md", out / "protocol.md")
     write_json(out / "configurations.json", configs)

@@ -1,7 +1,7 @@
-# Patron Saints — frontend
+# Armchair Labs — frontend
 
 React + TypeScript NextGen dashboard, served by Vite. Reads the FastAPI read API in
-`src/patron/api/`; it computes nothing itself.
+`src/engine/api/`; it computes nothing itself.
 
 ```bash
 npm install
@@ -40,9 +40,9 @@ explicit research scope; current analysis fails closed when verification fails.
 Run `web/tests/nextgen_smoke.py` against local API and frontend servers for the
 current desktop/mobile flow. Older smoke scripts describe archived layouts.
 
-Navigation is organized into persistent page groups: **Player analysis** (rankings,
-QB passing, rookies), **League management** (overview, matchups, rosters and
-comparisons, free agents, transactions, draft recap), and **Research** (model
+Navigation is organized into persistent page groups: **Analysis** (rankings,
+team analysis, QB passing, rookies), **League management** (overview, matchups, team
+strength, free agents, transactions, draft recap), and **Research** (model
 evidence, QB experiments, reference forecasts, archive). On small screens, Browse
 pages opens the same navigation. It stays available on player profiles.
 Rankings remain the entry page, with remaining-season/next-four-week
@@ -60,7 +60,7 @@ pattern to follow:
 - **Places are paths**, declared in `src/routes.tsx` and reached with `<Link>`/`<NavLink>`.
   Grouped page links use `<NavLink>` (active page: `aria-current="page"`).
   `src/pageNavigation.ts` defines page labels, descriptions and purpose groups.
-- **View configuration is search params** (filters, sort, page, week, team), via
+- **View configuration is search params** (filters, sort, page, week), via
   `useUrlState` / `useUrlPage` / `useUrlParams`. Changes push history so Back undoes
   them; free-text search uses `replace` so keystrokes don't pile up. A page's primary
   `DataTable` keeps its sort in the URL with `sortParam`.
@@ -71,8 +71,8 @@ pattern to follow:
 
 | Path | Page |
 |---|---|
-| `/intelligence/rankings` · `/qb-passing` · `/rookies` | Current analysis |
-| `/league/overview` · `/matchups?week=` · `/rosters?team=` · `/free-agents` · `/transactions` · `/draft` | League |
+| `/intelligence/rankings` · `/teams` · `/qb-passing` · `/rookies` | Current analysis |
+| `/league/overview?week=` · `/matchups/:week/:homeId/:awayId` · `/teams/:teamId/:teamSlug?` · `/free-agents` · `/transactions` · `/draft` | League |
 | `/research/evidence` · `/qb-experiments` · `/forecasts` · `/archive` | Research |
 | `/research/archive/intelligence/:view` · `/research/archive/league/:view` | Archived workspaces |
 | `/players/:playerId/:section?` · `/college/:collegeId/:section?` | Profiles |
@@ -123,6 +123,42 @@ node web/tests/data_queries_test.mjs             # from the repository root
 The browser check blocks live ESPN calls and verifies search/query reuse, profile
 cutoffs, server pagination, mobile layout, and stale-catalog rejection.
 
+## Team analysis
+
+Variance decomposition and observed pair scoring use Recharts through the shared
+`ChartFrame`, axes and tooltip theme. Negative covariance plots left of zero;
+missing variance remains unavailable. The correlation matrix remains an interactive
+HTML data table: Recharts has no native heatmap, and the table preserves cell values,
+sample-size labels, keyboard selection and row/column headers without custom chart
+rendering. Player selectors, KPIs and contribution tables remain standard UI.
+
+`/intelligence/teams` uses `/api/nextgen/team-analysis` for NFL QB/WR/TE
+relationships and selected-starter scoring variance. Team, season range,
+quarterback, participation, variance basis and selected player IDs live in the URL.
+The default quarterback is the most-used starter in the latest selected season.
+
+The endpoint reads the formal `analytics.team_player_games` table through DuckDB,
+with coverage from 2013. `/api/nextgen/team-analysis/catalog` supplies its verified
+table token and observation cutoff. The page polls this metadata every minute and
+pins requests/cache entries to that token; a table-only publication triggers a
+catalog refresh and fresh results. Missing, corrupt, or gold-mismatched tables
+produce an unavailable state rather than a fallback. See the
+[table guide](../docs/operations/tables.md) for refresh and SQL examples.
+
+The matrix uses each pair's shared games. Selected-starter risk instead uses one
+common sample for every selected player, preserving
+`Var(sum) = sum(Var) + 2 sum(Cov)` and a positive semidefinite covariance matrix.
+The page displays standard deviation, variance decomposition, covariance's
+percentage effect, observed score quantiles, sample sizes and exploratory paired
+bootstrap intervals. Missing overlap is unavailable, never zero risk. These are
+historical scoring statistics conditional on participation, not future projections
+or estimates of injury/availability risk. The within-season basis removes season
+means and divides by residual degrees of freedom; raw score means and quantiles
+remain separately labeled observations.
+
+Checks: `pytest tests/test_team_correlations.py` and
+`python web/tests/team_analysis_smoke.py` with the local API and frontend running.
+
 ## Weekly rank movement
 
 Player rankings, roster/free-agent tables, and player profiles compare the current
@@ -172,3 +208,58 @@ happens while the forecast page is in use; this does not schedule an unattended 
 Checks: `pytest tests/test_weekly_lineup.py tests/test_league_observations.py`,
 `node web/tests/league_outlook_test.mjs`, and
 `python web/tests/weekly_forecasts_smoke.py` with the local API and Vite running.
+
+## Shared presentation components and Team Strength
+
+- `components/AnalysisPanel.tsx`: shared section surfaces for Team Analysis and Team
+  Strength, with optional headings, source labels and a compact padding variant.
+- `components/Controls.tsx`: `SelectField` uses the standard filter-control styles.
+- `components/TeamSelect.tsx`: one team selector for header and footer; callers own navigation.
+- `components/StickyFooter.tsx`: reusable, labeled page-footer region that sticks to the
+  viewport bottom while scrolling. Place it after the page content and context;
+  it remains in normal flow, supports mobile safe areas, and accepts shared controls.
+- `components/StatCards.tsx`: overview cards, an opt-in compact variant, and `StatList`
+  for dense secondary metrics without individual boxes.
+- `components/Charts.tsx` and `chartTheme.ts`: responsive Recharts frames, captions,
+  legends, axes, tooltip styling and palette. Colors follow the existing light/dark
+  theme. Chart animations are disabled on Team Strength; exact values remain available.
+
+`/league/teams` starts with an empty chooser. Selecting a team navigates to its stable
+ID and readable name, e.g. `/league/teams/3/just-say-no`. Header and sticky-footer
+selectors push the same routes; Back/Forward restores team and scroll position.
+Old `/league/rosters?team=` links redirect. Recharts and the team diagnostics are
+loaded only when opening a selected team's breakdown.
+
+The first chart row pairs projected player contributions with actual weekly scoring
+composition. The second pairs replacement impact with actual position benchmarks.
+Results show each completed week's score, opponent and league average. Secondary
+metrics are compact; detailed scoring, position and replacement tables expand on demand.
+Recorded weekly contributions come from reconciled historical starters, including
+players no longer on the current roster. Missing breakdowns stay unavailable and
+negative scores remain negative. Offensive charts exclude K/DST; the results chart
+includes them. No ESPN predictions enter the charts.
+
+Historical correlation risk connects recorded QB/WR/TE starters sharing an NFL
+team, for every fantasy team. The API queries the pinned DuckDB catalog through
+`team_session`: `analytics.players` supplies unambiguous ESPN/GSIS identities and
+`analytics.team_player_games` supplies shared starts. Previous-five-season samples
+exclude the current season and other NFL clubs; within-season centering removes
+changes in season means. Each pair displays covariance, its contribution to the
+pair's variance, combined/zero-covariance standard deviations, approximate Fisher
+intervals, bootstrap variance-change intervals, and season breakdowns. Pairwise
+historical samples are never pooled into a roster covariance matrix.
+
+The separate current-season contribution uses reconciled recorded starters and
+includes K/DST in the team-score denominator. It requires both players in every
+completed week (at least three); missing coverage is unavailable, not zero. The
+same-team covariance terms add only on this common observed sample. Neither branch
+feeds forecasts or alters the existing results standard deviation. Connections use
+recorded lineup choices rather than forecast-driven substitutions.
+
+Checks: `pytest tests/test_roster_correlations.py tests/test_team_strength.py` and
+`python web/tests/team_correlation_smoke.py`.
+
+Checks: `pytest tests/test_team_strength.py` and
+`python web/tests/team_strength_smoke.py` against the API and Vite servers. Browser
+checks cover named routes, history, chart coverage, compact desktop layout, mobile
+resizing, theme switching, sticky-footer navigation, missing forecasts and stale data.

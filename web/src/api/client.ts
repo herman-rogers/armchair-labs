@@ -32,6 +32,9 @@ async function request(path: string, { dataCatalog, scope, signal, method = 'GET
     if (response.headers.get('X-Data-Catalog-Stale') === 'true') {
       window.dispatchEvent(new Event('data-catalog-changed'))
     }
+    if (response.headers.get('X-Table-Catalog-Stale') === 'true') {
+      window.dispatchEvent(new Event('table-catalog-changed'))
+    }
     const body = (await response.json().catch(() => ({}))) as { detail?: string }
     throw new Error(body.detail ?? `${response.status} ${response.statusText}`)
   }

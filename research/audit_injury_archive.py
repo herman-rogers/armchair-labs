@@ -17,7 +17,7 @@ from build_injury_archive import CACHE, GOLD, OUT, ROOT, digest
 from experiments.future_player_lab.notebooks import rb_availability as availability
 from experiments.future_player_lab.notebooks import workbench as data
 
-from patron.data.historical_evidence import article_content
+from engine.data.historical_evidence import article_content
 
 
 @lru_cache(maxsize=128)

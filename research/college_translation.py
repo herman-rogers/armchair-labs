@@ -12,11 +12,11 @@ from pathlib import Path
 import polars as pl
 from artifact_inputs import require_audited_version
 
-from patron.config.settings import get_settings
-from patron.data.college import normalize_season, sha256, write_json
-from patron.data.college_identity import build_links
-from patron.data.releases import load_gold, load_manifest
-from patron.metrics.college_translation import (
+from engine.config.settings import get_settings
+from engine.data.college import normalize_season, sha256, write_json
+from engine.data.college_identity import build_links
+from engine.data.releases import load_gold, load_manifest
+from engine.metrics.college_translation import (
     annual_rows,
     college_backtest,
     nfl_backtest,
@@ -70,9 +70,9 @@ def main():
     protected = {name: sha256(ROOT / name) for name in protected_names}
     for original, name in [
         (Path(__file__), "runner.py"),
-        (ROOT / "src/patron/data/college.py", "college.py"),
-        (ROOT / "src/patron/data/college_identity.py", "college_identity.py"),
-        (ROOT / "src/patron/metrics/college_translation.py", "college_translation.py"),
+        (ROOT / "src/engine/data/college.py", "college.py"),
+        (ROOT / "src/engine/data/college_identity.py", "college_identity.py"),
+        (ROOT / "src/engine/metrics/college_translation.py", "college_translation.py"),
         (ROOT / "data/static/college_identity_overrides.json", "identity_overrides.json"),
         (args.source / "manifest.json", "college_source_manifest.json"),
     ]:

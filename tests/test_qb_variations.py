@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from patron.metrics.qb_variations import (
+from engine.metrics.qb_variations import (
     augment_panel,
     bridge_candidates,
     choose,

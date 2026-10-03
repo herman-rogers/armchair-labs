@@ -24,14 +24,14 @@ def snapshot(paths: list[Path], repo: Path, *, missing_ok=False) -> dict:
 
 def verify_source_pins(repo: Path, pins: dict[str, str]) -> None:
     required = {
-        "src/patron/__init__.py",
-        "src/patron/data/__init__.py",
-        "src/patron/metrics/__init__.py",
-        "src/patron/data/releases.py",
-        "src/patron/metrics/nextgen.py",
+        "src/engine/__init__.py",
+        "src/engine/data/__init__.py",
+        "src/engine/metrics/__init__.py",
+        "src/engine/data/releases.py",
+        "src/engine/metrics/nextgen.py",
     }
     if set(pins) != required:
-        raise ValueError("Config must pin the exact set of imported Patron source modules")
+        raise ValueError("Config must pin the exact set of imported Armchair Labs source modules")
     for name, expected in pins.items():
         if sha256(repo / name) != expected:
             raise ValueError(

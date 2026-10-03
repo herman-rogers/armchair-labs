@@ -12,7 +12,7 @@ from evaluation import calibrated_intervals, paired_summary
 from methods import add_rates, fit_pool, matrix, mix_predictions, role_mixture
 from safety import new_run, sha256, snapshot, verify_source_pins
 
-from patron.metrics.nextgen import COUNTERS
+from engine.metrics.nextgen import COUNTERS
 
 LAB = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((LAB / "config.json").read_text())
@@ -27,7 +27,7 @@ def test_source_pins_fail_closed_and_unrelated_workspace_changes_are_separate(tm
     verify_source_pins(tmp_path, pins)
     (tmp_path / "current.json").write_text("changed elsewhere")
     verify_source_pins(tmp_path, pins)
-    (tmp_path / "src/patron/metrics/nextgen.py").write_text("changed dependency")
+    (tmp_path / "src/engine/metrics/nextgen.py").write_text("changed dependency")
     with pytest.raises(ValueError, match="Pinned source changed"):
         verify_source_pins(tmp_path, pins)
     assert snapshot([tmp_path / "deleted"], tmp_path, missing_ok=True) == {"deleted": None}

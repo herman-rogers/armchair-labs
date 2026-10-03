@@ -8,8 +8,8 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from playwright.sync_api import expect, sync_playwright
-from patron.espn.attention import annotate_players, roster_attention
-from patron.espn.observations import weekly_matchups
+from engine.espn.attention import annotate_players, roster_attention
+from engine.espn.observations import weekly_matchups
 from tests.test_league_attention import player
 from tests.test_league_observations import snapshot
 

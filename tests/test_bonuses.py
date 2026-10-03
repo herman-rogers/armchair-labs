@@ -13,12 +13,12 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.scoring.bonuses import (
+from engine.scoring.bonuses import (
     BONUS_POINTS,
     extract_touchdown_bonuses,
     season_bonus_totals,
 )
-from patron.scoring.columns import MissingColumnsError
+from engine.scoring.columns import MissingColumnsError
 from tests.factories import pbp, touchdown_play
 
 QB = "00-0000QB1"

@@ -2,8 +2,8 @@ import polars as pl
 import pytest
 from fastapi import HTTPException
 
-from patron.metrics.career_similarity import METRICS, career_neighbors
-from patron.metrics.career_stat_evidence import ZERO_STAT_REVIEWS, apply_zero_reviews
+from engine.metrics.career_similarity import METRICS, career_neighbors
+from engine.metrics.career_stat_evidence import ZERO_STAT_REVIEWS, apply_zero_reviews
 
 
 def fixture():
@@ -85,7 +85,7 @@ def test_no_completed_rookie_season_and_missing_target_are_explicit():
 
 
 def test_api_rejects_future_cutoff(monkeypatch, tmp_path):
-    from patron.api import profile_routes
+    from engine.api import profile_routes
 
     monkeypatch.setattr(
         profile_routes, "load_profiles", lambda: (tmp_path, {"season": 2026, "through_week": 2})
@@ -247,7 +247,7 @@ def test_small_peer_pool_retains_target_and_coverage():
 
 
 def test_api_returns_coverage_and_honors_completed_season_cutoff(monkeypatch, tmp_path):
-    from patron.api import profile_routes
+    from engine.api import profile_routes
 
     people, weeks = fixture()
     people.write_parquet(tmp_path / "players.parquet")

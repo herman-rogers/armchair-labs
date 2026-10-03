@@ -5,14 +5,14 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.scoring.kickers import (
+from engine.scoring.kickers import (
     KICKER_POINTS,
     BracketAlignmentError,
     aggregate_kicker_seasons,
     score_kicker_weeks,
     validate_bracket_alignment,
 )
-from patron.scoring.rules import ScoringRules, get_rules
+from engine.scoring.rules import ScoringRules, get_rules
 
 KICKING_DEFAULTS = {
     "fg_made_0_19": 0.0,

@@ -5,11 +5,11 @@ A renamed column is the failure this project is most exposed to, and it is dange
 precisely because it is quiet: read as null, coerced to zero, the board still builds
 and the numbers are simply wrong.
 
-These tests assert that everything `patron.scoring.columns` promises actually exists
+These tests assert that everything `engine.scoring.columns` promises actually exists
 upstream. They hit the network, so they are excluded from the default suite; run them
 with `just test-all`, and run them before trusting a board built after a long gap.
 
-A failure here means updating `patron/scoring/columns.py` to match the new names — and
+A failure here means updating `engine/scoring/columns.py` to match the new names — and
 checking whether the semantics changed too, not just the spelling.
 """
 
@@ -18,8 +18,8 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.data import nflverse
-from patron.scoring.columns import (
+from engine.data import nflverse
+from engine.scoring.columns import (
     DEFENSE_COLUMNS,
     DEPTH_CHART_COLUMNS,
     INJURY_COLUMNS,

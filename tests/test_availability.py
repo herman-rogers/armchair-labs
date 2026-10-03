@@ -7,14 +7,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from patron.metrics.availability import (
+from engine.metrics.availability import (
     attach_known_absences,
     audit_absence_constraints,
     coverage_audit,
     load_absences,
     validate_absences,
 )
-from patron.metrics.fit import (
+from engine.metrics.fit import (
     FitConfig,
     ModelSpec,
     apply_fitted_models,

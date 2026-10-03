@@ -2,7 +2,7 @@
 
 import argparse
 
-from patron.data.player_profiles import build_profiles
+from engine.data.player_profiles import build_profiles
 
 
 def main():

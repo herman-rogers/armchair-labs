@@ -11,13 +11,13 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from patron.data.catalog import publish_catalog
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, inside, reference, write_json
-from patron.data.retirements import carry_retirements
-from patron.metrics.current_rankings import rank_frame
-from patron.metrics.qb_passing import summarize
-from patron.metrics.qb_variations import policy_ranges
+from engine.data.catalog import publish_catalog
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, inside, reference, write_json
+from engine.data.retirements import carry_retirements
+from engine.metrics.current_rankings import rank_frame
+from engine.metrics.qb_passing import summarize
+from engine.metrics.qb_variations import policy_ranges
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -384,7 +384,7 @@ def package(data, source_version, version, publish=False, analysis_version=None)
     # A new week's observations must not reopen unchanged, already retired recipes.
     # Carry only exclusions, never a prior model's permission to serve predictions.
     prior_root, prior_manifest = load_analysis(data)
-    legacy = ROOT / "src/patron/config/metric_report.yaml"
+    legacy = ROOT / "src/engine/config/metric_report.yaml"
     reviewed_legacy = prior_root / "review_inputs/metric_report.yaml"
     if not reviewed_legacy.exists():
         reviewed_legacy = prior_root / "retirement_inputs/metric_report.yaml"
@@ -419,11 +419,11 @@ def package(data, source_version, version, publish=False, analysis_version=None)
     for name in (
         "research/publish_qb_variations.py",
         "research/score_qb_variations.py",
-        "src/patron/api/qb_passing_routes.py",
-        "src/patron/data/nextgen.py",
-        "src/patron/data/catalog.py",
-        "src/patron/data/retirements.py",
-        "src/patron/metrics/qb_variations.py",
+        "src/engine/api/qb_passing_routes.py",
+        "src/engine/data/nextgen.py",
+        "src/engine/data/catalog.py",
+        "src/engine/data/retirements.py",
+        "src/engine/metrics/qb_variations.py",
         "web/src/components/QBVariations.tsx",
         "web/src/components/QBPassing.tsx",
         "web/src/components/NextGenView.tsx",

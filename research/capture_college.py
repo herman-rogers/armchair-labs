@@ -3,8 +3,8 @@
 import argparse
 import re
 
-from patron.config.settings import get_settings
-from patron.data.college import capture_source, discover_source, write_json
+from engine.config.settings import get_settings
+from engine.data.college import capture_source, discover_source, write_json
 
 
 def main():

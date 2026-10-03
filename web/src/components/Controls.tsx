@@ -1,5 +1,10 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, SelectHTMLAttributes } from 'react'
 import { POSITION_FILTERS } from '../positions'
+
+/** Standard labelled select; inherits the shared analysis-controls styling. */
+export function SelectField({ label, children, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { label: string }) {
+  return <label>{label}<select aria-label={label} {...props}>{children}</select></label>
+}
 
 /** `<option>`s for a position filter `<select>`. */
 export function PositionOptions({ positions = POSITION_FILTERS }: { positions?: readonly string[] }) {

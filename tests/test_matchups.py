@@ -14,10 +14,10 @@ import time
 import polars as pl
 import pytest
 
-from patron.api import league_routes
-from patron.espn.crosswalk import IS_MINE, OWNER_TEAM_ID, OWNER_TEAM_NAME, JoinReport
-from patron.espn.service import LeagueState
-from patron.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
+from engine.api import league_routes
+from engine.espn.crosswalk import IS_MINE, OWNER_TEAM_ID, OWNER_TEAM_NAME, JoinReport
+from engine.espn.service import LeagueState
+from engine.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
 
 SLOTS = {"QB": 1, "RB": 1, "WR": 1, "RB/WR/TE": 1}
 

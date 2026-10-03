@@ -6,6 +6,8 @@ Maintained instructions for the current local system.
 |---|---|
 | Install dependencies, run services, sign in to ESPN, and test | [Run locally](run-local.md) |
 | Update observations and forecasts, inspect refresh progress, and rebuild serving bundles | [Refresh and publish data](refresh-data.md) |
+| Generate, validate, build, publish, and consume data | [Authoritative data pipeline](tables.md) |
+| Fetch source inputs and existing research releases | [Shared research data](shared-data.md) |
 | Download, verify, and read tracking source releases | [Tracking data](tracking-data.md) |
 | Launch notebooks or reproduce archived experiments | [Research workflows](research-workflows.md) |
 | Work on frontend routes, queries, and browser checks | [Frontend guide](../../web/README.md) |

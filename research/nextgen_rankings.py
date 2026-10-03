@@ -10,10 +10,10 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
-from patron.espn.attention import reviewed_news
-from patron.metrics.current_rankings import (
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.espn.attention import reviewed_news
+from engine.metrics.current_rankings import (
     BASELINES,
     HORIZONS,
     POSITIONS,
@@ -257,7 +257,7 @@ def build(data: Path, version: str, analysis_version: str | None = None):
     write_json(root / "report.json", report)
     for source in (
         Path(__file__),
-        ROOT / "src/patron/metrics/current_rankings.py",
+        ROOT / "src/engine/metrics/current_rankings.py",
         ROOT / "research/nextgen_rankings_protocol.md",
     ):
         destination = root / "implementation" / source.relative_to(ROOT)

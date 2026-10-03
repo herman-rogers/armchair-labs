@@ -10,12 +10,12 @@ been promoted and the frozen Adaptive predictions have not been changed.
 
 `data/static/draft_2026/` contains the exact V1 JSON, league configuration, scoring,
 overrides, projection assumptions, and a SHA-256 manifest. V1 API and league reads
-prefer this verified archive. `patron board` copies its exact bytes to both V1
+prefer this verified archive. `engine board` copies its exact bytes to both V1
 compatibility filenames. A regression pins the original board digest independently
 of the manifest. V1 retains its original production-row PPG denominator.
 
 Adaptive remains an explicitly experimental, frozen season-points forecast.
-`patron board --experiments` rebuilds its comparison view; ordinary production
+`engine board --experiments` rebuilds its comparison view; ordinary production
 builds do not require its snapshot or manifest. `prospective_grading_2026.json`
 preserves the original ranking settings and legacy evaluation population, with a
 pinned digest. Changing the mutable metric report cannot change that grade.
@@ -77,11 +77,11 @@ scenario statistic is explicitly labeled experimental and uncalibrated.
 
 ## Reproduction
 
-Run `uv run patron production-report` to refit only approved models from retained
-inputs without research fits. `uv run patron metric-report --reanalyze` refits the
+Run `uv run engine production-report` to refit only approved models from retained
+inputs without research fits. `uv run engine metric-report --reanalyze` refits the
 full research comparison separately. Then run
-`uv run patron board --experiments` to publish matching boards and manifests. A full
-`uv run patron metric-report` reconstructs the history/rookie/market draft universe.
+`uv run engine board --experiments` to publish matching boards and manifests. A full
+`uv run engine metric-report` reconstructs the history/rookie/market draft universe.
 Research remains separate from approval: corrected evidence and the untouched 2026
 prospective grade are prerequisites to choosing another production model.
 

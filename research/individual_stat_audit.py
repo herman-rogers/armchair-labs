@@ -25,7 +25,7 @@ from individual_stat_registry import build_registry, is_market
 from profile_history import fit_predict
 from threadpoolctl import threadpool_limits
 
-from patron.data.releases import write_json
+from engine.data.releases import write_json
 
 POSITIONS = ["QB", "RB", "WR", "TE"]
 

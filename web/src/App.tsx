@@ -12,7 +12,8 @@ export default function App() {
   const status = useQuery(statusQuery())
   const { pathname } = useLocation()
   const page = useCurrentPage()
-  useEffect(() => { document.title = `${page?.title ?? 'Player analytics'} · Sweaty Plays` }, [page?.title])
+  // Team routes supply the selected team's name for meaningful browser history.
+  useEffect(() => { if (page?.path !== '/league/teams') document.title = `${page?.title ?? 'Player analytics'} · Sweaty Plays` }, [page?.title, page?.path])
 
   return <div className="app instrument-dashboard">
     <a className="skip-link" href="#page-content">Skip to content</a>

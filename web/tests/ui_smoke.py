@@ -386,7 +386,7 @@ def run(url: str, channel: str):
                     ],
                 }
             elif path == "/api/profiles/player":
-                from patron.metrics.player_profile import METRICS
+                from engine.metrics.player_profile import METRICS
 
                 player = next(
                     r for r in rows if r["player_id"] == parse_qs(parsed.query)["player_id"][0]

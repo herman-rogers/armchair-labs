@@ -40,6 +40,8 @@ data/current.json
 data/source_catalog.json
 data/catalog_history/
 data/research/
+data/tables/
+data/league/
 # generated backfill; retain its reference manifest and collection code in Git
 data/static/historical_transaction_backfill.parquet
 
@@ -56,7 +58,7 @@ web/dist/
 # macos
 .DS_Store
 
-# persisted browser profile from `patron auth login` — holds a live ESPN session
+# persisted browser profile from `engine auth login` — holds a live ESPN session
 data/.browser-profile/
 
 # Shared data staging, download readiness markers, and optional repository-local cache

@@ -1,7 +1,7 @@
 import polars as pl
 
-from patron.metrics.current_rankings import make_panel
-from patron.metrics.weekly_points import add_context, choose, fit_fold
+from engine.metrics.current_rankings import make_panel
+from engine.metrics.weekly_points import add_context, choose, fit_fold
 from tests.test_current_rankings import panel_inputs
 
 

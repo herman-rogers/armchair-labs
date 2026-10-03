@@ -10,11 +10,11 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.config.settings import get_settings
-from patron.data.nextgen import load_analysis
-from patron.data.releases import atomic_json, digest, identifier, load_gold, reference, write_json
-from patron.metrics.current_rankings import POSITIONS, make_panel
-from patron.metrics.weekly_points import add_context, choose, evaluate, fit_fold, promotion
+from engine.config.settings import get_settings
+from engine.data.nextgen import load_analysis
+from engine.data.releases import atomic_json, digest, identifier, load_gold, reference, write_json
+from engine.metrics.current_rankings import POSITIONS, make_panel
+from engine.metrics.weekly_points import add_context, choose, evaluate, fit_fold, promotion
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -170,8 +170,8 @@ def build(version, analysis=None, publish=False):
     write_json(root / "report.json", report)
     pl.DataFrame(current, infer_schema_length=None).write_parquet(root / "predictions.parquet")
     for name in [
-        "src/patron/metrics/weekly_points.py",
-        "src/patron/metrics/current_rankings.py",
+        "src/engine/metrics/weekly_points.py",
+        "src/engine/metrics/current_rankings.py",
         "research/build_weekly_points.py",
     ]:
         target = root / "implementation" / name

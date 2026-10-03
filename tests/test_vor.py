@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.metrics.vor import (
+from engine.metrics.vor import (
     REPLACEMENT_PPG,
     VOR,
     ReplacementLevelError,

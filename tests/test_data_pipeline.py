@@ -7,9 +7,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from patron.data.catalog import publish_catalog
-from patron.data.gold import clean_floats, split_forecasts, unique, validate_forecasts
-from patron.data.releases import (
+from engine.data.catalog import publish_catalog
+from engine.data.gold import clean_floats, split_forecasts, unique, validate_forecasts
+from engine.data.releases import (
     digest,
     load_gold,
     preserve_object,
@@ -184,6 +184,29 @@ def test_reader_verifies_all_three_layers(tmp_path, artifact):
         load_gold(tmp_path, "v1")
 
 
+def test_table_batch_reader_preserves_transitive_verification(tmp_path):
+    from engine.data.releases import load_tables
+
+    legacy, raw_source = release_chain(tmp_path)
+    batch = tmp_path / "tables/batches/v1"
+    batch.parent.mkdir(parents=True)
+    legacy.rename(batch)
+    manifest = json.loads((batch / "manifest.json").read_text())
+    manifest["layer"] = "tables"
+    write_json(batch / "manifest.json", manifest)
+    assert load_tables(tmp_path, "v1").root == batch
+    # Historical product readers also resolve newly built batches.
+    assert load_gold(tmp_path, "v1").ref == reference(batch)
+    write_json(
+        tmp_path / "current.json",
+        {"schema_version": 1, "table_release": reference(batch), "products": {}},
+    )
+    assert load_tables(tmp_path).ref == reference(batch)
+    raw_source.write_text("changed")
+    with pytest.raises(ValueError, match="artifact changed"):
+        load_tables(tmp_path, "v1")
+
+
 def test_failed_publication_leaves_current_untouched_and_never_falls_back(tmp_path):
     gold, _ = release_chain(tmp_path)
     current = tmp_path / "current.json"
@@ -214,7 +237,7 @@ def test_frontend_catalog_token_rejects_stale_and_mid_request_releases(monkeypat
 
     from fastapi.responses import JSONResponse
 
-    from patron.api import app as api
+    from engine.api import app as api
 
     catalog = {"gold": {"version": "v1"}, "published_at": "today"}
     monkeypatch.setattr(api, "current_catalog", lambda _: catalog)

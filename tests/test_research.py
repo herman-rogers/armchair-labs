@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from patron.metrics.research import analyze_residual_patterns
+from engine.metrics.research import analyze_residual_patterns
 
 
 def test_residual_pattern_requires_same_direction_in_every_era() -> None:

@@ -19,7 +19,7 @@ from artifact_inputs import require_audited_version
 from data_integrity_audit import digest, read_sources, select_sources
 from incremental_information import point_comparisons, require_unique, season_summary, verify_files
 
-from patron.metrics.positions import canonical_positions
+from engine.metrics.positions import canonical_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_PATH = Path(__file__).with_name("rb_residual_protocol.json")
@@ -358,7 +358,7 @@ def main() -> None:
         Path(__file__).with_name("incremental_information.py"),
         Path(__file__).with_name("artifact_inputs.py"),
         Path(__file__).with_name("data_integrity_audit.py"),
-        ROOT / "src/patron/metrics/positions.py",
+        ROOT / "src/engine/metrics/positions.py",
     ]
     recorded.update({str(p.resolve()): digest(p) for p in implementation})
     protected = {
@@ -367,7 +367,7 @@ def main() -> None:
             *(ROOT / "data/outputs").glob("board*.json"),
             *(ROOT / "data/static/draft_2026").rglob("*"),
             ROOT / "data/static/experimental_2026_predictions.csv",
-            ROOT / "src/patron/config/experimental_freeze_2026.yaml",
+            ROOT / "src/engine/config/experimental_freeze_2026.yaml",
         ]
         if p.is_file()
     }

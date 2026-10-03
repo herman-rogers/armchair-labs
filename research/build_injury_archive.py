@@ -13,8 +13,8 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
-from patron.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
+from engine.metrics.experimental import _normalized_name, _transaction_aliases
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data/research/injury_archive_20260925_r1"

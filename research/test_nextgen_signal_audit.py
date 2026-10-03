@@ -12,7 +12,7 @@ from nextgen_signal_audit import (
     season_summary,
 )
 
-from patron.metrics.player_profile import career_features
+from engine.metrics.player_profile import career_features
 
 
 def training():

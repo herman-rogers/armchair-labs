@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import expect, sync_playwright
 from ui_smoke import fixtures
 
-from patron.metrics.player_profile import METRICS
+from engine.metrics.player_profile import METRICS
 
 
 def main():

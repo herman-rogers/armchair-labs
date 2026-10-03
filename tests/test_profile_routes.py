@@ -5,14 +5,14 @@ import polars as pl
 import pytest
 from fastapi import HTTPException
 
-from patron.api import profile_routes as routes
-from patron.api import profile_sources as sources
-from patron.metrics.player_profile import METRICS
+from engine.api import profile_routes as routes
+from engine.api import profile_sources as sources
+from engine.metrics.player_profile import METRICS
 
 
 def fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "patron.data.serving.get_settings", lambda: SimpleNamespace(data_dir=tmp_path)
+        "engine.data.serving.get_settings", lambda: SimpleNamespace(data_dir=tmp_path)
     )
     root = tmp_path / "research/profiles"
     root.mkdir(parents=True)
@@ -234,7 +234,7 @@ def test_nextgen_profile_does_not_read_or_serve_archived_forecasts(tmp_path, mon
 
 
 def test_tracking_hides_unfinished_and_future_seasons(tmp_path, monkeypatch):
-    from patron.metrics.profile_tracking import TRACKING_SCHEMA
+    from engine.metrics.profile_tracking import TRACKING_SCHEMA
 
     root, _ = fixture(tmp_path, monkeypatch)
     report = json.loads((root / "report.json").read_text())

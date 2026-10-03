@@ -1,9 +1,9 @@
 from copy import deepcopy
 
-from patron.data.releases import write_json
-from patron.espn.forecast_log import accuracy
-from patron.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
-from patron.metrics.weekly_lineup import weekly_forecast
+from engine.data.releases import write_json
+from engine.espn.forecast_log import accuracy
+from engine.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
+from engine.metrics.weekly_lineup import weekly_forecast
 
 
 def player(pid, position="QB", points=10, projected=999, slot=None):
@@ -218,7 +218,7 @@ def test_dedicated_weekly_points_ignore_next_four_and_wrong_origin():
 
 
 def test_replay_does_not_use_future_scores_or_call_it_pregame():
-    from patron.metrics.weekly_replay import season_replay
+    from engine.metrics.weekly_replay import season_replay
 
     snap, _, ids, schedule = fixture()
     # Include actual skill-player lineup selections in both past weeks.

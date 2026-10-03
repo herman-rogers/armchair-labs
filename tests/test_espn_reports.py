@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.espn.crosswalk import (
+from engine.espn.crosswalk import (
     CHANGED_TEAM,
     ESPN_ID,
     INJURY_STATUS,
@@ -15,7 +15,7 @@ from patron.espn.crosswalk import (
     OWNER_TEAM_NAME,
     PERCENT_OWNED,
 )
-from patron.espn.reports import (
+from engine.espn.reports import (
     WIRE_VOR,
     opponent_weaknesses,
     ranked_wire,
@@ -500,8 +500,8 @@ class TestUnrankable:
 
 class TestDraftAnalysis:
     def test_scores_picks_with_exact_best_available(self) -> None:
-        from patron.espn.reports import draft_analysis
-        from patron.espn.sync import DraftPick
+        from engine.espn.reports import draft_analysis
+        from engine.espn.sync import DraftPick
 
         board = pl.DataFrame(
             {
@@ -544,7 +544,7 @@ class TestDraftAnalysis:
         assert result["ranking_metric"] == "v2_overall_vor"
 
     def test_empty_draft_is_not_an_error(self) -> None:
-        from patron.espn.reports import draft_analysis
+        from engine.espn.reports import draft_analysis
 
         board = pl.DataFrame({ESPN_ID: [1], "position": ["RB"], "v2_overall_vor": [1.0]})
         assert draft_analysis(board, [])["picks"] == []

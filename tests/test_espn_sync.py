@@ -11,7 +11,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from patron.espn.sync import (
+from engine.espn.sync import (
     DraftPick,
     LeagueSnapshot,
     LineupEntry,
@@ -76,7 +76,7 @@ class TestPlayerState:
                 injuryStatus="QUESTIONABLE",
                 percent_owned=99.87,
             ),
-            FakeTeam(3, "Patron Saints"),
+            FakeTeam(3, "Armchair Labs"),
         )
 
         assert state.espn_id == 3117251
@@ -119,7 +119,7 @@ class TestPlayerState:
             FakePlayer(
                 playerId=-16003, name="Bears D/ST", position="D/ST", proTeam="CHI", injuryStatus=[]
             ),
-            FakeTeam(3, "Patron Saints"),
+            FakeTeam(3, "Armchair Labs"),
         )
         assert state.injury_status is None
         assert state.position == "D/ST"
@@ -246,7 +246,7 @@ class TestDraftMarket:
                 return {
                     "players": [
                         player(11, 2, 1.3),
-                        player(-16001, 16, 2.0),  # D/ST is not on Patron's board.
+                        player(-16001, 16, 2.0),  # D/ST is not on Armchair Labs's board.
                         player(12, 3, 4.8),
                         player(13, 2, 5.1),
                     ]

@@ -16,8 +16,8 @@ from pathlib import Path
 import polars as pl
 import requests
 
-from patron.data.historical_evidence import article_content
-from patron.data.releases import (
+from engine.data.historical_evidence import article_content
+from engine.data.releases import (
     digest,
     identifier,
     load_manifest,
@@ -50,7 +50,7 @@ def capture(data: Path, version: str, snapshot_path: Path, review_path: Path) ->
             if date.fromisoformat(event["known_on"]) < published:
                 raise ValueError("An observation cannot be known before its source")
     assets = {}
-    with tempfile.TemporaryDirectory(prefix="patron-injuries-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="engine-injuries-") as temporary:
         stage = Path(temporary)
 
         def add(name, path, kind, **metadata):
@@ -96,7 +96,9 @@ def capture(data: Path, version: str, snapshot_path: Path, review_path: Path) ->
         add("injuries/espn_statuses.parquet", parsed, "parsed_provider_observation")
         observations = []
         for index, source in enumerate(sources):
-            response = requests.get(source["url"], timeout=30, headers={"User-Agent": "Patron/1.0"})
+            response = requests.get(
+                source["url"], timeout=30, headers={"User-Agent": "Armchair Labs/1.0"}
+            )
             response.raise_for_status()
             if not response.content:
                 raise ValueError(f"Empty injury source: {source['url']}")

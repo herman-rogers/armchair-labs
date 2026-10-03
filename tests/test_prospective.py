@@ -8,16 +8,16 @@ from datetime import date
 import polars as pl
 import pytest
 
-from patron.config.league import get_league
-from patron.metrics.backtest import MetricReportConfig
-from patron.metrics.prospective import (
+from engine.board.pipeline import build_adaptive_board
+from engine.config.league import get_league
+from engine.metrics.backtest import MetricReportConfig
+from engine.metrics.prospective import (
     SNAPSHOT_COLUMNS,
     ProspectiveGradePending,
     frozen_snapshot,
     grade_frozen_forecast,
     snapshot_sha256,
 )
-from patron.pipeline import build_adaptive_board
 
 
 def _pending_predictions() -> pl.DataFrame:

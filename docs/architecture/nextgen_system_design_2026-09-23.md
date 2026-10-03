@@ -74,14 +74,14 @@ views, retained experiments, chronological evaluations, product manifests, and a
 atomic current catalog. Keep those facilities and the existing Parquet/Polars
 storage. Another data platform is unnecessary for this change.
 
-The common, versioned use policy is implemented in `src/patron/data/nextgen.py`.
+The common, versioned use policy is implemented in `src/engine/data/nextgen.py`.
 `data/current.json` selects an immutable `analysis` product together with gold,
 profiles, college and outlook products. Publication verifies their exact dependency
 hashes and rejects mixed releases or silently dropping the analysis policy.
 
 `research/nextgen_system.py` builds the registry, descriptive measurements,
 chronological forecasts, evaluations, source incident ledger and archive inventory.
-`src/patron/api/nextgen_routes.py` applies the same eligibility checks to selectors,
+`src/engine/api/nextgen_routes.py` applies the same eligibility checks to selectors,
 direct requests and CSV exports. The normal dashboard is `NextGenView.tsx`;
 legacy model lists and screens are accessible only through its Research archive.
 The league service exposes observations without loading a model board.

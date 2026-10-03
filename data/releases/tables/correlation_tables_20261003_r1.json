@@ -1,0 +1,11 @@
+{
+  "manifest_generation": "1791046033513927",
+  "manifest_key": "releases/correlation_tables_20261003_r1/manifest.json",
+  "manifest_sha256": "2f942538f1fdd35567eadd8c20a74099853b65025003a1ceae0fbdc90cdb22e6",
+  "release": "correlation_tables_20261003_r1",
+  "store": "gs://armchair-labs-data/armchair-labs/tables",
+  "table_catalog": {
+    "path": "tables/catalogs/d62fa62e150e3404808b01ec3872cabd72c2675082cb9e94460af36d9911b011.json",
+    "sha256": "d62fa62e150e3404808b01ec3872cabd72c2675082cb9e94460af36d9911b011"
+  }
+}

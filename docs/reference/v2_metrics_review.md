@@ -8,7 +8,7 @@
 
 # V2 metrics review
 
-Date: 2026-08-29. Scope: the v2 projection model (`src/patron/metrics/projection.py`,
+Date: 2026-08-29. Scope: the v2 projection model (`src/engine/metrics/projection.py`,
 `enrichment.py`, `backtest.py`), its configuration, the data it consumes, and the
 rolling backtest.
 
@@ -444,7 +444,7 @@ it rides on will change, and accept it only if the §0 WR row holds.
 ## 8. The fitted ranker: learning the weights from the backtest
 
 The review's central recommendation was to stop hand-tuning ~30 constants and let the
-completed folds set the weights. `src/patron/metrics/fit.py` does that as a
+completed folds set the weights. `src/engine/metrics/fit.py` does that as a
 walk-forward stage inside `just metric-report`:
 
 - **Features** (config `fit.features`): the signals that survived the ablations —
@@ -518,7 +518,7 @@ All six items of the follow-up review are done:
 2. **Ranking contract** — target-matched baselines (`season_pts` for the
    season-points outcome), lift on the candidate's own folds, strict W–T–L against
    one fixed baseline with tie-break on top-K actual points, paired SE and CI.
-   `patron metric-report --reanalyze` re-scores from the retained parquet.
+   `engine metric-report --reanalyze` re-scores from the retained parquet.
 3. **Season-points modelling** — model specs (`fit.models`) with nested walk-forward
    λ selection; `fitted_ppg` no longer takes `expected_games`; three formulations
    compared (§0 point 3).
@@ -860,7 +860,7 @@ is the separate rookie/college population, not another round of tuning on these 
 ECR folds.
 
 The freeze now includes the complete 611-row CSV, not only a configuration digest.
-`patron grade-prospective` verifies its SHA-256, refuses to grade before January 15,
+`engine grade-prospective` verifies its SHA-256, refuses to grade before January 15,
 2027 or when outcomes appear partial, and attaches only fresh actual PPG, games,
 season points, VOR, and availability value. Passing requires prospective overall hit
 rate above both the incumbent and dated ECR plus NDCG at least equal to ECR. The

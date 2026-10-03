@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create-only, offline representation search. No Patron publication integration."""
+"""Create-only, offline representation search. No Armchair Labs publication integration."""
 
 # ruff: noqa: E402
 from __future__ import annotations

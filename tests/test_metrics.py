@@ -5,10 +5,10 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.metrics.age import AGE_COLUMN, add_age, add_age_flags
-from patron.metrics.opportunity import aggregate_opportunity
-from patron.metrics.rates import weekly_rates
-from patron.scoring.engine import LEAGUE_POINTS
+from engine.metrics.age import AGE_COLUMN, add_age, add_age_flags
+from engine.metrics.opportunity import aggregate_opportunity
+from engine.metrics.rates import weekly_rates
+from engine.scoring.engine import LEAGUE_POINTS
 
 
 def weeks(points: list[float], player_id: str = "p1", season: int = 2025) -> pl.DataFrame:

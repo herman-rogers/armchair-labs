@@ -3,7 +3,7 @@ from copy import deepcopy
 import polars as pl
 import pytest
 
-from patron.metrics.rookies import analog_forecast, backtest, completed_cutoff, rookie_rows
+from engine.metrics.rookies import analog_forecast, backtest, completed_cutoff, rookie_rows
 
 
 def inputs():

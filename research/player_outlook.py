@@ -19,9 +19,9 @@ import yaml
 from artifact_inputs import require_audited_version
 from data_integrity_audit import digest
 
-from patron.config.settings import CONFIG_DIR, get_settings
-from patron.data.releases import load_gold
-from patron.metrics.outlook import (
+from engine.config.settings import CONFIG_DIR, get_settings
+from engine.data.releases import load_gold
+from engine.metrics.outlook import (
     OUTLOOK,
     POSITIONS,
     SCALE,
@@ -33,7 +33,7 @@ from patron.metrics.outlook import (
     team_name,
     unique,
 )
-from patron.metrics.positions import canonical_positions
+from engine.metrics.positions import canonical_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,7 +81,7 @@ def main():
             path = (snapshot / name).resolve()
             if not path.is_relative_to(snapshot) or digest(path) != expected:
                 raise ValueError(f"Captured current input changed: {name}")
-    frozen_scoring = args.history / "implementation/patron/config/scoring.yaml"
+    frozen_scoring = args.history / "implementation/engine/config/scoring.yaml"
     if yaml.safe_load(frozen_scoring.read_text()) != yaml.safe_load(
         (CONFIG_DIR / "scoring.yaml").read_text()
     ):
@@ -94,7 +94,7 @@ def main():
     for name in ("weeks", "snaps", "schedule", "players"):
         source = gold.path(f"current_{name}") if gold else snapshot / f"{name}.parquet"
         shutil.copy2(source, inputs / f"current_{name}.parquet")
-    for source in (Path(__file__), ROOT / "src/patron/metrics/outlook.py"):
+    for source in (Path(__file__), ROOT / "src/engine/metrics/outlook.py"):
         shutil.copy2(source, inputs / ("runner.py" if source == Path(__file__) else "model.py"))
     protected_manifest = json.loads((args.history / "manifest.json").read_text())
     protected = {

@@ -10,12 +10,12 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from patron.data.gold import table_spec, validate_forecasts
-from patron.data.player_profiles import prepare_weeks
-from patron.data.releases import digest, identifier, load_gold, write_json
-from patron.data.target_quality import correct_tables, mask_columns
-from patron.metrics.player_profile import KEYS, TOTALS, summarize
-from patron.metrics.projection import _age_factor
+from engine.data.player_profiles import prepare_weeks
+from engine.data.releases import digest, identifier, load_gold, write_json
+from engine.data.target_quality import correct_tables, mask_columns
+from engine.metrics.player_profile import KEYS, TOTALS, summarize
+from engine.metrics.projection import _age_factor
+from engine.tables.contracts import table_spec, validate_forecasts
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -347,10 +347,10 @@ def dispersion_features(weeks, candidates):
 
 def legacy_projection_features(gold, frame):
     """Recompute the legacy projection formulas from gold, retaining unknown dependencies."""
-    from patron.board.builder import build_board
-    from patron.board.overrides import OverrideSet
-    from patron.config.league import get_league
-    from patron.metrics.projection import ProjectionAssumptions, build_projection_board
+    from engine.board.builder import build_board
+    from engine.board.overrides import OverrideSet
+    from engine.config.league import get_league
+    from engine.metrics.projection import ProjectionAssumptions, build_projection_board
 
     seasons = gold.read("nfl_player_seasons")
     birthdays = gold.read("players").select(pl.col("gsis_id").alias("player_id"), "birth_date")

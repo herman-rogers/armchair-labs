@@ -5,8 +5,8 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from patron.data.nflverse import canonicalize_depth_charts
-from patron.metrics.enrichment import (
+from engine.data.nflverse import canonicalize_depth_charts
+from engine.metrics.enrichment import (
     build_expected_opportunity,
     build_injury_history,
     build_market_rankings,

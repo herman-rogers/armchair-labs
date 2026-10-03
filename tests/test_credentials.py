@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from patron.espn.credentials import EspnCredentials, clear, read, write
+from engine.espn.credentials import EspnCredentials, clear, read, write
 
 
 @pytest.fixture

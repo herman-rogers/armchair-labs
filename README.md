@@ -1,7 +1,7 @@
 # Armchair Labs
 
 NFL player research, forecasting, and fantasy analysis, with local marimo notebooks
-and the Patron analytics application. The Python package and CLI remain `patron`.
+and the Armchair Labs analytics application. The Python package and CLI are `engine` (distribution: `armchair-engine`).
 The league configuration supports **Sweaty Plays** (ESPN, 10-team full PPR with
 big-play TD bonuses).
 
@@ -29,6 +29,7 @@ Start at the [documentation index](docs/README.md).
 |---|---|
 | Run and maintain the system | [Operations](docs/operations/README.md) |
 | Update observations, forecasts, and precomputed responses | [Refresh data](docs/operations/refresh-data.md) |
+| Generate, build, publish, and consume queryable data | [Analytical tables](docs/operations/tables.md) |
 | Understand storage, API, and frontend caching | [Architecture](docs/architecture/README.md) |
 | See proposed work | [Plans](docs/plans/README.md) |
 | Read dated findings and evaluations | [Research](docs/research/README.md) |
@@ -44,21 +45,52 @@ from forecasts and league decisions. nflverse supplies football observations; ES
 supplies league ownership, results, and recorded statuses. Older V1/V2/Adaptive
 boards and experiments remain research archives.
 
-The backend reads versioned Parquet and analysis products selected by
-`data/current.json`, verifies their dependencies, and serves an API. Precomputed
-JSON responses and bounded in-process caches accelerate reads. The frontend uses
+The backend queries native DuckDB tables for analysis and league management,
+verifies the products selected by `data/current.json`, and serves an API. Research
+retains its artifact readers. Precomputed JSON responses and bounded in-process
+caches accelerate reads. The frontend uses
 TanStack Query for server state. See [architecture](docs/architecture/README.md) for
-the contracts and [plans](docs/plans/README.md) for proposed shared storage and
-further data/training work.
+the contracts and [plans](docs/plans/README.md) for further data/training work.
+
+## Data: build, upload, and consume
+
+Registered analytical datasets use the same table pipeline: captured sources →
+validated batches → versioned Parquet tables → GCS → local DuckDB tables.
+Research archives are inputs for explicit promotion, not a competing query store.
+
+Analysis and league management read through DuckDB: published products join the
+analytical catalog as `app_*` tables, and ESPN observations use a separate local
+league catalog with the same build/query machinery. Research-scoped requests keep
+their existing artifact readers. Response caches sit above these query paths. See the
+[current serving coverage](docs/operations/tables.md#frontend-serving-coverage).
+
+```sh
+uv sync --extra shared-data
+just data-fetch                    # fetch the published query catalog
+just tables list
+just tables query "SELECT count(*) FROM analytics.team_player_games"
+
+# On the publisher, generate sources/products, build tables and upload:
+just data-refresh --upload
+# Rebuild table recipes from captured inputs without retraining products:
+just tables refresh --due --upload
+```
+
+[The data pipeline guide](docs/operations/tables.md) is the authoritative contract
+for generation, validation, adding tables, retrying uploads, and consumption by
+other systems. Distribute `data/releases/tables/current.json` to consumers; it pins
+immutable Parquet objects and a language-neutral GCS catalog with schemas and
+checksums. `just source-fetch` is only for larger research/rebuild input archives.
 
 ## Source layout
 
 | Path | Purpose |
 |---|---|
-| `src/patron/api/` | FastAPI backend |
-| `src/patron/data/` | Source loading, versioned data, verification, and caches |
-| `src/patron/config/` | League scoring, model configuration, and overrides |
-| `src/patron/scoring/`, `src/patron/metrics/`, `src/patron/board/` | Scoring, metrics, and board construction |
+| `src/engine/api/` | FastAPI backend |
+| `src/engine/data/` | Source loading, versioned data, verification, and caches |
+| `src/engine/tables/` | DuckDB query sessions, table recipes, atomic refreshes, and sharing |
+| `src/engine/config/` | League scoring, model configuration, and overrides |
+| `src/engine/scoring/`, `src/engine/metrics/`, `src/engine/board/` | Scoring, metrics, and board construction |
 | `web/` | React frontend and browser checks |
 | `research/`, `experiments/` | Build scripts, protocols, notebooks, and experiments |
 | `tests/` | Python validation |

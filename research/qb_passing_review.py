@@ -11,16 +11,16 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, write_json
-from patron.metrics.evidence_diagnostics import passing_workload_diagnostics
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, write_json
+from engine.metrics.evidence_diagnostics import passing_workload_diagnostics
 
 
 def review(data: Path, version: str):
     source, manifest = load_analysis(data)
     output = data / "research" / identifier(version)
     output.mkdir(parents=True, exist_ok=False)
-    snapshot = source / "implementation/src/patron/metrics/nextgen.py"
+    snapshot = source / "implementation/src/engine/metrics/nextgen.py"
     spec = importlib.util.spec_from_file_location("saved_nextgen_review", snapshot)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -161,7 +161,7 @@ def review(data: Path, version: str):
     shutil.copyfile(__file__, output / "review.py")
     shutil.copyfile(snapshot, output / "saved_forecast_implementation.py")
     shutil.copyfile(
-        Path(__file__).resolve().parents[1] / "src/patron/metrics/evidence_diagnostics.py",
+        Path(__file__).resolve().parents[1] / "src/engine/metrics/evidence_diagnostics.py",
         output / "evidence_diagnostics.py",
     )
     write_json(

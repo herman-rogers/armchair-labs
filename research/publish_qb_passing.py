@@ -10,10 +10,10 @@ from pathlib import Path
 
 import polars as pl
 
-from patron.data.catalog import publish_catalog
-from patron.data.nextgen import load_analysis
-from patron.data.releases import current_catalog, digest, identifier, inside, reference, write_json
-from patron.metrics.qb_passing import CHALLENGERS, HORIZONS, summarize
+from engine.data.catalog import publish_catalog
+from engine.data.nextgen import load_analysis
+from engine.data.releases import current_catalog, digest, identifier, inside, reference, write_json
+from engine.metrics.qb_passing import CHALLENGERS, HORIZONS, summarize
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -261,13 +261,13 @@ def package(data, source_version, version, publish=False, analysis_version=None)
         "research/build_qb_passing.py",
         "research/score_qb_passing.py",
         "research/qb_passing_run_protocol.md",
-        "src/patron/api/qb_passing_routes.py",
-        "src/patron/data/nextgen.py",
-        "src/patron/data/catalog.py",
-        "src/patron/metrics/transaction_events.py",
-        "src/patron/metrics/experimental.py",
-        "src/patron/metrics/current_rankings.py",
-        "src/patron/metrics/nextgen.py",
+        "src/engine/api/qb_passing_routes.py",
+        "src/engine/data/nextgen.py",
+        "src/engine/data/catalog.py",
+        "src/engine/metrics/transaction_events.py",
+        "src/engine/metrics/experimental.py",
+        "src/engine/metrics/current_rankings.py",
+        "src/engine/metrics/nextgen.py",
         "web/src/components/QBPassing.tsx",
         "web/src/api/qbPassing.ts",
         "web/src/components/NextGenView.tsx",

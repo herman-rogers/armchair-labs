@@ -4,8 +4,8 @@ import zipfile
 import polars as pl
 import pytest
 
-from patron.data.releases import load_gold
-from patron.data.tracking import (
+from engine.data.releases import load_gold
+from engine.data.tracking import (
     build,
     capture,
     extract_zip,
@@ -13,7 +13,7 @@ from patron.data.tracking import (
     normalize_tracking,
     register,
 )
-from patron.data.tracking_sources import SOURCES
+from engine.data.tracking_sources import SOURCES
 
 
 def frames():
@@ -149,7 +149,7 @@ def test_metadata_only_and_overlapping_archives_do_not_publish(tmp_path):
     with pytest.raises(ValueError, match="Overlapping tracking"):
         build(data, raw)
     assert not (data / "source_catalog.json").exists()
-    assert not (data / "gold/releases/overlap/manifest.json").exists()
+    assert not (data / "tables/batches/overlap/manifest.json").exists()
 
 
 def test_zip_traversal_and_size_limit(tmp_path):
@@ -165,7 +165,7 @@ def test_zip_traversal_and_size_limit(tmp_path):
 
 
 def test_identity_namespace_and_ambiguity_are_not_guessed():
-    from patron.data.tracking import link_tracking_players, player_crosswalk
+    from engine.data.tracking import link_tracking_players, player_crosswalk
 
     ids = player_crosswalk(
         pl.DataFrame(
@@ -189,7 +189,7 @@ def test_identity_namespace_and_ambiguity_are_not_guessed():
 
 
 def test_download_receipts_reuse_verified_files_and_reject_truncation(tmp_path):
-    from patron.data.tracking import fetch_asset
+    from engine.data.tracking import fetch_asset
 
     class Response:
         headers = {}
@@ -227,7 +227,7 @@ def test_download_receipts_reuse_verified_files_and_reject_truncation(tmp_path):
 
 
 def test_prediction_test_input_is_spatial_and_keeps_test_split():
-    from patron.data.tracking import is_spatial_file
+    from engine.data.tracking import is_spatial_file
 
     source = SOURCES["bdb_2026_prediction"]
     assert is_spatial_file("test_input.csv", source)
@@ -238,7 +238,7 @@ def test_prediction_test_input_is_spatial_and_keeps_test_split():
 
 
 def test_historical_weather_text_is_preserved(tmp_path):
-    from patron.data.tracking import read_source
+    from engine.data.tracking import read_source
 
     path = tmp_path / "train.csv"
     path.write_text("WindSpeed,WindDirection,x\n" + "10,180,20.0\n" * 10001 + "SSW,North,21.0\n")

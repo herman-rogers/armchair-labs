@@ -3,7 +3,7 @@ from datetime import date
 import polars as pl
 import pytest
 
-from patron.metrics.qb_passing import (
+from engine.metrics.qb_passing import (
     build_panel,
     choose_recipe,
     compile_events,

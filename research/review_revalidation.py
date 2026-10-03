@@ -17,11 +17,18 @@ from pathlib import Path
 import polars as pl
 import yaml
 
-from patron.api.college_sources import load_college
-from patron.api.outlook_sources import load_outlook_release
-from patron.data.catalog import publish_catalog
-from patron.data.nextgen import load_analysis, read_json, verify_evidence
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.api.college_sources import load_college
+from engine.api.outlook_sources import load_outlook_release
+from engine.data.catalog import publish_catalog
+from engine.data.nextgen import load_analysis, read_json, verify_evidence
+from engine.data.releases import (
+    current_catalog,
+    digest,
+    identifier,
+    load_gold,
+    reference,
+    write_json,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
@@ -266,7 +273,9 @@ def apply_decisions(registry, decisions, version, date):
 
 def build(version: str, *, publish: bool = False):
     data = ROOT / "data"
-    catalog = read_json(data / "current.json")
+    catalog = current_catalog(data)
+    if catalog is None:
+        raise ValueError("No application catalog has been published")
     catalog_hash = digest(data / "current.json")
     source, manifest = load_analysis(data)
     registry = read_json(source / "registry.json")
@@ -315,7 +324,7 @@ def build(version: str, *, publish: bool = False):
     }
     stat_registry = {r["stat"]: r for r in read_json(evidence_root / "registry.json")}
     features = pl.read_parquet(evidence_root / "features.parquet")
-    config_path = ROOT / "src/patron/config/metric_report.yaml"
+    config_path = ROOT / "src/engine/config/metric_report.yaml"
     specs = {s["name"]: s for s in yaml.safe_load(config_path.read_text())["fit"]["models"]}
     decisions = {}
     for entry in registry:

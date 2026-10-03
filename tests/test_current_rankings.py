@@ -1,7 +1,7 @@
 import numpy as np
 import polars as pl
 
-from patron.metrics.current_rankings import (
+from engine.metrics.current_rankings import (
     BASELINES,
     CHALLENGERS,
     apply_constraints,
@@ -11,7 +11,7 @@ from patron.metrics.current_rankings import (
     metrics,
     rank_frame,
 )
-from patron.metrics.nextgen import COUNTERS
+from engine.metrics.nextgen import COUNTERS
 
 
 def panel_inputs():

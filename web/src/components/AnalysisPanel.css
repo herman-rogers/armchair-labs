@@ -1,0 +1,9 @@
+.analysis-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; min-width: 0; }
+.analysis-panel.analysis-panel-compact { padding: 12px; }
+.analysis-panel-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.analysis-panel-heading h3 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+.analysis-panel-heading > span { color: var(--text-dim); font-size: 10px; }
+.analysis-panel > .stat-list { padding: 8px; border-radius: 4px; background: color-mix(in srgb, var(--surface-raised) 55%, var(--surface)); }
+.analysis-panel .stat-list > div { padding-left: 8px; border-left: 2px solid var(--border); }
+.analysis-panel > .outlook-method { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+@media (max-width: 760px) { .analysis-panel { padding: 14px; } .analysis-panel.analysis-panel-compact { padding: 10px; } }

@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from patron.data.releases import digest, identifier, inside, load_gold, reference, write_json
-from patron.metrics.qb_passing import MODELS
+from engine.data.releases import digest, identifier, inside, load_gold, reference, write_json
+from engine.metrics.qb_passing import MODELS
 
 
 def score(data: Path, source_version: str, output_version: str):

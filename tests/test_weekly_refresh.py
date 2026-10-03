@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
-from research import refresh_nextgen as refresh
 
-from patron.data.releases import atomic_json
-from patron.data.weekly import capture
-from patron.metrics.rookies import completed_cutoff
+from engine.data import refresh
+from engine.data.releases import atomic_json
+from engine.data.weekly import capture
+from engine.metrics.rookies import completed_cutoff
 
 
 def observations(week):
@@ -25,7 +25,7 @@ def test_weekly_product_stages_after_delivery_without_early_activation():
 
 
 def test_weekly_activation_checks_completed_manifest(tmp_path, monkeypatch):
-    from patron.data.releases import digest, reference
+    from engine.data.releases import digest, reference
 
     monkeypatch.setattr(refresh, "DATA", tmp_path)
     root = tmp_path / "research/run_weekly"
@@ -77,7 +77,7 @@ def test_refresh_noop_force_and_cutoff_regression():
 
 
 def test_capture_unchanged_week_skips_expensive_sources(monkeypatch):
-    from patron.data import weekly
+    from engine.data import weekly
 
     monkeypatch.setattr(weekly.nflverse, "load_player_weeks", lambda _: pl.DataFrame())
     monkeypatch.setattr(weekly.nflverse, "load_schedules", lambda _: pl.DataFrame())
@@ -90,11 +90,15 @@ def test_capture_unchanged_week_skips_expensive_sources(monkeypatch):
 
 def setup_run(tmp_path, monkeypatch):
     monkeypatch.setattr(refresh, "DATA", tmp_path)
+    monkeypatch.setattr(refresh, "refresh_named_tables", lambda *_, **__: {})
+    monkeypatch.setattr(
+        refresh, "read_registry", lambda: {"team_player_games": SimpleNamespace(refresh_hours=24)}
+    )
     monkeypatch.setenv("NFLVERSE_CACHE_DURATION", "86400")
     atomic_json(tmp_path / "current.json", {"products": {"analysis": {"version": "old"}}})
     monkeypatch.setattr(
         refresh,
-        "load_gold",
+        "load_tables",
         lambda *_: SimpleNamespace(
             manifest={
                 "current_observations": observations(2),
@@ -145,11 +149,103 @@ def test_failed_rebuild_preserves_catalog_and_resume_skips_completed_stage(tmp_p
         atomic_json(second, {"complete": True})
 
     published = []
+    table_refreshes = []
     monkeypatch.setattr(refresh.subprocess, "run", finish)
     monkeypatch.setattr(refresh, "publish_catalog", lambda *args, **_: published.append(args))
+
+    def refresh_tables(data, *, names, **kwargs):
+        assert published, "Named tables must use the newly published source catalog"
+        table_refreshes.append((data, names))
+
+    monkeypatch.setattr(refresh, "refresh_named_tables", refresh_tables)
     assert refresh.run(args)["status"] == "published"
     assert calls == ["first", "second", "second"]
     assert published[0][2]["analysis"] == "test_weekly_delivery"
+    assert table_refreshes == [(tmp_path, ["team_player_games"])]
+
+
+def test_table_refresh_failure_after_publication_can_resume(tmp_path, monkeypatch):
+    args, first, second = setup_run(tmp_path, monkeypatch)
+    stages_run = []
+
+    def stage(command, **_):
+        stages_run.append(command)
+        atomic_json(first if command == ["first"] else second, {"complete": True})
+
+    def publish(*_, **__):
+        atomic_json(
+            tmp_path / "current.json",
+            {
+                "products": {"analysis": {"version": "test_weekly_delivery"}},
+            },
+        )
+
+    attempts = []
+
+    def tables(data, *, names, **kwargs):
+        attempts.append(names)
+        if len(attempts) == 1:
+            raise ValueError("Table refresh interrupted")
+
+    monkeypatch.setattr(refresh.subprocess, "run", stage)
+    monkeypatch.setattr(refresh, "publish_catalog", publish)
+    monkeypatch.setattr(refresh, "refresh_named_tables", tables)
+    with pytest.raises(ValueError, match="Table refresh interrupted"):
+        refresh.run(args)
+    assert (
+        json.loads((tmp_path / ".runtime/nextgen_refresh.json").read_text())["status"] == "failed"
+    )
+    assert refresh.run(args)["status"] == "current"
+    assert attempts == [["team_player_games"], ["team_player_games"]]
+    assert stages_run == [["first"], ["second"]]
+
+
+def test_unchanged_week_repairs_missing_or_outdated_tables(tmp_path, monkeypatch):
+    args, _, _ = setup_run(tmp_path, monkeypatch)
+    atomic_json(args.current_report, observations(2))
+    calls = []
+    monkeypatch.setattr(
+        refresh, "refresh_named_tables", lambda data, **kw: calls.append((data, kw))
+    )
+    assert refresh.run(args)["status"] == "current"
+    assert calls == [
+        (
+            tmp_path,
+            {"names": ["team_player_games"], "upload": False, "store": refresh.DEFAULT_STORE},
+        )
+    ]
+
+
+def test_unchanged_week_retries_upload_and_selects_all_refreshable_tables(tmp_path, monkeypatch):
+    args, _, _ = setup_run(tmp_path, monkeypatch)
+    args.current_report = None
+    args.upload = True
+    args.store = "file:///fixture-store"
+    monkeypatch.setattr(refresh, "capture", lambda *_, **__: None)
+    monkeypatch.setattr(
+        refresh,
+        "read_registry",
+        lambda: {
+            "new_weekly_summary": SimpleNamespace(refresh_hours=168),
+            "frozen_study": SimpleNamespace(refresh_hours=None),
+        },
+    )
+    calls = []
+
+    def finish(data, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise OSError("network unavailable")
+        return {"upload": {"status": "published"}}
+
+    monkeypatch.setattr(refresh, "refresh_named_tables", finish)
+    before = (tmp_path / "current.json").read_bytes()
+    with pytest.raises(OSError, match="network unavailable"):
+        refresh.run(args)
+    result = refresh.run(args)
+    assert result["tables"]["upload"]["status"] == "published"
+    assert calls == [{"names": ["new_weekly_summary"], "upload": True, "store": args.store}] * 2
+    assert (tmp_path / "current.json").read_bytes() == before
 
 
 def test_concurrent_publication_is_not_overwritten(tmp_path, monkeypatch):
@@ -169,8 +265,8 @@ def test_concurrent_publication_is_not_overwritten(tmp_path, monkeypatch):
 
 
 def test_catalog_compare_and_swap_is_checked_inside_publication_lock(tmp_path, monkeypatch):
-    from patron.data import catalog
-    from patron.data.releases import digest
+    from engine.data import catalog
+    from engine.data.releases import digest
 
     atomic_json(tmp_path / "current.json", {"version": "old"})
     expected = digest(tmp_path / "current.json")
@@ -183,7 +279,7 @@ def test_catalog_compare_and_swap_is_checked_inside_publication_lock(tmp_path, m
 
 
 def test_weekly_refresh_carries_only_unchanged_retirements():
-    from patron.data.retirements import carry_retirements
+    from engine.data.retirements import carry_retirements
 
     row = dict(
         id="stat:a",

@@ -4,7 +4,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from patron.metrics.rich_weekly import (
+from engine.metrics.rich_weekly import (
     _descriptor,
     build_rich_weekly_features,
     build_weekly_route_panel,
@@ -154,7 +154,7 @@ def test_rich_features_keep_missing_feed_null_and_capture_role_momentum(history:
 
 
 def test_weekly_panel_separates_play_coverage_from_participation() -> None:
-    from patron.metrics.rich_weekly import build_rich_weekly_panel
+    from engine.metrics.rich_weekly import build_rich_weekly_panel
 
     keys = {"player_id": ["wr", "wr"], "season": [2015, 2016], "week": [1, 1]}
     stats = pl.DataFrame(

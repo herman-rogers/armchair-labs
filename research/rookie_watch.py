@@ -16,13 +16,13 @@ import yaml
 from artifact_inputs import require_audited_version
 from data_integrity_audit import digest
 
-from patron.config.league import get_league
-from patron.config.settings import CONFIG_DIR, get_settings
-from patron.data import nflverse
-from patron.metrics.positions import canonical_positions
-from patron.metrics.rookies import analog_forecast, backtest, completed_cutoff, rookie_rows
-from patron.scoring.bonuses import extract_touchdown_bonuses
-from patron.scoring.engine import score_components
+from engine.config.league import get_league
+from engine.config.settings import CONFIG_DIR, get_settings
+from engine.data import nflverse
+from engine.metrics.positions import canonical_positions
+from engine.metrics.rookies import analog_forecast, backtest, completed_cutoff, rookie_rows
+from engine.scoring.bonuses import extract_touchdown_bonuses
+from engine.scoring.engine import score_components
 
 
 def mapped_snaps(raw: pl.DataFrame, identities: pl.DataFrame) -> pl.DataFrame:
@@ -43,7 +43,7 @@ def main() -> None:
     parser.add_argument("--through-week", type=int, default=None)
     args = parser.parse_args()
     provenance = require_audited_version(args.history)
-    historical_scoring = args.history / "implementation/patron/config/scoring.yaml"
+    historical_scoring = args.history / "implementation/engine/config/scoring.yaml"
     if yaml.safe_load(historical_scoring.read_text()) != yaml.safe_load(
         (CONFIG_DIR / "scoring.yaml").read_text()
     ):
@@ -173,7 +173,7 @@ def main() -> None:
         "source_sha256": {p.name: digest(p) for p in archive.glob("*.parquet")},
         "implementation_sha256": {
             "runner": digest(Path(__file__)),
-            "model": digest(Path(__file__).parents[1] / "src/patron/metrics/rookies.py"),
+            "model": digest(Path(__file__).parents[1] / "src/engine/metrics/rookies.py"),
         },
         "players": predictions,
         "backtest": backtest(history),

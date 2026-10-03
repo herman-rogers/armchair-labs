@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ruff: noqa: E402
 # Disable bytecode and set the read-only source path before importing dependencies.
-"""Run disposable experiments without touching any Patron publication path."""
+"""Run disposable experiments without touching any Armchair Labs publication path."""
 
 from __future__ import annotations
 
@@ -33,8 +33,8 @@ from methods import add_rates, fit_pool, predict_regression, recipes, role_mixtu
 from report import html_report, markdown_report
 from safety import install_write_guard, new_run, sha256, snapshot, verify_source_pins, write_json
 
-from patron.data.releases import load_gold
-from patron.metrics.nextgen import fit_fold
+from engine.data.releases import load_gold
+from engine.metrics.nextgen import fit_fold
 
 
 def protected_paths(gold, config):

@@ -14,10 +14,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from patron.espn import service as service_module
-from patron.espn.credentials import EspnCredentials
-from patron.espn.service import LeagueService, NotAuthenticatedError
-from patron.espn.sync import LeagueSnapshot, PlayerState, TeamState
+from engine.espn import service as service_module
+from engine.espn.credentials import EspnCredentials
+from engine.espn.service import LeagueService, NotAuthenticatedError
+from engine.espn.sync import LeagueSnapshot, PlayerState, TeamState
 
 
 def make_snapshot(week: int = 1) -> LeagueSnapshot:
@@ -28,7 +28,7 @@ def make_snapshot(week: int = 1) -> LeagueSnapshot:
         season=2026,
         week=week,
         my_team_id=3,
-        teams=[TeamState(3, "Patron Saints", "me", 0, 0, 145)],
+        teams=[TeamState(3, "Armchair Labs", "me", 0, 0, 145)],
         players=[
             PlayerState(1, "Owned Guy", "RB", "SF", "ACTIVE", 99.0, 80.0, 12.0, 3, "Mine", "RB"),
             PlayerState(2, "Free Guy", "WR", "SEA", "ACTIVE", 10.0, 2.0, 8.0, None, None, None),
@@ -56,7 +56,7 @@ def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LeagueService:
     outputs.mkdir()
     write_board(outputs / "board_v1.json")
 
-    from patron.config.settings import Settings
+    from engine.config.settings import Settings
 
     settings = Settings(data_dir=tmp_path)
     monkeypatch.setattr(
@@ -238,7 +238,7 @@ class TestResilience:
         self, service: LeagueService, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(service_module.creds, "read", lambda _: None)
-        with pytest.raises(NotAuthenticatedError, match="patron auth login"):
+        with pytest.raises(NotAuthenticatedError, match="engine auth login"):
             service.get()
 
     def test_a_missing_board_is_reported_clearly(
@@ -247,7 +247,7 @@ class TestResilience:
         (service._settings.outputs_dir / "board_v1.json").unlink()
         monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
 
-        with pytest.raises(FileNotFoundError, match="patron board"):
+        with pytest.raises(FileNotFoundError, match="engine board"):
             service.get()
 
 

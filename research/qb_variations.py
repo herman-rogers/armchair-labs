@@ -12,11 +12,11 @@ import numpy as np
 import polars as pl
 import yaml
 
-from patron.data.nextgen import load_analysis
-from patron.data.releases import digest, identifier, load_gold, reference, write_json
-from patron.metrics.current_rankings import compare
-from patron.metrics.qb_passing import build_panel
-from patron.metrics.qb_variations import (
+from engine.data.nextgen import load_analysis
+from engine.data.releases import digest, identifier, load_gold, reference, write_json
+from engine.metrics.current_rankings import compare
+from engine.metrics.qb_passing import build_panel
+from engine.metrics.qb_variations import (
     KEY,
     adjust_q,
     augment_panel,
@@ -200,10 +200,10 @@ def run(data, version, analysis_version=None):
     now = datetime.now(UTC).isoformat()
     shutil.copyfile(ROOT / "research/qb_variations_protocol.md", root / "protocol.md")
     for name in (
-        "src/patron/metrics/qb_variations.py",
+        "src/engine/metrics/qb_variations.py",
         "research/qb_variations.py",
-        "src/patron/metrics/current_rankings.py",
-        "src/patron/config/scoring.yaml",
+        "src/engine/metrics/current_rankings.py",
+        "src/engine/config/scoring.yaml",
     ):
         out = root / "implementation" / name
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -301,7 +301,7 @@ def run(data, version, analysis_version=None):
     predictions, annual, folds, rank_predictions = [], [], [], []
     coefficient = (
         1
-        / yaml.safe_load((ROOT / "src/patron/config/scoring.yaml").read_text())["passing"][
+        / yaml.safe_load((ROOT / "src/engine/config/scoring.yaml").read_text())["passing"][
             "yards_per_point"
         ]
     )

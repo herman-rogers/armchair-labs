@@ -5,7 +5,7 @@ from datetime import date
 import polars as pl
 import pytest
 
-from patron.data.historical_evidence import (
+from engine.data.historical_evidence import (
     BACKFILL_FILE,
     BACKFILL_MANIFEST,
     archive_rows,
@@ -14,8 +14,8 @@ from patron.data.historical_evidence import (
     load_transaction_backfill,
     sha256,
 )
-from patron.metrics.experimental import build_transaction_features
-from patron.metrics.roster_evidence import attach_roster_evidence, supplement_identity_names
+from engine.metrics.experimental import build_transaction_features
+from engine.metrics.roster_evidence import attach_roster_evidence, supplement_identity_names
 
 
 def test_crosswalk_adds_only_unambiguous_identity_names():

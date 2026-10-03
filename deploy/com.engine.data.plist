@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Edit absolute paths; install on the designated publisher only.
+     cp deploy/com.engine.data.plist ~/Library/LaunchAgents/
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.engine.data.plist
+     Requires noninteractive GCS credentials. See docs/operations/tables.md. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.engine.data</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/CHANGEME/.local/bin/uv</string>
+        <string>run</string><string>--extra</string><string>shared-data</string>
+        <string>engine</string><string>data</string><string>refresh</string>
+        <string>--upload</string>
+    </array>
+    <key>WorkingDirectory</key><string>/Users/CHANGEME/dev/fantasy</string>
+    <key>StartCalendarInterval</key>
+    <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer></dict>
+    <key>StandardOutPath</key><string>/tmp/engine-data-refresh.log</string>
+    <key>StandardErrorPath</key><string>/tmp/engine-data-refresh.error.log</string>
+    <key>RunAtLoad</key><false/>
+</dict>
+</plist>

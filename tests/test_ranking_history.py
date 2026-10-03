@@ -3,8 +3,8 @@ import json
 import polars as pl
 import pytest
 
-from patron.data import ranking_history as module
-from patron.data.releases import digest, write_json
+from engine.data import ranking_history as module
+from engine.data.releases import digest, write_json
 
 
 @pytest.fixture

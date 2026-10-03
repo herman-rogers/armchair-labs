@@ -1,4 +1,4 @@
-# Patron Saints Analytics Engine — Implementation Plan
+# Armchair Labs Analytics Engine — Implementation Plan
 
 > Historical implementation record. Release IDs, results, commands, and interface descriptions reflect the recorded change; use the [operations guides](../operations/README.md) to run the system today.
 
@@ -42,7 +42,7 @@ DST is the one place the draft build approximated: the proxy (sacks + 2×takeawa
 ## 4. Metrics: the goal, and where the catalog lives
 
 > The metric catalog is no longer duplicated here. The single source of truth for
-> which metrics exist is `src/patron/config/metric_report.yaml` (`metrics:` block);
+> which metrics exist is `src/engine/config/metric_report.yaml` (`metrics:` block);
 > [`metrics.md`](../reference/metrics.md) is authoritative for metric behavior and carries the
 > graveyard of everything the backtest disproved.
 

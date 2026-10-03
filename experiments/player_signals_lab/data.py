@@ -6,7 +6,7 @@ import math
 
 import polars as pl
 
-from patron.metrics.nextgen import build_panel
+from engine.metrics.nextgen import build_panel
 
 RATE_PAIRS = {
     "passing": ("passing_yards", "attempts"),

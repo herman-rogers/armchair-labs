@@ -1,7 +1,7 @@
 [project]
-name = "patron"
+name = "armchair-engine"
 version = "0.1.0"
-description = "Patron Saints analytics engine — league-exact fantasy valuation for Sweaty Plays"
+description = "Armchair Labs data, statistics, forecasting, and fantasy analysis engine"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,10 +20,11 @@ dependencies = [
     "types-requests>=2.33.0.20260712",
     "numpy>=2.5.2",
     "scikit-learn>=1.7.2",
+    "duckdb>=1.4,<2",
 ]
 
 [project.scripts]
-patron = "patron.cli:app"
+engine = "engine.cli:app"
 
 [project.optional-dependencies]
 shared-data = [
@@ -44,7 +45,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/patron"]
+packages = ["src/engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -67,6 +68,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.12"
-packages = ["patron"]
+packages = ["engine"]
 mypy_path = "src"
 ignore_missing_imports = true

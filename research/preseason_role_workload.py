@@ -20,8 +20,8 @@ from artifact_inputs import require_audited_version
 from data_integrity_audit import digest
 from value_capture_audit import finite, model_values, rank_ids, score, summarize
 
-from patron.metrics.outlook import fit, team_name, unique
-from patron.metrics.positions import canonical_positions
+from engine.metrics.outlook import fit, team_name, unique
+from engine.metrics.positions import canonical_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 POSITIONS = ("QB", "RB", "TE")
@@ -466,8 +466,8 @@ def main():
             str(p.relative_to(ROOT)): digest(p)
             for p in (
                 Path(__file__),
-                ROOT / "src/patron/metrics/outlook.py",
-                ROOT / "src/patron/metrics/positions.py",
+                ROOT / "src/engine/metrics/outlook.py",
+                ROOT / "src/engine/metrics/positions.py",
                 ROOT / "research/value_capture_audit.py",
                 ROOT / "research/artifact_inputs.py",
                 ROOT / "research/data_integrity_audit.py",

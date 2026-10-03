@@ -1,20 +1,25 @@
 import { RankMovement } from './RankMovement'
 import { weeklyForecastsQuery, rankingHistoryQuery, leagueQuery, matchupsQuery, rankingsQuery } from '../api/queries'
-import { Link, Outlet, useLocation, useParams } from 'react-router'
+import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from 'react-router'
+import { lazy, Suspense, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { refreshObservations } from '../api/nextgen'
 import type { WeeklyForecastSide, LeagueObservations, MatchupSide, ObservedLineup, RankingsResponse } from '../api/nextgen'
 import { useDataRelease } from '../dataRelease'
 import { DataTable, type Column } from './DataTable'
 import { LeagueAttention, PlayerStatus, PlayerNotes } from './LeagueAttention'
-import { leaguePath, leagueWeekPath, matchupPath, playerPath, to, useUrlFlag, useUrlParams, useUrlState } from '../navigation'
+import { leaguePath, leagueWeekPath, matchupPath, playerPath, teamPath, useUrlFlag, useUrlState } from '../navigation'
 import { LeagueOverview } from './LeagueOverview'
+import { TeamSelect } from './TeamSelect'
+import { StickyFooter } from './StickyFooter'
 import { forecastFor, forecastBasis, leagueSummary } from '../leagueSummary'
 import { PlayerLink } from './PlayerLink'
-import { PositionOptions, QueryError } from './Controls'
+import { PositionOptions, QueryError, SelectField } from './Controls'
 import { LEAGUE_POSITION_FILTERS } from '../positions'
 import { fixed, rank } from '../format'
 import { currentWeeklyForecasts } from '../weeklyForecasts'
+
+const TeamStrength = lazy(() => import('./TeamStrength').then(m => ({ default: m.TeamStrength })))
 
 type LeaguePlayer = LeagueObservations['players'][number]
 const rosterColumns: Column<LeaguePlayer>[] = [
@@ -75,7 +80,7 @@ function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: M
     <p>{fixed(side.score)} recorded points · {fixed(forecast?.model_projection)} NextGen weekly points</p>
     {side.lineup_available ? <><h5>Starters</h5><DataTable rows={side.lineup.filter(r => r.started)} columns={columns} defaultSort="slot" rowKey={r => r.espn_id} />
       <h5>Bench & reserve</h5><DataTable rows={side.lineup.filter(r => !r.started)} columns={benchColumns} defaultSort="points" rowKey={r => r.espn_id} emptyMessage="No recorded bench or reserve entries." /></>
-      : <p>No lineup captured for this week. Current rosters are available under Rosters.</p>}
+      : <p>No lineup captured for this week. Current rosters are available under Team Strength.</p>}
   </section>
 }
 
@@ -106,11 +111,11 @@ function Matchups({ overview, rankings }: { overview?: LeagueObservations; ranki
     <div className="matchup-scoreboard">{[game.home, game.away].map(side => <section key={side.team_id}>
       <h4>{side.team_name}</h4><strong>{fixed(side.score)}</strong><p>Recorded points</p>
       <p>{fixed(forecastForSide(side.team_id)?.model_projection)} NextGen weekly points</p>
-      <Link to={to(leaguePath('rosters'), { team: side.team_id })}>View current roster →</Link>
+      <Link to={teamPath(side)}>View team strength →</Link>
     </section>)}</div>
     <QueryError query={modelQuery} label="NextGen weekly forecasts unavailable" />
     <h3>Recorded lineups</h3>
-    <p className="legend">Patron ranks use today's remaining-season forecasts. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
+    <p className="legend">Armchair Labs ranks use today's remaining-season forecasts. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
     {data.requested_week === data.current_week && !currentPlayers && <p className="notice">Current injury details are unavailable for this matchup snapshot. Review the roster alerts or refresh the league.</p>}
     <div className="league-lineups matchup-detail-lineups">{[game.home, game.away].map(side => <Lineup key={side.team_id} side={side} forecast={forecastForSide(side.team_id)} players={overview?.players} currentPlayers={currentPlayers} rankings={rankings?.report.season === data.season ? rankings : undefined} />)}</div>
     {data.requested_week === data.current_week && <p className="legend">Current roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.nextgen_team_rank)} · ${fixed(t?.forecast_points)} remaining player points` }).join(' / ')}. These roster totals include the bench.</p>}
@@ -145,18 +150,30 @@ export function LeagueWorkspace() {
     {data && <p className="legend">{data.season}, Week {data.week} · Captured {new Date(data.captured_at).toLocaleString()}{data.stale ? ' · saved snapshot is stale' : ''}</p>}
     {data && <LeagueAttention data={data} />}
     <QueryError query={query} /><QueryError query={refresh} />
-    <QueryError query={rankingQuery} label="Patron forecasts unavailable">. League results remain available.</QueryError>
-    {rankingQuery.isLoading && <p role="status">Loading Patron roster forecasts…</p>}
+    <QueryError query={rankingQuery} label="Armchair Labs forecasts unavailable">. League results remain available.</QueryError>
+    {rankingQuery.isLoading && <p role="status">Loading Armchair Labs roster forecasts…</p>}
     {data && rankingQuery.data && !rankings && <p className="notice">The forecast season does not match this league season; ranks are withheld.</p>}
-    {rankings && <p className="legend">Patron remaining-season forecasts · {rankings.report.season}, production through Week {rankings.report.through_week} · forecast through Week {Math.max(...rankings.rankings.map(r => r.end_week), rankings.report.through_week)} · published {new Date(rankings.report.published_at ?? rankings.report.generated_at).toLocaleString()}. Reference forecasts are labelled; current injury tags may be newer. Refresh league updates ESPN, not the published forecast.</p>}
+    {rankings && <p className="legend">Armchair Labs remaining-season forecasts · {rankings.report.season}, production through Week {rankings.report.through_week} · forecast through Week {Math.max(...rankings.rankings.map(r => r.end_week), rankings.report.through_week)} · published {new Date(rankings.report.published_at ?? rankings.report.generated_at).toLocaleString()}. Reference forecasts are labelled; current injury tags may be newer. Refresh league updates ESPN, not the published forecast.</p>}
     {!data && !query.isError && <p role="status">Loading league observations…</p>}
   </>
   return <section aria-label="League workspace">
-    {isMatchups ? <>
+    {(isMatchups || pathname.startsWith('/league/teams')) && data ? <>
       <Outlet />
       <details className="league-recent-activity"><summary>League snapshot & forecast context</summary>{context}</details>
+      {pathname.startsWith('/league/teams/') && <TeamNavigationFooter data={data} />}
     </> : <>{context}<Outlet /></>}
   </section>
+}
+
+function TeamNavigationFooter({ data }: { data: LeagueObservations }) {
+  const { teamId } = useParams()
+  const navigate = useNavigate()
+  const team = data.teams.find(t => String(t.team_id) === teamId)
+  if (!team) return null
+  return <StickyFooter label="Team navigation"><TeamSelect label="Switch team" teams={data.teams} value={team.team_id} onChange={id => {
+    const selected = data.teams.find(t => t.team_id === id)
+    navigate(selected ? teamPath(selected) : leaguePath('teams'))
+  }} /><a className="button" href="#page-content">Back to top ↑</a></StickyFooter>
 }
 
 /** `/league/overview` */
@@ -180,31 +197,54 @@ function usePlayerFilters() {
   const rows = data?.players.filter(r => (position === 'ALL' || r.position === position) && r.player_display_name.toLowerCase().includes(search.toLowerCase()) && (!attentionOnly || !!r.attention?.length)) ?? []
   const controls = <>
     <label><input type="checkbox" checked={attentionOnly} onChange={e => setAttentionOnly(e.target.checked)} /> Needs attention only</label><label>Find league player<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label>
-    <label>League position<select value={position} onChange={e => setPosition(e.target.value)}><PositionOptions positions={LEAGUE_POSITION_FILTERS} /></select></label>
+    <SelectField label="League position" value={position} onChange={e => setPosition(e.target.value)}><PositionOptions positions={LEAGUE_POSITION_FILTERS} /></SelectField>
   </>
   return { rows, controls }
 }
 
-/** `/league/rosters?team=<id|all>&compare=<id>`; the default team is yours. */
-export function LeagueRosters() {
+/** Teams are routes, while roster filters remain optional URL search parameters. */
+export function LeagueTeams() {
   const { data, rankings } = useLeague()
   const { rows, controls } = usePlayerFilters()
-  const [owner] = useUrlState('team', 'mine')
-  const [comparison, setComparison] = useUrlState('compare', '')
-  const [, update] = useUrlParams()
+  const { teamId, teamSlug } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const params = new URLSearchParams(location.search)
+  const legacyId = params.get('team')
+  const requestedId = teamId ?? (legacyId === 'mine' ? String(data?.my_team_id ?? '') : legacyId)
+  const team = requestedId && /^\d+$/.test(requestedId) ? data?.teams.find(t => t.team_id === Number(requestedId)) : undefined
+  useEffect(() => {
+    document.title = `${team ? `${team.team_name} · ` : teamId && data ? 'Team not found · ' : ''}Team Strength · Sweaty Plays`
+  }, [team, teamId, data])
   if (!data) return null
-  const selectedOwner = owner === 'mine' ? data.my_team_id : owner === 'all' ? null : Number(owner)
-  const roster = rows.filter(r => r.owner_team_id != null && (owner === 'all' || r.owner_team_id === selectedOwner))
-  const teams = data.teams
+  // Resolve old query links and old names by stable ID, replacing the history entry.
+  const cleanParams = new URLSearchParams(params)
+  cleanParams.delete('team'); cleanParams.delete('compare')
+  const canonicalPath = team ? teamPath(team) : leaguePath('teams')
+  const needsCanonical = team && (`${leaguePath('teams')}/${teamId}/${teamSlug}` !== canonicalPath)
+  if (needsCanonical || params.has('team') || params.has('compare')) {
+    const target = team ? canonicalPath : teamId ? location.pathname : leaguePath('teams')
+    return <Navigate replace to={{ pathname: target, search: cleanParams.toString() ? `?${cleanParams}` : '', hash: location.hash }} />
+  }
+  const roster = rows.filter(r => r.owner_team_id === team?.team_id)
+  const selectTeam = (id: number | null) => {
+    const selected = data.teams.find(t => t.team_id === id)
+    navigate(selected ? teamPath(selected) : leaguePath('teams'))
+  }
   return <>
-    <div className="analysis-controls">{controls}
-      <label>Roster<select value={owner} onChange={e => update({ team: e.target.value === 'mine' ? null : e.target.value, compare: e.target.value === comparison ? null : comparison })}><option value="mine">My team</option><option value="all">All rosters</option>{teams.map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
-      <label>Compare with<select value={comparison} onChange={e => setComparison(e.target.value)}><option value="">No comparison</option>{teams.filter(t => t.team_id !== selectedOwner).map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
+    <div className="outlook-section-head team-heading">
+      {team && <div><h3>{team.team_name}</h3><nav className="page-links" aria-label="Team breadcrumb"><Link to={leaguePath('teams')}>All teams</Link></nav></div>}
+      <div className="analysis-controls">
+      <TeamSelect teams={data.teams} value={team?.team_id} onChange={selectTeam} />
+      </div>
     </div>
-    <h3>{owner === 'all' ? 'All rosters' : teams.find(t => t.team_id === selectedOwner)?.team_name ?? 'My roster'}</h3>
-    {owner === 'mine' && data.my_team_id == null && <p>Select your team from the Roster menu.</p>}
-    <Roster rankings={rankings} rows={roster} sortParam="sort" />
-    {comparison && <><h3>{teams.find(t => t.team_id === Number(comparison))?.team_name}</h3><Roster rankings={rankings} rows={rows.filter(r => r.owner_team_id === Number(comparison))} /></>}
+    {!team && (teamId ? <p className="notice" role="alert">Team not found. Choose a team above.</p> : <p className="legend">Choose a team to view its starting lineup, scoring balance, usable depth and results.</p>)}
+    {team && <>
+    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id}>
+      <div className="analysis-controls">{controls}</div>
+      <Roster rankings={rankings} rows={roster} sortParam="sort" />
+    </TeamStrength></Suspense>
+    </>}
   </>
 }
 

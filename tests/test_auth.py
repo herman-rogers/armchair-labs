@@ -7,7 +7,7 @@ otherwise cause a confusing failure much later.
 
 from __future__ import annotations
 
-from patron.espn.auth import REQUIRED_COOKIES, _extract
+from engine.espn.auth import REQUIRED_COOKIES, _extract
 
 
 def cookie(name: str, value: str, domain: str = ".espn.com") -> dict:

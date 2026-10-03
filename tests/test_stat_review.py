@@ -6,10 +6,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from patron.artifacts import artifact_status, publish_draft, publish_provenance, verify_draft
-from patron.espn.reports import wire_lineup_improvements, wire_replacement_levels
-from patron.metrics.backtest import _overall_rows, _rank_fold
-from patron.metrics.fit import (
+from engine.artifacts import artifact_status, publish_draft, publish_provenance, verify_draft
+from engine.espn.reports import wire_lineup_improvements, wire_replacement_levels
+from engine.metrics.backtest import _overall_rows, _rank_fold
+from engine.metrics.fit import (
     FitConfig,
     ModelSpec,
     _has_required,
@@ -17,7 +17,7 @@ from patron.metrics.fit import (
     fit_ridge,
     production_config,
 )
-from patron.metrics.forecast import attach_forecast
+from engine.metrics.forecast import attach_forecast
 
 
 def test_omitting_best_actual_player_is_not_a_perfect_ranker():
@@ -115,9 +115,9 @@ def test_lineup_gain_respects_existing_starters_and_flex():
 
 
 def test_live_depth_chart_uses_recorded_artifact_date(monkeypatch):
-    from patron import pipeline
-    from patron.config.league import get_league
-    from patron.metrics.backtest import MetricReportConfig
+    from engine.board import pipeline
+    from engine.config.league import get_league
+    from engine.metrics.backtest import MetricReportConfig
 
     cutoffs = []
     monkeypatch.setattr(pipeline.nflverse, "load_depth_charts", lambda seasons: pl.DataFrame())
@@ -136,9 +136,9 @@ def test_live_depth_chart_uses_recorded_artifact_date(monkeypatch):
 def test_production_artifact_loads_without_research_fingerprint(tmp_path):
     import json
 
-    from patron.metrics.backtest import MetricReportConfig
-    from patron.metrics.fit import RidgeModel, build_fit_artifact
-    from patron.pipeline import load_fitted_models
+    from engine.board.pipeline import load_fitted_models
+    from engine.metrics.backtest import MetricReportConfig
+    from engine.metrics.fit import RidgeModel, build_fit_artifact
 
     config = MetricReportConfig.from_config()
     predictions = pl.DataFrame({"forecast_season": [2025, 2026], "outcome_complete": [True, False]})
@@ -160,7 +160,7 @@ def test_production_artifact_loads_without_research_fingerprint(tmp_path):
 
 
 def test_export_preserves_model_input_precision(tmp_path):
-    from patron.pipeline import export_board
+    from engine.board.pipeline import export_board
 
     frame = pl.DataFrame(
         {

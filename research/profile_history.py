@@ -22,11 +22,11 @@ from threadpoolctl import threadpool_limits
 from value_capture_audit import finite, model_values, rank_ids, score
 from value_capture_audit import summarize as market_summary
 
-from patron.api.college_sources import load_college
-from patron.api.profile_sources import load_profiles
-from patron.api.research_sources import accepted_version, digest
-from patron.metrics.outlook import team_name, unique
-from patron.metrics.player_profile import role_band, summarize
+from engine.api.college_sources import load_college
+from engine.api.profile_sources import load_profiles
+from engine.api.research_sources import accepted_version, digest
+from engine.metrics.outlook import team_name, unique
+from engine.metrics.player_profile import role_band, summarize
 
 ROOT = Path(__file__).resolve().parents[1]
 DESIGN = ROOT / "research/profile_history_design.md"
@@ -838,12 +838,12 @@ def main():
         ROOT / "research/value_capture_audit.py",
         ROOT / "research/artifact_inputs.py",
         ROOT / "research/data_integrity_audit.py",
-        ROOT / "src/patron/metrics/player_profile.py",
-        ROOT / "src/patron/metrics/outlook.py",
-        ROOT / "src/patron/api/profile_sources.py",
-        ROOT / "src/patron/api/college_sources.py",
-        ROOT / "src/patron/api/research_sources.py",
-        ROOT / "src/patron/data/releases.py",
+        ROOT / "src/engine/metrics/player_profile.py",
+        ROOT / "src/engine/metrics/outlook.py",
+        ROOT / "src/engine/api/profile_sources.py",
+        ROOT / "src/engine/api/college_sources.py",
+        ROOT / "src/engine/api/research_sources.py",
+        ROOT / "src/engine/data/releases.py",
     ]
     report = dict(
         generated_at=datetime.now(UTC).isoformat(),
