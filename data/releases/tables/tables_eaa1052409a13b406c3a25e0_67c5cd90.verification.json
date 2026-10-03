@@ -130,5 +130,10 @@
     ],
     "league_network": "disabled; reused captured snapshot"
   },
-  "browser_smoke": "Passed: serving_smoke.py"
+  "browser_smoke": "Passed: serving_smoke.py",
+  "unit_tests": {
+    "passed": 852,
+    "network_tests_deselected": 35
+  },
+  "repeat_refresh": "62 application recipes unchanged; catalog still matches published GCS reference"
 }
