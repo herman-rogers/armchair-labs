@@ -435,7 +435,7 @@ def package(data, source_version, version, publish=False, analysis_version=None)
         "tests/test_qb_variations_scoring.py",
         "tests/test_qb_passing_routes.py",
         "tests/test_ranking_publication.py",
-        "docs/qb_passing_variations_2026-09-24.md",
+        "docs/research/qb_passing_variations_2026-09-24.md",
     ):
         dest = root / "delivery" / name
         dest.parent.mkdir(parents=True, exist_ok=True)

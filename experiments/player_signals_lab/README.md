@@ -6,7 +6,7 @@ NextGen challengers as read-only dependencies. It has no model registration, pub
 API, CLI, frontend, or package-build integration. **Delete this directory to remove the lab.**
 
 The starting hypotheses come from the
-[NFL literature review](../../docs/nfl_player_research_literature_review_2026-09-23.md).
+[NFL literature review](../../docs/research/nfl_player_research_literature_review_2026-09-23.md).
 The scope includes retrospective **preseason season-level** forecasting and a separate
 historical weekly QB role experiment. Existing rankings and research work remain separate.
 

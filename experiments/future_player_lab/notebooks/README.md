@@ -2,7 +2,7 @@
 
 Planned local GPU benchmarking, broader model searches, and GCS/Parquet storage with
 a local cache are described in the
-[compute and shared data plan](../../../docs/research_compute_and_shared_data_plan_2026-10-02.md).
+[compute and shared data plan](../../../docs/plans/research_compute_and_shared_data_plan_2026-10-02.md).
 Marimo and notebooks remain local on each machine; deployment and authentication
 setup are deferred.
 
@@ -79,7 +79,7 @@ Partial/uncertain absences are features, not proportional discounts. Training la
 remain unchanged, and raw/adjusted predictions and metrics are shown separately.
 The archive coverage panel is available before training. New rules and inputs take
 effect on the next submitted training run; opening or updating the notebook does
-not retrain it. See the [injury archive audit](../../../docs/injury_archive_2026-09-25.md)
+not retrain it. See the [injury archive audit](../../../docs/history/injury_archive_2026-09-25.md)
 for coverage gaps, timestamp recovery, chronology rules, and validation.
 
 The RB notebook also evaluates **predictive distributions with CRPS**, alongside

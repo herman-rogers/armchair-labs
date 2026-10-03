@@ -1,6 +1,6 @@
 # Individual statistics and combinations, September 23, 2026
 
-This audit implements the evidence portion of `docs/nextgen_system_design_2026-09-23.md`.
+This audit implements the evidence portion of `docs/architecture/nextgen_system_design_2026-09-23.md`.
 It does not publish a new default forecast or replace the dashboard policy. The
 referenced profile study is an archived benchmark requiring revalidation, not
 proof that its exact gains survive the current gold contract.

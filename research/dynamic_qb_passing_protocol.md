@@ -3,10 +3,10 @@
 Status: design for the next experiment, September 24, 2026. No results or serving
 approval. The motivating historical cases and booster results have already been
 inspected; reusing those years is retrospective research, not independent confirmation.
-See [the audit and literature review](../docs/qb_passing_forecasts_review_2026-09-24.md).
+See [the audit and literature review](../docs/research/qb_passing_forecasts_review_2026-09-24.md).
 
 Implementation follow-up: [the fixed run protocol](qb_passing_run_protocol.md) and
-[QB passing system report](../docs/qb_passing_system_2026-09-24.md) now cover the
+[QB passing system report](../docs/history/qb_passing_system_2026-09-24.md) now cover the
 generic history model, dated constraints, dashboard reference forecasts and
 prospective scoring. Boosting remains shadow research. The richer starting-role
 and medical-state ambitions below are not validated by workload proxy labels.

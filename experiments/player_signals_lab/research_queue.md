@@ -1,6 +1,6 @@
 # Research-path coverage after the follow-up experiments
 
-Every recommendation from the [source review](../../docs/nfl_player_research_literature_review_2026-09-23.md)
+Every recommendation from the [source review](../../docs/research/nfl_player_research_literature_review_2026-09-23.md)
 and original lab queue now has an executed test or a documented data boundary, with the
 feasible narrower test completed. This closes the declared experiment menu; it does not
 claim exhaustive science or label missing-data questions solved. All results are exploratory.

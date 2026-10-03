@@ -272,7 +272,7 @@ def package(data, source_version, version, publish=False, analysis_version=None)
         "web/src/api/qbPassing.ts",
         "web/src/components/NextGenView.tsx",
         "web/src/components/PlayerProfile.tsx",
-        "docs/qb_passing_system_2026-09-24.md",
+        "docs/history/qb_passing_system_2026-09-24.md",
         "tests/test_qb_passing.py",
         "tests/test_qb_passing_routes.py",
         "web/tests/qb_passing_smoke.py",

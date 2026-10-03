@@ -478,7 +478,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
     parser.add_argument(
-        "--output", type=Path, default=ROOT / "docs/qb_boosting_capacity_2026-09-24.md"
+        "--output", type=Path, default=ROOT / "docs/research/qb_boosting_capacity_2026-09-24.md"
     )
     args = parser.parse_args()
     render(args.run, args.output)
