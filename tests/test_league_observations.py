@@ -54,8 +54,18 @@ def test_historical_zero_and_bench_preserved_and_future_unknown():
     future = weekly_matchups(snap, 4)["matchups"][0]
     assert future["status"] == "scheduled"
     assert future["home"]["score"] is None
-    assert future["home"]["espn_projection"] is None
+    assert "espn_projection" not in future["home"]
     assert future["home"]["lineup"] == []
+
+
+def test_observation_api_exposes_actuals_without_provider_predictions():
+    game = weekly_matchups(snapshot(), 2)["matchups"][0]
+    for side in (game["home"], game["away"]):
+        assert "espn_projection" not in side
+        for player in side["lineup"]:
+            assert "projected_points" not in player
+    assert game["home"]["lineup"][0]["points"] == 0.0
+    assert game["home"]["lineup"][1]["points"] == 25.0
 
 
 def test_routes_use_observations_only_and_refresh_is_explicit():

@@ -17,7 +17,14 @@ from pathlib import Path
 
 from patron.data.catalog import publish_catalog
 from patron.data.nextgen import load_analysis
-from patron.data.releases import atomic_json, digest, identifier, load_gold, load_manifest
+from patron.data.releases import (
+    atomic_json,
+    digest,
+    identifier,
+    load_gold,
+    load_manifest,
+    reference,
+)
 from patron.data.weekly import capture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,7 +144,27 @@ def stages(version: str, history: str, college: str, report: Path, evidence: str
             ),
             [DATA / "research" / (version + "_delivery") / "manifest.json"],
         ),
+        (
+            "weekly_model",
+            command(
+                "build_weekly_points.py",
+                "--version",
+                version + "_weekly",
+                "--analysis",
+                version + "_delivery",
+            ),
+            [DATA / "research" / (version + "_weekly") / "manifest.json"],
+        ),
     ]
+
+
+def activate_weekly(version, plan):
+    if "weekly_model" not in plan["completed"]:
+        return
+    for path, expected in plan["completed"]["weekly_model"].items():
+        if digest(Path(path)) != expected:
+            raise ValueError("Completed weekly model changed")
+    atomic_json(DATA / "weekly/current.json", reference(DATA / "research" / (version + "_weekly")))
 
 
 def run(args):
@@ -178,6 +205,7 @@ def run(args):
                 plan = json.loads(plan_path.read_text())
                 if plan["catalog_sha256"] != original_catalog:
                     if catalog["products"]["analysis"]["version"] == version + "_delivery":
+                        activate_weekly(version, plan)
                         state.update(status="current", through_week=published["through_week"])
                         atomic_json(status_path, state)
                         return state
@@ -255,6 +283,7 @@ def run(args):
             products.update(analysis=version + "_delivery")
             products[f"outlook_{captured['season']}"] = version + "_outlook"
             publish_catalog(DATA, version, products, expected_catalog_sha256=plan["catalog_sha256"])
+            activate_weekly(version, plan)
             state.update(status="published", completed_at=datetime.now(UTC).isoformat())
             atomic_json(status_path, state)
             return state

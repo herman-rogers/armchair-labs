@@ -38,7 +38,18 @@ def team_code(value):
     return {"LAR": "LA", "STL": "LA", "SD": "LAC", "OAK": "LV"}.get(value, value)
 
 
-def make_panel(features, weeks, schedule, identities, college, links, *, season, through_week):
+def make_panel(
+    features,
+    weeks,
+    schedule,
+    identities,
+    college,
+    links,
+    *,
+    season,
+    through_week,
+    horizons=HORIZONS,
+):
     """Outcome-only suffixes cannot change candidates, teams, or predictor values."""
     by_player = defaultdict(list)
     by_season = defaultdict(list)
@@ -189,16 +200,17 @@ def make_panel(features, weeks, schedule, identities, college, links, *, season,
             ):
                 row["e_college_" + c] = latest.get(c)
             row["e_college_games"] = latest.get("observed_stat_games")
-            for horizon in HORIZONS:
+            for horizon in horizons:
                 last_week = 18 if year >= 2021 else 17
-                end = min(through_week + 4, last_week) if horizon == "next4" else last_week
+                width = {"next_week": 1, "next4": 4}.get(horizon)
+                end = min(through_week + width, last_week) if width else last_week
                 future = [
                     r for r in history if r["season"] == year and through_week < r["week"] <= end
                 ]
                 count = (
                     sum(through_week < w <= end for w in schedule_weeks)
                     if schedule_weeks
-                    else (4 if horizon == "next4" else max(season_length(year) - elapsed, 0))
+                    else (width if width else max(season_length(year) - elapsed, 0))
                 )
                 panel.append(
                     dict(

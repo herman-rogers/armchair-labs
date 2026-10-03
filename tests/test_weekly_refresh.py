@@ -16,6 +16,29 @@ def observations(week):
     return dict(season=2026, through_week=week, saved_at="2026-10-02T12:00:00+00:00")
 
 
+def test_weekly_product_stages_after_delivery_without_early_activation():
+    plan = refresh.stages("run", "history", "college", Path("capture.json"), "evidence")
+    assert [s[0] for s in plan][-2:] == ["delivery", "weekly_model"]
+    command = plan[-1][1]
+    assert command[command.index("--analysis") + 1] == "run_delivery"
+    assert "--publish" not in command
+
+
+def test_weekly_activation_checks_completed_manifest(tmp_path, monkeypatch):
+    from patron.data.releases import digest, reference
+
+    monkeypatch.setattr(refresh, "DATA", tmp_path)
+    root = tmp_path / "research/run_weekly"
+    atomic_json(root / "manifest.json", {"version": "run_weekly"})
+    manifest = root / "manifest.json"
+    plan = {"completed": {"weekly_model": {str(manifest): digest(manifest)}}}
+    refresh.activate_weekly("run", plan)
+    assert json.loads((tmp_path / "weekly/current.json").read_text()) == reference(root)
+    atomic_json(manifest, {"version": "changed"})
+    with pytest.raises(ValueError, match="weekly model changed"):
+        refresh.activate_weekly("run", plan)
+
+
 def test_full_season_cutoff_requires_consecutive_final_games_and_team_stats():
     schedule = pl.DataFrame(
         [

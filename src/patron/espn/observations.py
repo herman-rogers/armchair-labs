@@ -1,12 +1,24 @@
 """League schedule and actual lineups, independent of every player-value model."""
 
-from dataclasses import asdict
-
 from patron.espn.sync import LeagueSnapshot, LineupEntry
 
 
 def lineup_rows(entries: list[LineupEntry]) -> list[dict]:
-    return [{**asdict(entry), "started": entry.started} for entry in entries]
+    # This API supplies league facts only. Provider projections stay in the raw
+    # snapshot for other consumers, never in the overview's observation contract.
+    return [
+        dict(
+            espn_id=entry.espn_id,
+            player_display_name=entry.player_display_name,
+            position=entry.position,
+            slot=entry.slot,
+            points=entry.points,
+            pro_opponent=entry.pro_opponent,
+            on_bye=entry.on_bye,
+            started=entry.started,
+        )
+        for entry in entries
+    ]
 
 
 def weekly_matchups(snapshot: LeagueSnapshot, week: int) -> dict:
@@ -36,9 +48,6 @@ def weekly_matchups(snapshot: LeagueSnapshot, week: int) -> dict:
             if record
             else scheduled.score
             if scheduled and scheduled.played
-            else None,
-            "espn_projection": (record.home_projected if home else record.away_projected)
-            if record
             else None,
             "lineup": lineup_rows(record.lineup_for(team_id)) if record else [],
             "lineup_available": bool(record and record.lineup_for(team_id)),
