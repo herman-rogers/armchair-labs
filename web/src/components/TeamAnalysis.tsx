@@ -1,6 +1,6 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { teamAnalysisCatalogQuery, teamAnalysisQuery } from '../api/queries'
+import { teamAnalysisQuery } from '../api/queries'
 import type { TeamAnalysisData, TeamPair, TeamPlayer, TeamRisk } from '../api/teamAnalysis'
 import { useDataRelease } from '../dataRelease'
 import { useUrlParams } from '../navigation'
@@ -96,13 +96,6 @@ function CorrelationMatrix({ data, selected }: { data: TeamAnalysisData; selecte
 
 export function TeamAnalysis() {
   const { token } = useDataRelease()
-  const tableCatalog = useQuery(teamAnalysisCatalogQuery(token))
-  const { refetch: refreshTableCatalog } = tableCatalog
-  useEffect(() => {
-    const refresh = () => { void refreshTableCatalog() }
-    window.addEventListener('table-catalog-changed', refresh)
-    return () => window.removeEventListener('table-catalog-changed', refresh)
-  }, [refreshTableCatalog])
   const [params, update] = useUrlParams()
   const team = params.get('team') ?? 'LA'
   const start = params.get('start') ?? '2021'
@@ -113,12 +106,11 @@ export function TeamAnalysis() {
   const request = new URLSearchParams({ team, start, qb, sample, basis })
   if (end !== 'latest') request.set('end', end)
   if (params.has('players')) request.set('players', params.get('players') === 'none' ? '' : params.get('players')!)
-  const tableVersion = tableCatalog.isError ? undefined : tableCatalog.data?.table_version
-  const query = useQuery(teamAnalysisQuery(request, token, tableVersion))
-  const data = !tableCatalog.isError && !query.isError ? query.data : undefined
+  const query = useQuery(teamAnalysisQuery(request, token))
+  const data = !query.isError ? query.data : undefined
   const selected = params.has('players') ? params.get('players') === 'none' ? [] : params.get('players')!.split(',') : data?.risk.player_ids ?? []
-  const year = data?.report.season ?? tableCatalog.data?.season ?? new Date().getFullYear()
-  const earliest = tableCatalog.data?.earliest_season ?? 2013
+  const year = data?.report.season ?? new Date().getFullYear()
+  const earliest = data?.report.earliest_season ?? 2013
   const seasons = Array.from({ length: Math.max(1, year - earliest + 1) }, (_, i) => earliest + i).reverse()
   const changeTeam = (value: string) => update({ team: value, players: null, qb: null })
   const toggle = (player: TeamPlayer) => {
@@ -135,9 +127,8 @@ export function TeamAnalysis() {
       <label>Participation<select aria-label="Participation" value={sample} onChange={e => update({ sample: e.target.value })}><option value="starter">Starter roles · ≥50% snaps</option><option value="active">All offensive appearances</option></select></label>
       <label>Variance basis<select aria-label="Variance basis" value={basis} onChange={e => update({ basis: e.target.value })}><option value="season">Within season</option><option value="raw">Raw points</option></select></label>
     </div>
-    <QueryError query={tableCatalog} label="Team observations unavailable" />
     <QueryError query={query} label="Team analysis unavailable" />
-    {!tableCatalog.isError && query.isPending && <div className="ta-loading" role="status">Loading team relationships…</div>}
+    {query.isPending && <div className="ta-loading" role="status">Loading team relationships…</div>}
     {data && <>
       <div className="ta-sample-line"><span>{data.teams.find(t => t.id === team)?.name}</span><span>{data.start}–{data.end}</span><span>{data.team_games} games</span><span>{data.players.length} players</span><span>REG · league scoring</span><span className="ta-badge">Historical</span></div>
       <div className="ta-top-grid">

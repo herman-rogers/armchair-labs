@@ -191,6 +191,41 @@ def test_pinned_sessions_native_cache_and_corruption(setup):
         pass
 
 
+def test_warm_native_queries_skip_manifest_loading_and_hashing(setup, monkeypatch):
+    from engine.tables import query
+
+    data, registry, _ = setup
+    refresh(data, registry_path=registry)
+    materialize(data)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Warm query repeated snapshot setup")
+
+    monkeypatch.setattr(query, "load_table", unexpected)
+    monkeypatch.setattr(query, "sha256", unexpected)
+    for _ in range(2):
+        with connect(data) as db:
+            assert db.sql("SELECT total FROM analytics.summary").fetchone() == (10.0,)
+
+
+def test_changed_native_snapshot_is_rebuilt_before_reuse(setup):
+    from engine.data.shared import sha256
+
+    data, registry, _ = setup
+    refresh(data, registry_path=registry)
+    path = materialize(data)
+    # A valid DuckDB file with altered data must not bypass the loaded-snapshot
+    # cache simply because the publication pointer has not changed.
+    import duckdb
+
+    with duckdb.connect(str(path)) as db:
+        db.execute("UPDATE analytics.summary SET total = 999")
+    altered = sha256(path)
+    with connect(data) as db:
+        assert db.sql("SELECT total FROM analytics.summary").fetchone() == (10.0,)
+    assert sha256(path) != altered
+
+
 def test_registry_rejects_cycles_missing_dependencies_and_unsafe_names(setup):
     _, registry, config = setup
     for mutation in ("cycle", "unknown", "name"):

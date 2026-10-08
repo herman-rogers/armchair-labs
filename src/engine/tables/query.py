@@ -10,8 +10,8 @@ from pathlib import Path
 
 import duckdb
 
-from engine.data.releases import digest
-from engine.data.shared import inside, json_bytes, lock, write_new
+from engine.data.shared import inside, json_bytes, lock, sha256, write_new
+from engine.data.verification import observe, verified
 from engine.tables.storage import content_hash, current, file_spec, load_table
 
 
@@ -48,10 +48,6 @@ def connect(
         data_dir = get_settings().data_dir
     data_dir = data_dir.resolve()
     catalog = current(data_dir) if catalog is None else catalog
-    paths = {}
-    for name, ref in catalog["tables"].items():
-        root, _ = load_table(data_dir, name, ref)
-        paths[name] = root / "data.parquet"
     config: dict[str, str | bool | int | float | list[str]] = {
         "memory_limit": memory_limit,
         "threads": threads,
@@ -61,20 +57,40 @@ def connect(
         path = materialize(data_dir, catalog, config=config)
         connection = duckdb.connect(str(path), read_only=True, config=config)
     else:
+        paths = {
+            name: load_table(data_dir, name, ref)[0] / "data.parquet"
+            for name, ref in catalog["tables"].items()
+        }
         connection = duckdb.connect(config=config)
         attach_tables(connection, paths)
     try:
         yield connection
-        for name, ref in catalog["tables"].items():
-            load_table(data_dir, name, ref)
+        if native:
+            # Reuse the prepared snapshot; only changed dependencies need loading.
+            materialize(data_dir, catalog, config=config)
+        else:
+            for name, ref in catalog["tables"].items():
+                load_table(data_dir, name, ref)
     finally:
         connection.close()
 
 
 def materialize(data_dir: Path, catalog: dict | None = None, *, config=None) -> Path:
-    """Build a closed native DB under a unique catalog+engine-version cache key."""
+    """Load/validate each native snapshot once, reusing it until files change.
+
+    Warm queries check file revisions, not checksums or every table manifest.
+    The publication pointer selects a new cache key; failed loads are not cached.
+    """
+    data_dir = data_dir.resolve()
     catalog = current(data_dir) if catalog is None else catalog
     key = content_hash({"catalog": catalog, "duckdb": duckdb.__version__})
+    return verified(
+        ("native-query-snapshot", str(data_dir), key),
+        lambda: _materialize(data_dir, catalog, key, config=config),
+    )
+
+
+def _materialize(data_dir: Path, catalog: dict, key: str, *, config=None) -> Path:
     cache = data_dir / "cache/tables"
     target = cache / f"{key}.duckdb"
     sidecar = target.with_suffix(".json")
@@ -85,7 +101,9 @@ def materialize(data_dir: Path, catalog: dict | None = None, *, config=None) -> 
         }
         if target.exists() and sidecar.exists():
             spec = json.loads(sidecar.read_text())
-            if target.stat().st_size == spec["size"] and digest(target) == spec["sha256"]:
+            if target.stat().st_size == spec["size"] and sha256(target) == spec["sha256"]:
+                observe(target)
+                observe(sidecar)
                 return target
         fd, filename = tempfile.mkstemp(suffix=".duckdb", dir=cache)
         os.close(fd)
@@ -120,4 +138,6 @@ def materialize(data_dir: Path, catalog: dict | None = None, *, config=None) -> 
         finally:
             temporary.unlink(missing_ok=True)
             inside(cache, temporary.name + ".wal").unlink(missing_ok=True)
+    observe(target)
+    observe(sidecar)
     return target

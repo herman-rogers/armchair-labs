@@ -1,4 +1,4 @@
-import { Link, Navigate, useLocation, useParams } from 'react-router'
+import { Navigate, useLocation, useParams } from 'react-router'
 import { isProfileSection, collegePath, playerPath, type ProfileSection } from '../navigation'
 import { PlayerProfile } from './PlayerProfile'
 
@@ -15,7 +15,6 @@ export function PlayerPage() {
   // Unknown sections fall back to the top of the profile, keeping view params.
   if (section && !isProfileSection(section)) return <Navigate replace to={{ pathname: profilePath(), search }} />
   return <main className="player-page">
-    <nav aria-label="Breadcrumb"><Link to="/">← Dashboard</Link></nav>
     <PlayerProfile key={playerId ?? collegeId} playerId={playerId} collegeId={collegeId} section={isProfileSection(section) ? section : undefined} />
   </main>
 }

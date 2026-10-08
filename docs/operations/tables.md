@@ -334,9 +334,19 @@ remains in `data/research/rams_correlations_20261003/originals/methodology.json`
 
 Team analysis queries `team_player_games` with parameterized team/year filters,
 then applies its existing QB/participation and complete-case lineup statistics.
-Its catalog endpoint and browser cache pin the exact table version. Missing,
+Its response includes the exact table version and observation coverage. The browser
+requests analysis directly and polls it every minute, without a catalog round trip.
+The catalog endpoint and optional `table_version` parameter remain available to
+clients that explicitly pin a version. Missing,
 corrupt or source-mismatched tables fail closed; superseded table tokens return
 409. Query-only replicas need no source archives or application catalog.
+
+The API preloads the current native database and team coverage at startup. Native
+snapshot setup and coverage validation are cached per catalog; subsequent queries
+use lightweight file revision checks rather than reloading all manifests, hashing
+the database, or rescanning coverage. A changed publication selects a new snapshot;
+changed files invalidate the cached verification. New snapshots load on first use
+if published while the server is running. Failed validation is never cached.
 
 `nfl_schedule`/`current_schedule` are forecast-safe schedules; the separate
 `*_observed_schedule` tables retain realized QB identities and scores. Keep

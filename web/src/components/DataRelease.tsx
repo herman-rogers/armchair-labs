@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { dataCatalogQuery } from '../api/queries'
 import { ReleaseContext, useDataRelease } from '../dataRelease'
 
-export function DataReleaseProvider({ children }: { children: ReactNode }) {
+export function DataReleaseProvider({ children, fallback = message => message }: { children: ReactNode; fallback?: (message: ReactNode) => ReactNode }) {
   const query = useQuery(dataCatalogQuery())
   const { refetch } = query
   useEffect(() => {
@@ -11,8 +11,8 @@ export function DataReleaseProvider({ children }: { children: ReactNode }) {
     window.addEventListener('data-catalog-changed', refresh)
     return () => window.removeEventListener('data-catalog-changed', refresh)
   }, [refetch])
-  if (query.isError) return <p className="notice" role="alert">Current data catalog unavailable: {query.error.message}</p>
-  if (!query.data) return <p role="status">Checking the current data release…</p>
+  if (query.isError) return fallback(<p className="notice" role="alert">Current data catalog unavailable: {query.error.message}</p>)
+  if (!query.data) return fallback(<p role="status">Checking the current data release…</p>)
   const catalog = query.data
   const token = catalog.available ? `${catalog.table_release.version}@${catalog.published_at}` : undefined
   return <ReleaseContext.Provider value={{ token, catalog }}>{children}</ReleaseContext.Provider>

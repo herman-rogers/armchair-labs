@@ -4,8 +4,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from engine.data.releases import current_catalog
+from engine.data.verification import verified
 from engine.tables.query import connect
-from engine.tables.storage import current, load_table
+from engine.tables.storage import content_hash, current, load_table
 
 TABLE = "team_player_games"
 REQUIRED_COLUMNS = {
@@ -39,6 +40,44 @@ def check_source(data_dir: Path, manifest: dict) -> None:
         )
 
 
+def coverage_report(data_dir: Path, catalog: dict, ref: dict) -> dict:
+    """Validate coverage once per loaded snapshot, including its file dependencies."""
+
+    def load():
+        _, manifest = load_table(data_dir, TABLE, ref)
+        cutoff = manifest["observation_cutoff"]
+        with connect(data_dir, catalog=catalog) as db:
+            earliest, latest, latest_week = db.execute(
+                "SELECT min(season), max(season), "
+                "max(week) FILTER (WHERE season = ?) FROM analytics.team_player_games",
+                [cutoff["season"]],
+            ).fetchone()
+            if (
+                earliest is None
+                or latest > cutoff["season"]
+                or (latest_week is not None and latest_week > cutoff["through_week"])
+            ):
+                raise ValueError("Team observations disagree with their published cutoff")
+            report = dict(
+                table="analytics.team_player_games",
+                table_version=ref["sha256"],
+                version=manifest["version"],
+                source_version=(manifest.get("source_release", manifest.get("gold")) or {}).get(
+                    "version"
+                ),
+                built_at=manifest["built_at"],
+                season=cutoff["season"],
+                through_week=cutoff["through_week"],
+                earliest_season=earliest,
+                scoring="League points",
+                evidence="historical",
+                season_type="REG",
+            )
+        return report
+
+    return verified(("team-coverage", str(data_dir.resolve()), content_hash(catalog)), load)
+
+
 @contextmanager
 def team_session(data_dir: Path, expected_version: str | None = None):
     catalog = current(data_dir)
@@ -51,34 +90,8 @@ def team_session(data_dir: Path, expected_version: str | None = None):
     if not manifest["columns"].keys() >= REQUIRED_COLUMNS:
         raise ValueError("The team_player_games table is missing required analysis columns")
     check_source(data_dir, manifest)
-    cutoff = manifest["observation_cutoff"]
+    report = coverage_report(data_dir, catalog, ref)
     with connect(data_dir, catalog=catalog) as db:
-        earliest, latest, latest_week = db.execute(
-            "SELECT min(season), max(season), "
-            "max(week) FILTER (WHERE season = ?) FROM analytics.team_player_games",
-            [cutoff["season"]],
-        ).fetchone()
-        if (
-            earliest is None
-            or latest > cutoff["season"]
-            or (latest_week is not None and latest_week > cutoff["through_week"])
-        ):
-            raise ValueError("Team observations disagree with their published cutoff")
-        report = dict(
-            table="analytics.team_player_games",
-            table_version=ref["sha256"],
-            version=manifest["version"],
-            source_version=(manifest.get("source_release", manifest.get("gold")) or {}).get(
-                "version"
-            ),
-            built_at=manifest["built_at"],
-            season=cutoff["season"],
-            through_week=cutoff["through_week"],
-            earliest_season=earliest,
-            scoring="League points",
-            evidence="historical",
-            season_type="REG",
-        )
         yield db, report
     if current(data_dir)["tables"].get(TABLE) != ref:
         raise TableVersionChanged("Team observations changed during the request; refresh and retry")

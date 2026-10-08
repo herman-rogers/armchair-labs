@@ -8,7 +8,7 @@ import type { WeeklyForecastSide, LeagueObservations, MatchupSide, ObservedLineu
 import { useDataRelease } from '../dataRelease'
 import { DataTable, type Column } from './DataTable'
 import { LeagueAttention, PlayerStatus, PlayerNotes } from './LeagueAttention'
-import { leaguePath, leagueWeekPath, matchupPath, playerPath, teamPath, useUrlFlag, useUrlState } from '../navigation'
+import { leaguePath, matchupPath, playerPath, teamPath, useUrlFlag, useUrlState } from '../navigation'
 import { LeagueOverview } from './LeagueOverview'
 import { TeamSelect } from './TeamSelect'
 import { StickyFooter } from './StickyFooter'
@@ -91,9 +91,8 @@ function Matchups({ overview, rankings }: { overview?: LeagueObservations; ranki
   const validPath = /^[1-9]\d*$/.test(matchupWeek ?? '') && Number(matchupWeek) <= 25 && /^\d+$/.test(homeId ?? '') && /^\d+$/.test(awayId ?? '')
   const week = validPath ? Number(matchupWeek) : null
   const query = useQuery({ ...matchupsQuery(week, token), enabled: validPath })
-  const schedulePath = validPath ? leagueWeekPath(week!) : leaguePath('overview')
-  if (!validPath) return <section className="notice"><h3>Matchup not found</h3><Link to={leaguePath('overview')}>Back to league overview</Link></section>
-  if (query.isError) return <section className="notice" role="alert"><h3>Matchups unavailable</h3><p>{query.error.message}</p><Link to={schedulePath}>Back to league overview</Link></section>
+  if (!validPath) return <section className="notice"><h3>Matchup not found</h3></section>
+  if (query.isError) return <section className="notice" role="alert"><h3>Matchups unavailable</h3><p>{query.error.message}</p></section>
   if (!query.data) return <p role="status">Loading matchup…</p>
   const data = query.data
   const model = overview ? currentWeeklyForecasts(overview, modelQuery.data, data) : undefined
@@ -103,9 +102,8 @@ function Matchups({ overview, rankings }: { overview?: LeagueObservations; ranki
   const gamePath = (game: typeof data.matchups[number]) => matchupPath(data.requested_week, game.home.team_id, game.away.team_id)
   const teamForecasts = overview ? leagueSummary(overview, rankings) : []
   const currentPlayers = data.requested_week === data.current_week && overview?.week === data.current_week && overview.captured_at === data.captured_at ? overview.players : undefined
-  if (!game || data.requested_week !== week) return <section className="notice"><h3>Matchup not found</h3><p>These teams have no captured matchup for Week {matchupWeek}.</p><Link to={schedulePath}>Back to the weekly schedule</Link></section>
+  if (!game || data.requested_week !== week) return <section className="notice"><h3>Matchup not found</h3><p>These teams have no captured matchup for Week {matchupWeek}.</p></section>
   return <section aria-label="Matchup detail">
-    <nav className="page-links" aria-label="Matchup breadcrumb"><Link to={schedulePath}>← Week {data.requested_week} matchups</Link><Link to={leaguePath('overview')}>Current league overview</Link></nav>
     <div className="section-heading"><div><span className="eyebrow">{data.season} · Week {data.requested_week} · {game.status}</span>
       <h3>{game.home.team_name} vs {game.away.team_name}</h3></div>{game.involves_me && <span className="badge mine">Your matchup</span>}</div>
     <div className="matchup-scoreboard">{[game.home, game.away].map(side => <section key={side.team_id}>
@@ -121,7 +119,6 @@ function Matchups({ overview, rankings }: { overview?: LeagueObservations; ranki
     {data.requested_week === data.current_week && <p className="legend">Current roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.nextgen_team_rank)} · ${fixed(t?.forecast_points)} remaining player points` }).join(' / ')}. These roster totals include the bench.</p>}
     <nav className="page-links" aria-label="Other matchups">
       {gameIndex > 0 && <Link to={gamePath(data.matchups[gameIndex - 1])}>← Previous matchup</Link>}
-      <Link to={schedulePath}>All Week {data.requested_week} matchups</Link>
       {gameIndex < data.matchups.length - 1 && <Link to={gamePath(data.matchups[gameIndex + 1])}>Next matchup →</Link>}
     </nav>
   </section>
@@ -233,7 +230,7 @@ export function LeagueTeams() {
   }
   return <>
     <div className="outlook-section-head team-heading">
-      {team && <div><h3>{team.team_name}</h3><nav className="page-links" aria-label="Team breadcrumb"><Link to={leaguePath('teams')}>All teams</Link></nav></div>}
+      {team && <div><h3>{team.team_name}</h3></div>}
       <div className="analysis-controls">
       <TeamSelect teams={data.teams} value={team?.team_id} onChange={selectTeam} />
       </div>

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import duckdb
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -47,14 +48,23 @@ logger = logging.getLogger(__name__)
 async def lifespan(app):
     def warm():
         from engine.data.serving import generation, validate_sources
+        from engine.tables.query import materialize
+        from engine.tables.storage import current
+        from engine.tables.team_analysis import team_session
 
         data = get_settings().data_dir
+        catalog = current(data)
+        if catalog["tables"]:
+            materialize(data, catalog)
+        if "team_player_games" in catalog["tables"]:
+            with team_session(data):
+                pass
         if generation(data) is not None:
             validate_sources(data, "profile-directory")
 
     try:
         await run_in_threadpool(warm)
-    except (OSError, ValueError, KeyError, TypeError, HTTPException):
+    except (OSError, ValueError, KeyError, TypeError, HTTPException, duckdb.Error):
         logger.exception("Published release unavailable at startup; API will fail closed")
     yield
 

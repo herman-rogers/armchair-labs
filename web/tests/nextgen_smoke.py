@@ -95,7 +95,7 @@ def main():
         assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
         page.screenshot(path="/tmp/nextgen-profile-mobile.png", full_page=True)
         page.set_viewport_size({"width": 1440, "height": 1000})
-        page.get_by_role("link", name="← Dashboard", exact=True).click()
+        page.get_by_role("link", name="Analysis", exact=True).click()
         expect(page).to_have_url(re.compile(r"/intelligence/rankings$"))
         page.get_by_label("Find ranked player", exact=True).fill("Michael Wilson")
         page.locator("table").get_by_role("link", name="Michael Wilson", exact=True).first.click()
@@ -142,7 +142,7 @@ def main():
         assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
         page.screenshot(path="/tmp/similar-careers-mobile.png", full_page=True)
         page.set_viewport_size({"width": 1440, "height": 1000})
-        page.get_by_role("link", name="← Dashboard", exact=True).click()
+        page.get_by_role("link", name="Analysis", exact=True).click()
         tabs.get_by_role("link", name="Rookies", exact=True).click()
         expect(page).to_have_url(re.compile(r"/intelligence/rookies$"))
         page.get_by_role("button", name="Clear filters", exact=True).click()
@@ -164,7 +164,7 @@ def main():
         page.screenshot(path="/tmp/league-restored-mobile.png", full_page=True)
         page.set_viewport_size({"width": 1440, "height": 1000})
         league_tabs = page.get_by_role("navigation", name="League views")
-        for label, path in [("League overview", "overview"), ("Rosters", "rosters"), ("Free agents", "free-agents"),
+        for label, path in [("Overview", "overview"), ("Rosters", "rosters"), ("Free agents", "free-agents"),
                             ("Transactions", "transactions"), ("Draft recap", "draft")]:
             league_tabs.get_by_role("link", name=label, exact=True).click()
             expect(page).to_have_url(re.compile(rf"/league/{path}$"))

@@ -138,10 +138,11 @@ quarterback, participation, variance basis and selected player IDs live in the U
 The default quarterback is the most-used starter in the latest selected season.
 
 The endpoint reads the formal `analytics.team_player_games` table through DuckDB,
-with coverage from 2013. `/api/nextgen/team-analysis/catalog` supplies its verified
-table token and observation cutoff. The page polls this metadata every minute and
-pins requests/cache entries to that token; a table-only publication triggers a
-catalog refresh and fresh results. Missing, corrupt, or gold-mismatched tables
+with coverage from 2013. Each analysis response includes its table version and
+observation cutoff; the page needs no preliminary catalog request. Results are
+fresh for 30 seconds and refetched every minute, including table-only publications.
+The API loads and validates each database snapshot and its coverage once, then
+reuses that setup while file revisions remain unchanged. Missing, corrupt, or source-mismatched tables
 produce an unavailable state rather than a fallback. See the
 [table guide](../docs/operations/tables.md) for refresh and SQL examples.
 

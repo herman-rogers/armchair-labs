@@ -4,7 +4,7 @@ import argparse
 import re
 from copy import deepcopy
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -19,7 +19,6 @@ def check_chart_edge_cases(browser, base_url, payload):
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('**/api/nextgen/team-analysis?*', lambda route: route.fulfill(json=data))
-    page.route('**/api/nextgen/team-analysis/catalog', lambda route: route.fulfill(json=data['report']))
     page.goto(base_url + '/intelligence/teams')
     bars = page.locator('.ta-variance .recharts-bar-rectangle path')
     expect(bars).to_have_count(3)
@@ -60,6 +59,7 @@ def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="chrome", headless=True)
         page = browser.new_page(viewport={"width": 1512, "height": 1100})
+        page.clock.install()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
 
@@ -71,6 +71,9 @@ def main():
         catalog = catalog_response.json()
         assert catalog["table"] == "analytics.team_player_games"
         assert catalog["earliest_season"] == 2013
+        catalog_requests = []
+        page.on("request", lambda request: catalog_requests.append(request.url)
+                if "/team-analysis/catalog" in request.url else None)
         page.goto(args.url + "/intelligence/teams")
         settled()
         pinned = page.request.get(
@@ -160,37 +163,33 @@ def main():
         # Simulate a table-only publication while the app's gold token stays fixed.
         # No real data or pointers are changed by this browser cache check.
         replacement = "browser-test-new-table-version"
-        requested_versions = []
-        page.route(
-            "**/api/nextgen/team-analysis/catalog",
-            lambda route: route.fulfill(json={**catalog, "table_version": replacement}),
-        )
+        requests = []
+        published_week = catalog["through_week"] + 1
 
         def changed_table(route):
-            url = urlparse(route.request.url)
-            params = parse_qs(url.query, keep_blank_values=True)
-            requested_versions.append(params.get("table_version", [None])[0])
-            if requested_versions[-1] != replacement:
-                route.fulfill(
-                    status=409,
-                    headers={"X-Table-Catalog-Stale": "true"},
-                    json={"detail": "Table changed during browser test"},
-                )
-                return
-            params["table_version"] = [catalog["table_version"]]
-            response = route.fetch(
-                url=urlunparse(url._replace(query=urlencode(params, doseq=True)))
-            )
+            params = parse_qs(urlparse(route.request.url).query, keep_blank_values=True)
+            assert "table_version" not in params
+            requests.append(params)
+            response = route.fetch()
             assert response.status == 200
             payload = response.json()
-            payload["report"]["table_version"] = replacement
+            payload["report"].update(table_version=replacement, through_week=published_week)
             route.fulfill(response=response, json=payload)
 
         page.route("**/api/nextgen/team-analysis?*", changed_table)
         page.get_by_label("Variance basis", exact=True).select_option("season")
         settled()
-        assert catalog["table_version"] in requested_versions
-        assert replacement in requested_versions
+        expect(page.get_by_label("Through season", exact=True)).to_contain_text(
+            f"Latest · {catalog['season']} W{published_week}"
+        )
+        # A subsequent table-only publication is picked up by the normal data poll.
+        published_week += 1
+        page.clock.fast_forward(61_000)
+        expect(page.get_by_label("Through season", exact=True)).to_contain_text(
+            f"Latest · {catalog['season']} W{published_week}"
+        )
+        assert len(requests) >= 2
+        assert not catalog_requests, catalog_requests
         assert not errors, errors
         browser.close()
     print(

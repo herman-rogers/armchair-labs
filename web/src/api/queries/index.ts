@@ -5,7 +5,7 @@ import type { ProfileDirectory } from '../profiles'
 import { nextgenWeeklyEvidence, nextgenWeeklyForecasts, nextgenForecastAccuracy, nextgenRankingHistory, nextgenCatalog, nextgenLeague, nextgenMatchups, nextgenPlayers, nextgenRankings, nextgenRankingEvidence, nextgenForecasts, nextgenRegistry, nextgenRookies, nextgenEvidence } from '../nextgen'
 import { passingForecasts, passingEvidence, passingVariations } from '../qbPassing'
 import { nextgenTeamStrength } from '../teamStrength'
-import { fetchTeamAnalysis, fetchTeamAnalysisCatalog } from '../teamAnalysis'
+import { fetchTeamAnalysis } from '../teamAnalysis'
 
 // The catalog provider polls and verifies the release; changing its token selects
 // new cache entries. Live observations use their own freshness and invalidation.
@@ -35,22 +35,14 @@ export const registryQuery = (params: URLSearchParams, token?: string) => ({ ...
 export const rookiesQuery = (params: URLSearchParams, token?: string) => ({ ...paramsQuery('nextgen-rookies', params, token, nextgenRookies), placeholderData: keepWithinRelease(token) })
 export const evidenceQuery = (params: URLSearchParams, token?: string) => paramsQuery('nextgen-evidence', params, token, nextgenEvidence)
 export const passingQuery = (params: URLSearchParams, token?: string) => paramsQuery('qb-passing', params, token, passingForecasts)
-export const teamAnalysisCatalogQuery = (token?: string) => queryOptions({
-  queryKey: ['team-analysis-catalog', token],
-  queryFn: ({ signal }) => fetchTeamAnalysisCatalog(token, signal),
-  refetchInterval: 60_000, staleTime: 30_000, retry: false,
-})
-export const teamAnalysisQuery = (params: URLSearchParams, token?: string, tableVersion?: string) => ({
-  ...published,
-  queryKey: ['team-analysis', token, canonicalParams(params), tableVersion],
-  enabled: Boolean(tableVersion),
-  queryFn: ({ signal }: { signal: AbortSignal }) => {
-    const request = new URLSearchParams(params)
-    if (tableVersion) request.set('table_version', tableVersion)
-    return fetchTeamAnalysis(request, token, signal)
-  },
+// Each response contains its own table version and coverage. Poll the data itself
+// so table-only publications refresh without a blocking catalog round trip.
+export const teamAnalysisQuery = (params: URLSearchParams, token?: string) => ({
+  ...paramsQuery('team-analysis', params, token, fetchTeamAnalysis),
+  staleTime: 30_000,
+  refetchInterval: 60_000,
   placeholderData: (previous: Awaited<ReturnType<typeof fetchTeamAnalysis>> | undefined, query?: { queryKey: readonly unknown[] }) => {
-    if (!query || query.queryKey[1] !== token || query.queryKey[3] !== tableVersion || typeof query.queryKey[2] !== 'string') return undefined
+    if (!query || query.queryKey[1] !== token || typeof query.queryKey[2] !== 'string') return undefined
     const before = new URLSearchParams(query.queryKey[2]); const after = new URLSearchParams(params)
     before.delete('players'); after.delete('players')
     return canonicalParams(before) === canonicalParams(after) ? previous : undefined

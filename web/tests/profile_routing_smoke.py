@@ -63,8 +63,8 @@ def main():
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         page.screenshot(path='/tmp/player-page-mobile.png', full_page=True)
-        # The breadcrumb is a plain link to the dashboard; Back is what restores filters.
-        page.get_by_role('link', name='← Dashboard', exact=True).click()
+        # The section breadcrumb opens its first sidebar page; Back restores filters.
+        page.get_by_role('link', name='Analysis', exact=True).click()
         expect(page).to_have_url(re.compile(r'/intelligence/rankings$'))
         page.goto(args.url + path + '/not-a-section?period=career')
         expect(page).to_have_url(re.compile(re.escape(path) + r'\?period=career$'))
@@ -72,7 +72,7 @@ def main():
         expect(page.get_by_role('heading', name='Page not found')).to_be_visible()
         page.goto(args.url + '/players/not-a-player')
         expect(page.locator('.player-page .notice')).to_be_visible()
-        expect(page.get_by_role('link', name='← Dashboard', exact=True)).to_be_visible()
+        expect(page.get_by_role('link', name='Analysis', exact=True)).to_be_visible()
         assert not errors, errors
         browser.close()
         print('Profile routing checks passed: themed links, keyboard focus, stats, section paths, direct URLs, refresh, Back/Forward, mobile, and missing routes.')

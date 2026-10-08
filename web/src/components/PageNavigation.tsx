@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router'
-import { PAGE_GROUPS } from '../pageNavigation'
+import { PAGE_GROUPS, navigationPage } from '../pageNavigation'
 
 export function PageNavigation() {
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
-  const active = (path: string) => pathname === path || pathname.startsWith(`${path}/`) || (path === '/league/overview' && pathname.startsWith('/league/matchups/'))
+  const currentPage = navigationPage(pathname)?.page
+  const active = (path: string) => currentPage?.path === path
   return <aside className="page-sidebar">
     <button className="button navigation-toggle" type="button" aria-expanded={open} aria-controls="page-navigation" onClick={() => setOpen(!open)}>Browse pages <span aria-hidden="true">{open ? '−' : '+'}</span></button>
     <nav id="page-navigation" className={open ? 'page-navigation is-open' : 'page-navigation'} aria-label="Main navigation">
