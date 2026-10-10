@@ -18,7 +18,7 @@ dependencies = [
     "espn-api>=0.46.0",
     "requests>=2.34.2",
     "types-requests>=2.33.0.20260712",
-    "numpy>=2.5.2",
+    "numpy>=2.2,<3",
     "scikit-learn>=1.7.2",
     "duckdb>=1.4,<2",
 ]
@@ -30,6 +30,18 @@ engine = "engine.cli:app"
 shared-data = [
     "google-cloud-storage>=3.0,<4",
 ]
+research = [
+    "xgboost==3.4.1",
+    "catboost==1.2.10",
+    "lightgbm==4.7.0",
+]
+# NVIDIA RAPIDS wheels are optional and Linux-only; base installs remain portable.
+# CUDA 13.3 matches the tested RTX 4090 driver; NumPy is constrained transitively
+# by RAPIDS' supported Numba version. Do not install with --no-deps.
+research-gpu = [
+    "cuml-cu13==26.8.0; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'",
+    "cuda-toolkit==13.3.*; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'",
+]
 
 [dependency-groups]
 dev = [
@@ -38,6 +50,7 @@ dev = [
     "ruff>=0.9.0",
     "mypy>=1.14.0",
     "types-pyyaml>=6.0.12",
+    "httpx2>=2.13.1",
 ]
 
 [build-system]

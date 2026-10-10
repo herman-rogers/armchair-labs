@@ -17,6 +17,8 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -330,6 +332,31 @@ def status(output: TextIO = sys.stdout) -> bool:
     return True
 
 
+def wait_ready(urls: list[str], processes: list[subprocess.Popen], stop_requested: Event) -> None:
+    """Wait for the frontend and data-backed API before announcing readiness."""
+    pending = set(urls)
+    deadline = time.monotonic() + 120
+    while pending and time.monotonic() < deadline:
+        if stop_requested.is_set():
+            raise RuntimeError("Startup interrupted.")
+        if any(process.poll() is not None for process in processes):
+            raise RuntimeError("A server exited during startup; see its output above.")
+        for url in tuple(pending):
+            try:
+                with urllib.request.urlopen(url, timeout=2) as response:
+                    if response.status == 200:
+                        pending.remove(url)
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode(errors="replace")[:500]
+                raise RuntimeError(f"Readiness check failed at {url}: {detail}") from error
+            except (urllib.error.URLError, TimeoutError):
+                pass
+        if pending:
+            stop_requested.wait(0.25)
+    if pending:
+        raise RuntimeError(f"Servers did not become ready: {', '.join(sorted(pending))}")
+
+
 def run(
     *,
     restart: bool = False,
@@ -338,6 +365,8 @@ def run(
     web_host: str = "127.0.0.1",
     web_port: int = 5173,
     reload: bool = True,
+    prepare: bool = False,
+    auth: bool = True,
     output: TextIO = sys.stdout,
 ) -> int:
     """Run API and Vite in the foreground until interrupted or either child fails."""
@@ -358,6 +387,14 @@ def run(
     npm = shutil.which("npm")
     if npm is None:
         raise RuntimeError("npm is not installed or not on PATH.")
+
+    if prepare:
+        from engine.startup import prepare as prepare_system
+
+        try:
+            prepare_system(auth=auth)
+        except subprocess.SubprocessError as error:
+            raise RuntimeError(f"Startup preparation failed: {error}") from error
 
     token = uuid.uuid4().hex
     environment = {**os.environ, "ENGINE_DEV_TOKEN": token, "PYTHONUNBUFFERED": "1"}
@@ -410,6 +447,16 @@ def run(
             start_new_session=True,
         )
         children.append(("api", api, "engine.api.app:app"))
+        if prepare:
+            wait_ready(
+                [
+                    f"http://{api_host}:{api_port}/api/status",
+                    f"http://{api_host}:{api_port}/api/nextgen/team-analysis/catalog",
+                ]
+                + ([f"http://{api_host}:{api_port}/api/nextgen/league/matchups"] if auth else []),
+                [api],
+                stop_requested,
+            )
         web = subprocess.Popen(
             web_command,
             cwd=REPO_ROOT / "web",
@@ -430,10 +477,17 @@ def run(
             web_port=web_port,
             children=records,
         ).write(path)
+        if prepare:
+            wait_ready(
+                [f"http://{web_host}:{web_port}/"],
+                [process for _, process, _ in children],
+                stop_requested,
+            )
         print(
             f"Armchair Labs dev ready: API http://{api_host}:{api_port} · "
             f"web http://{web_host}:{web_port} · Ctrl+C stops both",
             file=output,
+            flush=True,
         )
 
         exit_code = 0

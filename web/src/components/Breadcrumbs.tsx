@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { breadcrumbsFor, type Breadcrumb } from '../breadcrumbs'
-import { leagueQuery, profileQuery } from '../api/queries'
+import { leagueQuery, playerQuery } from '../api/queries'
 import { useDataRelease } from '../dataRelease'
 
 function TeamLabel({ id, fallback }: { id: string; fallback: string }) {
@@ -13,11 +13,10 @@ function TeamLabel({ id, fallback }: { id: string; fallback: string }) {
 function ProfileLabel({ entity, fallback }: { entity: NonNullable<Breadcrumb['entity']>; fallback: string }) {
   const { token } = useDataRelease()
   const { search } = useLocation()
-  const season = new URLSearchParams(search).get('season')
-  // Share the profile's query key, including its historical cutoff.
-  const params = new URLSearchParams({ [entity.kind === 'player' ? 'player_id' : 'college_id']: entity.id, ...(season ? { season, week: '18' } : {}) })
-  const query = useQuery(profileQuery(params, token))
-  return query.data?.identity.player_display_name ?? fallback
+  const season = new URLSearchParams(search).get('season') ?? ''
+  // Share the profile's query key, including its game-log season.
+  const query = useQuery({ ...playerQuery(entity.id, season, token), enabled: entity.kind === 'player' })
+  return entity.kind === 'player' ? query.data?.player.display_name ?? fallback : entity.id
 }
 
 /** Always rendered by the app shell, including loading, error and missing pages. */

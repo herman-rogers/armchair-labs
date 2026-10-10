@@ -13,8 +13,7 @@ import polars as pl
 from build_injury_archive import CACHE, GOLD, OUT, ensure_open
 from recover_injury_dates import text_of
 
-from engine.data.historical_evidence import EvidenceCapture
-from engine.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import EvidenceCapture, normalized_name, transaction_aliases
 
 
 def parse_official(html, season, week, source, identities):
@@ -31,7 +30,7 @@ def parse_official(html, season, week, source, identities):
                 cells = [text_of(t) for t in re.findall(r"<td\b[^>]*>(.*?)</td>", raw, re.S)]
                 if len(cells) != 5:
                     continue
-                ids = identities.get(_normalized_name(cells[0]), set())
+                ids = identities.get(normalized_name(cells[0]), set())
                 result.append(
                     dict(
                         season=season,
@@ -57,7 +56,7 @@ def main():
     ensure_open()
     capture = EvidenceCapture(CACHE)
     identities = {}
-    for pid, aliases in _transaction_aliases(
+    for pid, aliases in transaction_aliases(
         pl.read_parquet(GOLD / "tables/players.parquet")
     ).items():
         for name in aliases:

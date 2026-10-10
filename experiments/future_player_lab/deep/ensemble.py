@@ -35,11 +35,13 @@ def convex_weights(p, y, w, shrink=0.0, prior=None):
     scale = max(float(w @ (y**2)), 1.0)
     gram = p.T @ (w[:, None] * p) / scale
     cross = p.T @ (w * y) / scale
+
     def objective(a):
         return float(a @ gram @ a - 2 * cross @ a + shrink * ((a - prior) ** 2).sum())
 
     def gradient(a):
         return 2 * (gram @ a - cross + shrink * (a - prior))
+
     fit = minimize(
         objective,
         prior,

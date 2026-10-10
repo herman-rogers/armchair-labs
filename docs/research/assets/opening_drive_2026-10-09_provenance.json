@@ -1,0 +1,22 @@
+{
+  "campaign_id": "opening_drive_v1",
+  "kind": "historical_development_research",
+  "sources": {
+    "experiments/future_player_lab/runs/opening_drive_review_20261009_001/report.json": "d532b34db8a121c377fa030bd8b83a40a0a4b089135355bdc9e4808849defa4a",
+    "data/campaigns/opening_drive_v1/manifest.json": "c3a8f1826abfeb5b5b888c428c7165a28cff163e139a705cd5aa4735fa45aaf9",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/manifest.json": "9ceff82adfed3d95d28b58a1cd0b06b2dc2c76874228213c1a3e87a2533bd6e6",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/qb_remaining/manifest.json": "5b3bfea63e17e543b6a8183e6737408c96313af94637cbd26ece892b4eca4371",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/qb_season/manifest.json": "291f50dac64cf21dc7df6bf2cf0078975f90b5309a2226a650444b418ff5aaab",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/rb_remaining/manifest.json": "b6aa0a86da895718566076cdc1ee48131ef6408c28bce683a34f31effed334f6",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/rb_season/manifest.json": "e40dd01eef0864b2a018c1258b5ef17fac800fbaf7211012dcd1a780d3c3328e",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/wr_remaining/manifest.json": "f78da2721570089ee7120b78e676e4ecca5cc9ed3634e9471f7c6078c5f5186b",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/wr_season/manifest.json": "28931bc330d0677af78fa74235d45fc33d5ed1f2c4c3c03cf48d17ceb43b20d2",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/diagnostics/qb_preseason_shrinkage_002/manifest.json": "579685780a7e2301da2ce8ce8d47e3e7032a27b642f06cecaa99c4824768c745",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/audit_all_001.json": "ff115f6c408033b5ee4a4256d0f5982f49e239d7b7676890a074be0d6c8fc104",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/replay_verification.json": "501ad88155b9fb8c804cae9de46b15f8852685dd8c256e7f4ac5d9f4fc2f5c41",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/audit_qb_preseason_shrinkage_002.json": "6079f1082af7fdf812129285d320d994b585df11b54587081d0022a8d68a4856",
+    "experiments/future_player_lab/runs/opening_drive_v1_001/review_qb_preseason_rankings.json": "60db1df73bd6ecf983a06094800ff5d9666d644839cf141ed4a6a42d27090f66"
+  },
+  "target_comparisons": 50,
+  "paired_target_mse_improvements": 48
+}

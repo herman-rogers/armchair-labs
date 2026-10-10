@@ -1,4 +1,4 @@
-"""Immutable local data releases. The current catalog is the only mutable pointer.
+"""Immutable local data releases; the latest accepted batch is the builder input.
 
 Raw objects preserve captured bytes; cleaned table batches use Parquet. A reader
 pins one manifest and verifies its dependency closure before exposing any table.
@@ -27,6 +27,17 @@ def identifier(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", value):
         raise ValueError(f"Invalid release identifier: {value}")
     return value
+
+
+def protected_artifacts(root: Path, names) -> dict[str, str | None]:
+    """Snapshot legacy output guards, including absence and renamed source paths."""
+    paths = set(names)
+    paths.update(
+        name.replace("src/patron/", "src/engine/", 1)
+        for name in names
+        if name.startswith("src/patron/")
+    )
+    return {name: digest(root / name) if (root / name).exists() else None for name in sorted(paths)}
 
 
 def inside(root: Path, name: str) -> Path:
@@ -145,20 +156,6 @@ def _load_manifest(data_dir: Path, layer: str, ref: dict) -> tuple[Path, dict]:
     return root, manifest
 
 
-def current_catalog(data_dir: Path) -> dict | None:
-    path = data_dir / "current.json"
-    observe(path)
-    if not path.exists():
-        return None
-    catalog = read_json(path)
-    ref = catalog.get("table_release", catalog.get("gold"))
-    if catalog["schema_version"] != 1 or not ref:
-        raise ValueError("Invalid current data catalog")
-    # Normalize only in memory for historical product readers; new pointers use
-    # table_release. Hash-bound old pointers and reports stay byte-for-byte intact.
-    return {**catalog, "gold": ref}
-
-
 @dataclass(frozen=True)
 class TableRelease:
     root: Path
@@ -181,25 +178,43 @@ class TableRelease:
         return read_frame(self.path(table), columns=columns)
 
 
+def latest_batch(data_dir: Path) -> Path:
+    """The most recently accepted table batch; immutable pre-table-system releases count too."""
+    candidates = []
+    for parent in (data_dir / "tables/batches", data_dir / "gold/releases"):
+        if not parent.is_dir():
+            continue
+        observe(parent)
+        for root in parent.iterdir():
+            manifest = root / "manifest.json"
+            if not manifest.is_file():
+                continue
+            try:
+                document = read_json(manifest)
+            except (OSError, ValueError):
+                continue
+            if document.get("status") == "accepted" and document.get("generated_at"):
+                candidates.append((document["generated_at"], root))
+    if not candidates:
+        raise ValueError("No accepted source table batch exists")
+    return max(candidates)[1]
+
+
 def load_tables(data_dir: Path, version: str | None = None) -> TableRelease:
-    """Load a verified input batch, including immutable pre-table-system releases.
+    """Load a verified input batch; without a version, the latest accepted one.
 
     Batch files are builder inputs. SQL callers use engine.tables.connect and the
-    selected named-table catalog, which does not require these source archives.
+    published named-table catalog, which does not require these source archives.
     """
     if version is None:
-        catalog = current_catalog(data_dir)
-        if catalog is None:
-            raise ValueError("No source table release has been published")
-        ref = catalog["gold"]
+        parent = latest_batch(data_dir)
     else:
         identifier(version)
         parent = data_dir / "tables/batches" / version
         if not parent.exists():
             parent = data_dir / "gold/releases" / version
-        ref = reference(parent)
-    parent = data_dir / "tables/batches" / identifier(ref["version"])
-    layer = "tables" if parent.exists() else "gold"
+    ref = reference(parent)
+    layer = "tables" if parent.parent.name == "batches" else "gold"
     root, manifest = load_manifest(data_dir, layer, ref)
     return TableRelease(root, manifest)
 
@@ -208,27 +223,3 @@ def load_tables(data_dir: Path, version: str | None = None) -> TableRelease:
 # names. New builders use TableRelease/load_tables; never rewrite old artifacts.
 GoldRelease = TableRelease
 load_gold = load_tables
-
-
-def product_reference(data_dir: Path, key: str, legacy_pointer: Path) -> dict:
-    """A published catalog must never silently fall back to a different data vintage."""
-    catalog = current_catalog(data_dir)
-    if catalog is None:
-        return read_json(legacy_pointer)
-    ref = catalog["products"][key]
-    root = data_dir / "research" / identifier(ref["version"])
-    if digest(root / "manifest.json") != ref["manifest_sha256"]:
-        raise ValueError(f"Catalog product changed: {key}")
-    manifest = read_json(root / "manifest.json")
-    if manifest.get("gold") != catalog["gold"]:
-        raise ValueError(f"{key} does not use the current gold release")
-    # The product loader verifies this exact gold reference immediately afterward.
-    # Avoid scanning the same raw/enriched dependency closure twice per request.
-    return ref
-
-
-def verify_product_gold(data_dir: Path, manifest: dict) -> None:
-    if "gold" in manifest:
-        gold = load_gold(data_dir, manifest["gold"]["version"])
-        if gold.ref != manifest["gold"] or gold.manifest["history"] != manifest["history"]:
-            raise ValueError("Product and gold data provenance disagree")

@@ -162,7 +162,11 @@ def chronological(panel, y, p, context, names, config):
                 "weights": {names[take[j]]: float(v) for j, v in enumerate(weights) if v > 1e-8},
             }
             budget.append(
-                {"year": int(year), "candidates": len(take), **task_score(y[test], pred, origins[test])}
+                {
+                    "year": int(year),
+                    "candidates": len(take),
+                    **task_score(y[test], pred, origins[test]),
+                }
             )
         # Model diversity is measured using prior-season errors only.
         err = p[train] - y[train, None]

@@ -1,0 +1,36 @@
+{
+  "run_id": "rb_gpu_20261003_001",
+  "metric": "Direct rushing/receiving PPR period-total RMSE; lower is better",
+  "evaluation_years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "population": {
+    "preseason": 865,
+    "remaining_after_week2": 906
+  },
+  "policies": [
+    "persistence",
+    "affine_selected",
+    "ensemble_top3"
+  ],
+  "raw_manifest_sha256": "f4595619cd7c261c006d31fd6b5cfd871bdd9fbc01daffa2e533766f1203613f",
+  "research_manifest_sha256": "4956428ae1604e0a9aff83cf5568aaad6d6fa166ced416133393531297a759f9",
+  "generator_sha256": "6fdd04a37302dd2772667a07fdbc2de6fb2505a53664ef8d868e5230e33a835b",
+  "source_artifacts": {
+    "experiments/future_player_lab/runs/rb_gpu_20261003_001/report/figures/strong_baseline_rmse.png": "b1dd59f2134cea5229cc69884af78862016aaac946213b45510c87b9c9903c17",
+    "experiments/future_player_lab/runs/rb_gpu_20261003_001/report/figures/strong_baseline_rmse.svg": "dd3f3a9c3d754a8ea44c26b0a8618240f4c9879bf39aec0cbb10776dff7968cb",
+    "experiments/future_player_lab/runs/rb_gpu_20261003_001/report/figures/strong_baseline_rmse.pdf": "9b0a8c76bb661284d3416f450eac5f68e511534ae7854a0dbfb3556dc968188c",
+    "experiments/future_player_lab/runs/rb_gpu_20261003_001/report/exports/strong_baseline_rmse.csv": "e77861d90732591b8607d6c189f6bc05f2007d10122f8c7cac451d19ec4728d9"
+  },
+  "files": {
+    "rb_gpu_campaign_2026-10-03.png": "b1dd59f2134cea5229cc69884af78862016aaac946213b45510c87b9c9903c17",
+    "rb_gpu_campaign_2026-10-03.pdf": "9b0a8c76bb661284d3416f450eac5f68e511534ae7854a0dbfb3556dc968188c",
+    "rb_gpu_campaign_2026-10-03.csv": "e77861d90732591b8607d6c189f6bc05f2007d10122f8c7cac451d19ec4728d9",
+    "rb_gpu_campaign_2026-10-03.svg": "dd3f3a9c3d754a8ea44c26b0a8618240f4c9879bf39aec0cbb10776dff7968cb"
+  },
+  "limitations": "Historical development evidence, not an untouched prospective test. These main-policy figures precede the separate draft-capital extension. Compare methods within each horizon; horizons have different target periods. Affine baseline was specified after the preseason preview."
+}

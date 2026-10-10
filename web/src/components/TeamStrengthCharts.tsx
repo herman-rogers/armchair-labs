@@ -12,7 +12,7 @@ export function ContributionChart({ team }: { team: TeamStrength }) {
   const rows = starters.filter(p => p.usable && p.prediction != null).sort((a, b) => b.prediction! - a.prediction!)
   const missing = starters.filter(p => !p.usable || p.prediction == null)
   return <>
-    {rows.length ? <ChartFrame title="Projected player contributions" description="NextGen weekly points · offensive starters" height={Math.max(180, rows.length * 26 + 32)}>
+    {rows.length ? <ChartFrame title="Projected player contributions" description="Campaign per-game points · offensive starters" height={Math.max(180, rows.length * 26 + 32)}>
       <BarChart data={rows} layout="vertical" margin={{ left: 0, right: 36, top: 8, bottom: 0 }} accessibilityLayer>
         <CartesianGrid horizontal={false} stroke="var(--border)" />
         <XAxis type="number" {...chartAxis} /><YAxis type="category" dataKey="name" tickFormatter={shortName} width={108} interval={0} {...chartAxis} />

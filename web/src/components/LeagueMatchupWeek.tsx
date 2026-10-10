@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { matchupsQuery } from '../api/queries'
-import type { LeagueObservations, WeeklyForecasts } from '../api/nextgen'
+import type { LeagueObservations, WeeklyForecasts } from '../api/league'
 import { useDataRelease } from '../dataRelease'
 import { fixed } from '../format'
 import { matchupPath, useUrlNumber } from '../navigation'

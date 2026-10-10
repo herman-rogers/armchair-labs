@@ -1,0 +1,21 @@
+[
+  "rb_age_cliff",
+  "age_factor",
+  "depth_role_factor",
+  "opportunity_multiplier",
+  "override_delta",
+  "combine_speed_score",
+  "combine_burst_score",
+  "combine_agility_score",
+  "early_career_score",
+  "entering_sophomore",
+  "sophomore_rush_share",
+  "source_opportunities_pg_sq",
+  "career_opportunities_log",
+  "career_pass_attempts_log",
+  "contract_depth_security",
+  "vacated_target_early_career",
+  "vacated_carry_early_career",
+  "young_speed_score",
+  "young_burst_score"
+]

@@ -7,9 +7,34 @@ See the [justfile](../../justfile) for the underlying commands.
 ## Install and start
 
 ```bash
-just setup                 # uv sync, then npm install in web/
-just dev                   # API :8000 and frontend :5173
+uv run engine dev          # prepare everything, then API :8000 and frontend :5173
+# Equivalent: just dev
 ```
+
+Install `uv`, Node.js/npm, and Chrome or Chromium first (Flatpak Chrome/Chromium is
+supported on Linux). The first download needs Google Cloud access to the private
+bucket through ADC or `gcloud`; startup opens `gcloud auth login` when credentials
+are unavailable. ESPN sign-in opens a browser only when the saved session cannot
+be verified. Complete sign-in there and select your league if prompted.
+
+Startup reuses valid local releases. Missing application artifacts are restored
+through the verified archive/cache transport; missing query tables use the pinned
+table release. It reconciles tables against the restored application selection,
+prewarms DuckDB, and loads ESPN observations and their local tables. Existing files
+with differing checksums are never overwritten. Setup failures stop startup with
+their cause; readiness checks include `/api/status` and Team analysis.
+
+```bash
+uv run engine setup          # preparation without servers (also: just setup)
+uv run engine dev --restart  # stop existing services, prepare, and restart
+uv run engine dev --no-auth  # analysis only; skip ESPN login/sync
+uv run engine dev --no-setup # services only, for an already prepared workspace
+```
+
+Startup fetches the published table catalog when it is missing and lists the campaign
+bundles under `data/campaigns/`; it does not capture a newer NFL week or train
+models. Use the publisher refresh workflow for new observations and the campaign
+commands for new models.
 
 Open <http://localhost:5173>. The frontend proxies `/api` to FastAPI. To run each
 service in a separate terminal, use `just api` and `just web`.
@@ -21,10 +46,9 @@ restart the API. Restart the dev command once after changing its watcher setting
 Git includes source, configuration, tests, documentation, and curated reference
 fixtures. Generated datasets, research archives, model runs, and local environments
 are excluded. A fresh clone does not include the historical datasets or a populated
-analytical catalog. Existing captured inputs or a data build are needed for data-backed
-pages; see [refreshing data](refresh-data.md). Run `just data-fetch` for queryable tables; source/product rebuild archives use
-`just source-fetch`. See the [data pipeline](tables.md) for the published reference
-and consumer contract.
+analytical catalog; startup restores the published application inputs. See
+[refreshing data](refresh-data.md) for new source captures and builds, and the
+[data pipeline](tables.md) for the published reference and consumer contract.
 
 ## Stop or restart
 

@@ -14,24 +14,6 @@ from engine.data.historical_evidence import (
     load_transaction_backfill,
     sha256,
 )
-from engine.metrics.experimental import build_transaction_features
-from engine.metrics.roster_evidence import attach_roster_evidence, supplement_identity_names
-
-
-def test_crosswalk_adds_only_unambiguous_identity_names():
-    players = pl.DataFrame(
-        {"gsis_id": ["existing"], "display_name": ["Existing Player"], "team": ["CLE"]}
-    )
-    crosswalk = pl.DataFrame(
-        {
-            "gsis_id": ["existing", "new", "ambiguous", "ambiguous"],
-            "name": ["Wrong Replacement", "New Player", "First Name", "Different Name"],
-            "team": ["DAL", "NYJ", "GB", "GB"],
-        }
-    )
-    result = supplement_identity_names(players, crosswalk).sort("gsis_id")
-    assert result["display_name"].to_list() == ["Existing Player", "New Player"]
-    assert result["team"].to_list() == ["CLE", None]
 
 
 def test_wrong_year_and_redirected_archives_are_not_evidence():
@@ -97,62 +79,3 @@ def test_export_fails_if_source_capture_changes(tmp_path):
     (cache / "raw.html.gz").write_bytes(gzip.compress(b"changed"))
     with pytest.raises(ValueError, match="capture changed"):
         load_transaction_backfill(tmp_path)
-
-
-def test_rookies_and_market_candidates_use_dated_events_without_current_team_metadata():
-    players = pl.DataFrame(
-        {
-            "gsis_id": ["r", "m"],
-            "display_name": ["Rookie Player", "Market Player"],
-            "latest_team": ["NYJ", "DAL"],
-        }
-    )
-    prior = pl.DataFrame(
-        schema={
-            "season": pl.Int64,
-            "player_id": pl.String,
-            "player_display_name": pl.String,
-            "team": pl.String,
-            "position": pl.String,
-        }
-    )
-    candidates = pl.DataFrame(
-        {
-            "player_id": ["r", "m"],
-            "player_display_name": ["Rookie Player", None],
-            "forecast_season": [2019, 2019],
-            "position": ["RB", "WR"],
-        }
-    )
-    events = pl.DataFrame(
-        [
-            {
-                "transaction_date": date(2019, month, 1),
-                "transaction_year": 2019,
-                "category": "official",
-                "from_team": None,
-                "to_team": "CLE",
-                "player_name": None,
-                "description": f"Signed {name}.",
-                "source_url": "fixture",
-            }
-            for month, name in [(5, "Rookie Player"), (8, "Market Player")]
-        ]
-    )
-    features = build_transaction_features(
-        events,
-        prior,
-        players,
-        [2019],
-        "07-17",
-        forecast_candidates=candidates,
-        trusted_sources_only=True,
-    )
-    result = attach_roster_evidence(candidates, features, players).sort("player_id")
-    market, rookie = result.to_dicts()
-    assert market["player_display_name"] == "Market Player"
-    assert market["cutoff_state_resolution"] == "no_prior_team"
-    assert market["cutoff_preseason_team"] is None
-    assert not market["cutoff_team_observed"]
-    assert rookie["cutoff_preseason_team"] == "CLE"
-    assert rookie["cutoff_team_observed"]

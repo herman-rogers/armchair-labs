@@ -1,0 +1,21 @@
+[
+  {"family":"campaign-trees","patterns":["experiments/future_player_lab/campaigns/*.py","src/engine/chairstats/*.py"]},
+  {"family":"deep-ensembles","patterns":["experiments/future_player_lab/deep/*.py"]},
+  {"family":"saved-models","patterns":["experiments/future_player_lab/forecasting/*.py"]},
+  {"family":"rb-representations","patterns":["experiments/future_player_lab/gpu_lab/profile*.py","experiments/future_player_lab/gpu_lab/representations.py","experiments/future_player_lab/gpu_lab/dimension_study.py"]},
+  {"family":"rb-gpu","patterns":["experiments/future_player_lab/gpu_lab/*.py","experiments/future_player_lab/gpu_backends.py"]},
+  {"family":"future-player","patterns":["experiments/future_player_lab/*.py"]},
+  {"family":"signals-lab","patterns":["experiments/player_signals_lab/*.py"]},
+  {"family":"representation-lab","patterns":["experiments/representation_lab/*.py"]},
+  {"family":"legacy-boards","patterns":["src/engine/board/*.py","src/engine/metrics/enrichment.py","src/engine/metrics/forecast.py","src/engine/metrics/backtest.py"]},
+  {"family":"individual-stats","patterns":["research/individual_stat_*.py","research/incremental_information.py","research/review_revalidation.py","src/engine/metrics/career_stat_evidence.py","src/engine/metrics/evidence_diagnostics.py"]},
+  {"family":"qb-passing","patterns":["research/build_qb_passing.py","research/publish_qb_passing.py","research/qb_passing_review.py","research/score_qb_passing.py","research/score_qb_variations.py"]},
+  {"family":"qb-capacity","patterns":["research/report_qb_boosting.py"]},
+  {"family":"availability-research","patterns":["research/*injur*.py","research/*absence*.py"]},
+  {"family":"college","patterns":["research/capture_college.py"]},
+  {"family":"profiles","patterns":["research/player_profiles.py","src/engine/metrics/outlook.py"]},
+  {"family":"horizon-rankings","patterns":["research/publish_nextgen_rankings.py"]},
+  {"family":"weekly","patterns":["src/engine/metrics/weekly_lineup.py"]},
+  {"family":"market-benchmarks","patterns":["research/value_capture_audit.py","research/export_transaction_backfill.py","src/engine/metrics/transaction_events.py","src/engine/metrics/roster_evidence.py"]},
+  {"family":null,"role":"shared_infrastructure","patterns":["research/accept_evidence_backfill.py","research/artifact_inputs.py","research/backfill_public_evidence.py","research/build_read_models.py","research/data_integrity_audit.py","research/data_pipeline.py","research/rebuild_history.py","research/refresh_nextgen.py","research/verify_shared_inputs.py","src/engine/metrics/positions.py"]}
+]

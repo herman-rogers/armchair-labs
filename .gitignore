@@ -40,6 +40,7 @@ data/current.json
 data/source_catalog.json
 data/catalog_history/
 data/research/
+data/campaigns/
 data/tables/
 data/league/
 # generated backfill; retain its reference manifest and collection code in Git
@@ -64,3 +65,5 @@ data/.browser-profile/
 # Shared data staging, download readiness markers, and optional repository-local cache
 /data/.shared/
 /.armchair-cache/
+# archived prior revisions of replaced campaign bundles (weights and parquet)
+data/campaign_revisions/

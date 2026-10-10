@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from engine.api.league_observation_routes import matchups, refresh
+from engine.api.league_routes import matchups, refresh
 from engine.espn.observations import weekly_matchups
 from engine.espn.sync import LeagueSnapshot, LineupEntry, ScheduleEntry, TeamState, WeekLineups
 
@@ -82,24 +82,19 @@ def test_routes_use_observations_only_and_refresh_is_explicit():
     assert calls == [{}, {"force": True}]
 
 
-def test_draft_identity_is_linked_even_after_player_leaves_current_pool(monkeypatch, tmp_path):
+def test_draft_identity_is_linked_even_after_player_leaves_current_pool(monkeypatch):
+    from contextlib import contextmanager
+
     import polars as pl
 
-    from engine.api import nextgen_routes as routes
+    from engine.api import league_routes as routes
+    from engine.espn import attention, crosswalk
     from engine.espn.crosswalk import JoinReport
     from engine.espn.sync import DraftPick
+    from engine.tables import observations
 
     snap = snapshot()
     snap.draft = [DraftPick(1, 1, 1, 1, "Mine", 99, "Drafted then dropped")]
-    identities = pl.DataFrame({"espn_id": [99], "gsis_id": ["draft-id"]})
-    pl.DataFrame(
-        {
-            "period": ["current"],
-            "player_id": ["other"],
-            "player_display_name": ["Other player"],
-            "position": ["WR"],
-        }
-    ).write_parquet(tmp_path / "players.parquet")
     resolved = pl.DataFrame(
         {
             "espn_id": [11],
@@ -111,14 +106,22 @@ def test_draft_identity_is_linked_even_after_player_leaves_current_pool(monkeypa
             "lineup_slot": ["WR"],
         }
     )
+
+    @contextmanager
+    def connect():
+        yield object()
+
+    monkeypatch.setattr(routes, "connect", connect)
+    monkeypatch.setattr(observations, "espn_ids", lambda db: {99: "draft-id"})
     monkeypatch.setattr(
-        routes, "release", lambda: (tmp_path, {"version": "test", "gold": {"version": "gold"}})
+        observations,
+        "candidates",
+        lambda db, season: pl.DataFrame(
+            {"player_id": ["other"], "player_display_name": ["Other player"], "position": ["WR"]}
+        ),
     )
-    monkeypatch.setattr(
-        routes, "load_gold", lambda *a: SimpleNamespace(read=lambda table: identities)
-    )
-    monkeypatch.setattr(routes, "resolve_player_ids", lambda *a: (resolved, JoinReport()))
-    monkeypatch.setattr(routes, "reviewed_news", lambda *a: ([], None))
+    monkeypatch.setattr(crosswalk, "resolve_player_ids", lambda *a: (resolved, JoinReport()))
+    monkeypatch.setattr(attention, "reviewed_news", lambda *a: ([], None))
     result = routes.league(SimpleNamespace(observations=lambda: (snap, False, 1)))
     assert result["draft"][0]["player_id"] == "draft-id"
     assert result["players"][0]["player_id"] == "other"

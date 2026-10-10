@@ -34,4 +34,4 @@ export type TeamAnalysisCatalog = {
   scoring: string; evidence: string; season_type: string;
 }
 export const fetchTeamAnalysis = (params: URLSearchParams, token?: string, signal?: AbortSignal) =>
-  get<TeamAnalysisData>(`/api/nextgen/team-analysis?${params}`, token, undefined, signal)
+  get<TeamAnalysisData>(`/api/team-analysis?${params}`, token, signal)

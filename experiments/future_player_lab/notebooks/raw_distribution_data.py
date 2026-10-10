@@ -34,6 +34,51 @@ META = {
     "game_id",
     "nflverse_game_id",
 }
+TEAM_CODES = {
+    "Arizona Cardinals": "ARI",
+    "Atlanta Falcons": "ATL",
+    "Baltimore Ravens": "BAL",
+    "Buffalo Bills": "BUF",
+    "Carolina Panthers": "CAR",
+    "Chicago Bears": "CHI",
+    "Cincinnati Bengals": "CIN",
+    "Cleveland Browns": "CLE",
+    "Dallas Cowboys": "DAL",
+    "Denver Broncos": "DEN",
+    "Detroit Lions": "DET",
+    "Green Bay Packers": "GB",
+    "Houston Texans": "HOU",
+    "Indianapolis Colts": "IND",
+    "Jacksonville Jaguars": "JAX",
+    "Kansas City Chiefs": "KC",
+    "Las Vegas Raiders": "LV",
+    "Oakland Raiders": "LV",
+    "Los Angeles Rams": "LA",
+    "St. Louis Rams": "LA",
+    "Los Angeles Chargers": "LAC",
+    "San Diego Chargers": "LAC",
+    "Miami Dolphins": "MIA",
+    "Minnesota Vikings": "MIN",
+    "New England Patriots": "NE",
+    "New Orleans Saints": "NO",
+    "New York Giants": "NYG",
+    "New York Jets": "NYJ",
+    "Philadelphia Eagles": "PHI",
+    "Pittsburgh Steelers": "PIT",
+    "Seattle Seahawks": "SEA",
+    "San Francisco 49ers": "SF",
+    "Tampa Bay Buccaneers": "TB",
+    "Tennessee Titans": "TEN",
+    "Washington Commanders": "WAS",
+    "Washington Redskins": "WAS",
+    "Washington Football Team": "WAS",
+    "STL": "LA",
+    "LAR": "LA",
+    "SD": "LAC",
+    "OAK": "LV",
+    "JAC": "JAX",
+    "WSH": "WAS",
+}
 
 
 def digest(path):
@@ -78,7 +123,10 @@ POLICY = {
     "box": "All numeric past player observations; IDs/clock fields excluded.",
     "team_box": "All numeric past team observations; future values are labels only.",
     "plays": "All numeric past rush/target play summaries, plus red-zone opportunities.",
-    "participation": "All numeric past participation fields, joined by game/play IDs.",
+    "participation": (
+        "Numeric past fields joined by game/play IDs; current-season 2023+ FTN is masked "
+        "because the archive is published after the postseason."
+    ),
     "snaps": "Past observations; exact PFR→GSIS crosswalk only.",
     "ngs": "Past weekly NGS aggregates, not frame-level player tracking; week 0 excluded.",
     "injuries": (
@@ -196,10 +244,9 @@ def load_raw():
     team = finite(read_family("team_box")).filter(pl.col("season") <= LAST_COMPLETE_SEASON)
     team = unique_observations(team, ["team", "season", "week"])
     schedule = read_family("schedule").filter(pl.col("season") <= LAST_COMPLETE_SEASON)
-    aliases = {"STL": "LA", "LAR": "LA", "SD": "LAC", "OAK": "LV", "JAC": "JAX"}
-    box = box.with_columns(pl.col("team").replace(aliases))
-    team = team.with_columns(pl.col("team").replace(aliases))
-    schedule = schedule.with_columns(pl.col("home_team", "away_team").replace(aliases))
+    box = box.with_columns(pl.col("team").replace(TEAM_CODES))
+    team = team.with_columns(pl.col("team").replace(TEAM_CODES))
+    schedule = schedule.with_columns(pl.col("home_team", "away_team").replace(TEAM_CODES))
     identity = read_family("identity")
     crosswalk = read_family("crosswalk")
     # Conflicting crosswalk IDs are withheld, never resolved by arbitrary row order.
@@ -333,11 +380,51 @@ def aggregate_history(frame, key, prefix):
     )
 
 
-def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
+def cutoff_player_history(frame, year, origin):
+    """Keep prior observations and respect the known delayed FTN publication window."""
+    known = frame.filter(
+        (pl.col("season") < year) | ((pl.col("season") == year) & (pl.col("week") <= origin))
+    )
+    delayed = [c for c in known.columns if "__participation_" in c]
+    if year >= 2023 and delayed:
+        known = known.with_columns(
+            [
+                pl.when(pl.col("season") == year).then(None).otherwise(pl.col(c)).alias(c)
+                for c in delayed
+            ]
+        )
+    return known
+
+
+def attach_scheduled_games(candidates, all_season_games, target_games):
+    """Known teams on bye have zero games; an unmatched team remains unknown."""
+
+    def teams(games):
+        return pl.concat(
+            [games.select(pl.col(f"{side}_team").alias("team")) for side in ["home", "away"]]
+        )
+
+    known = teams(all_season_games).unique().with_columns(pl.lit(True).alias("_schedule_known"))
+    counts = teams(target_games).group_by("team").len(name="scheduled_games")
+    return (
+        candidates.join(known, on="team", how="left", validate="m:1")
+        .join(counts, on="team", how="left", validate="m:1")
+        .with_columns(
+            pl.when(pl.col("_schedule_known").fill_null(False))
+            .then(pl.col("scheduled_games").fill_null(0))
+            .otherwise(None)
+            .alias("scheduled_games")
+        )
+        .drop("_schedule_known")
+    )
+
+
+def make_panel(position="RB", horizon="week", origins=(2,), first_year=None, *, drop_unknown=True):
     """Candidates come from past production; absent completed-period production is zero.
 
     Season candidates are prior-year participants plus exactly linked drafted combine entrants.
     In-season candidates also include players observed by the origin. No future roster filter.
+    Set drop_unknown=False to preserve per-stat unknown labels for independent stat models.
     """
     raw = load_raw()
     box, player, team, sched = (raw[k] for k in ["box", "player", "team", "schedule"])
@@ -367,10 +454,10 @@ def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
                 entrants.filter((pl.col("draft_year") == year) & (pl.col("pos") == position))
                 .select(
                     "player_id",
-                    pl.col("draft_team").alias("team"),
+                    pl.col("draft_team").replace(TEAM_CODES).alias("team"),
                     pl.col("player_name").alias("player_display_name"),
                 )
-                .drop_nulls()
+                .drop_nulls(["player_id"])
                 .unique("player_id")
             )
             rookies = rookies.join(cand.select("player_id"), on="player_id", how="anti")
@@ -383,7 +470,7 @@ def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
             if not cand.height:
                 continue
             before = player.filter(pl.col("season") == year - 1)
-            recent = player.filter((pl.col("season") == year) & (pl.col("week") <= origin))
+            recent = cutoff_player_history(player, year, origin).filter(pl.col("season") == year)
             cand = cand.join(
                 aggregate_history(before, "player_id", "prior"), on="player_id", how="left"
             )
@@ -404,11 +491,24 @@ def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
             rate_history = history.filter(pl.col("season") == (year if origin else year - 1))
             exposure = origin if origin else ends[year - 1]
             sums = rate_history.group_by("player_id").agg(
-                *[pl.col(s).sum().alias(f"history_{s}") for s in STATS],
+                *[
+                    pl.when(pl.col(s).null_count() == 0)
+                    .then(pl.col(s).sum())
+                    .otherwise(None)
+                    .alias(f"history_{s}")
+                    for s in STATS
+                ],
                 pl.col("week").n_unique().alias("history_games"),
             )
             cand = cand.join(sums, on="player_id", how="left").with_columns(
-                pl.col([f"history_{s}" for s in STATS] + ["history_games"]).fill_null(0),
+                *[
+                    pl.when(pl.col("history_games").is_null())
+                    .then(0)
+                    .otherwise(pl.col(f"history_{s}"))
+                    .alias(f"history_{s}")
+                    for s in STATS
+                ],
+                pl.col("history_games").fill_null(0),
                 pl.lit(exposure).alias("history_weeks"),
             )
             for label, tf in [
@@ -453,8 +553,16 @@ def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
             unknown = cand.filter(
                 pl.any_horizontal([pl.col(f"y_{s}").is_null() for s in STATS])
             ).height
-            cand = cand.drop_nulls([f"y_{s}" for s in STATS])
-            audit.append({"year": year, "origin": origin, "excluded_unknown": unknown})
+            if drop_unknown:
+                cand = cand.drop_nulls([f"y_{s}" for s in STATS])
+            audit.append(
+                {
+                    "year": year,
+                    "origin": origin,
+                    "excluded_unknown": unknown if drop_unknown else 0,
+                    "unknown_target_rows": unknown,
+                }
+            )
             future_team = (
                 team.filter(
                     (pl.col("season") == year) & (pl.col("week") > origin) & (pl.col("week") <= end)
@@ -469,25 +577,19 @@ def make_panel(position="RB", horizon="week", origins=(2,), first_year=None):
                 )
             )
             cand = cand.join(future_team, on="team", how="left").with_columns(
-                pl.col("y_team_carries", "y_team_targets", "y_team_plays").fill_null(0),
                 pl.lit(year).alias("year"),
                 pl.lit(origin).alias("origin"),
                 pl.lit(end - origin).alias("weeks"),
                 pl.lit(position).alias("position"),
                 pl.lit(horizon).alias("horizon"),
             )
-            games = (
-                pl.concat(
-                    [
-                        target_games.select(pl.col(f"{side}_team").alias("team"))
-                        for side in ["home", "away"]
-                    ]
-                )
-                .group_by("team")
-                .len(name="scheduled_games")
-            )
-            cand = cand.join(games, on="team", how="left").with_columns(
-                pl.col("scheduled_games").fill_null(0)
+            cand = attach_scheduled_games(
+                cand, sched.filter(pl.col("season") == year), target_games
+            ).with_columns(
+                [
+                    pl.when(pl.col("scheduled_games") == 0).then(0).otherwise(pl.col(c)).alias(c)
+                    for c in ["y_team_carries", "y_team_targets", "y_team_plays"]
+                ]
             )
             # Closing lines for the target period are a separately labelled oracle sensitivity.
             markets = []

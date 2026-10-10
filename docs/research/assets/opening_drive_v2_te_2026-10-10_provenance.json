@@ -1,0 +1,13 @@
+{
+  "campaign_id": "opening_drive_v2_te",
+  "run": "experiments/future_player_lab/runs/opening_drive_v2_te_003",
+  "report_sha256": "575eb0b2b3dd2ea9ee2ed826b1955a0f4895224742d55fd4286b55368e41e032",
+  "audit_sha256": "569c79f5abef7b3aa8baae4d3ab4573c3b07cb4fcdda4c19925dd9abc03fc3d4",
+  "manifest_sha256": "9d0c07931f073f3a289df445a1778df3822176258175499cd6875bfd0866f7cd",
+  "cells": {
+    "te_remaining": "f9d7163a035c0af6a810bc2929e585bf42c2d7ad79d3c27ea7dd006a4ca3795a",
+    "te_season": "0868b36e8cea5a6acfbc45ede8cc7792a8f14b0d002d24d777e54874122fd6c5"
+  },
+  "regression_tests": "120 passed",
+  "source_snapshot": "experiments/future_player_lab/runs/opening_drive_v2_te_003/source_snapshot"
+}

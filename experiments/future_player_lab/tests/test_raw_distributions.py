@@ -192,7 +192,7 @@ def test_real_raw_cutoffs_unknowns_and_absent_production(monkeypatch):
     assert features == names
     assert base.select("player_id", *features).equals(other.select("player_id", *features))
     assert not base["y_points"].equals(other["y_points"])
-    known = base.filter(pl.col("y_carries") > 0)["player_id"][0]
+    known = base.filter((pl.col("y_carries") > 0) & (pl.col("history_games") > 0))["player_id"][0]
     changed = dict(raw)
     changed["box"] = raw["box"].with_columns(
         pl.when(future & (pl.col("week") == 3) & (pl.col("player_id") == known))
@@ -203,6 +203,20 @@ def test_real_raw_cutoffs_unknowns_and_absent_production(monkeypatch):
     unknown, _, audit = data.make_panel(first_year=2025)
     assert not unknown.filter(pl.col("player_id") == known).height
     assert audit["excluded_unknown"].sum() == 1
+    preserved, _, _ = data.make_panel(first_year=2025, drop_unknown=False)
+    partial = preserved.filter(pl.col("player_id") == known)
+    assert partial.height == 1
+    assert partial["y_carries"][0] is None
+    assert partial["y_rushing_yards"][0] is not None
+    changed = dict(raw)
+    changed["box"] = raw["box"].with_columns(
+        pl.when((pl.col("season") == 2025) & (pl.col("week") <= 2) & (pl.col("player_id") == known))
+        .then(None)
+        .otherwise(pl.col("carries"))
+        .alias("carries")
+    )
+    past_unknown, _, _ = data.make_panel(first_year=2025, drop_unknown=False)
+    assert past_unknown.filter(pl.col("player_id") == known)["history_carries"][0] is None
     changed = dict(raw)
     changed["box"] = raw["box"].filter(~(future & (pl.col("player_id") == known)))
     absent, _, _ = data.make_panel(first_year=2025)

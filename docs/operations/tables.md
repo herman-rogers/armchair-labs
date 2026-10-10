@@ -1,10 +1,10 @@
-# Data pipeline: generation, tables, and GCS
+# Observation tables: generation, tables, and GCS
 
-This is the supported workflow for producing and sharing queryable data. New
-accepted datasets belong in `src/engine/tables/registry.yaml`; selected application
-products have generated recipes in `engine.tables.products`. Use the existing
-builders, validation, cache, and transport instead of adding another data loader
-or upload path. Research runs remain separate until explicitly promoted.
+This is the supported workflow for producing and sharing queryable observation data.
+New accepted datasets belong in `src/engine/tables/registry.yaml`. Use the existing
+builders, validation, cache, and transport instead of adding another data loader or
+upload path. Model outputs never enter this catalog: they live in campaign bundles
+and are served by `/api/chairstats`.
 
 ## Use the data
 
@@ -55,43 +55,20 @@ local analyst code, not an untrusted public SQL endpoint.
 
 The frontend calls FastAPI; DuckDB runs in the backend. The frontend's TanStack
 Query cache manages HTTP responses and is separate from the DuckDB query engine.
-Analysis and league-management requests use the application SQL boundary. Explicit
-research scope retains the existing artifact readers and research behavior.
+Every request that reads observations runs inside one pinned catalog scope.
 
 | Page or data | Backend read path |
 |---|---|
+| ChairStats rankings, QB production, player forecasts | Campaign bundles via `/api/chairstats`; the request names the campaign |
 | Team analysis | DuckDB `analytics.team_player_games`, followed by statistical calculations |
-| Rankings, rookies, player stats, forecasts, QB passing | DuckDB `analytics.app_analysis_*` and canonical source tables |
-| Player profiles | DuckDB `analytics.app_profiles_*`, college tables and approved forecast tables |
-| Published ranking history | DuckDB `analytics.app_history_*`, preserving release/cutoff and eligibility checks |
+| Player profiles, player directory, rookies, college history | DuckDB observation tables via `/api/tables` |
 | League ownership, teams, lineups, transactions, draft and results | Captured ESPN observations → local Parquet catalog → native DuckDB → league calculations |
-| League forecasts, accuracy and Team strength | Queried league observations, application forecast tables, queried pregame captures, and Team correlation tables |
-| Research, college research and archived boards | Existing research artifact readers; unchanged by this migration |
+| League forecasts and Team strength | ESPN observations joined with the named campaign's per-game points and team correlation tables |
 
 The boundary is `engine.tables.application.query_scope`, enabled by the API for
-analysis/league requests and disabled for explicit research scope. It pins the
-published query catalog, rejects stale/missing application tables, and routes
-shared source readers through SQL. There is no direct-Parquet fallback inside an
-application request. Manifests and policy dependencies are still verified from their
-preserved artifacts; computations after selection may use Python/Polars. Bounded
-response caches and optional precomputed responses are keyed by this same query
-catalog. Successful application responses carry `X-Data-Engine: duckdb`.
-
-`engine.tables.products` derives `app_*` recipes from the selected application and
-weekly manifests and the published ranking-history chain. It imports declared
-outputs, never arbitrary research directories. Refreshing the default registry also
-refreshes these recipes. Parquet columns retain their values with an added
-`_record_number` key; JSON records use `_record_number` and lossless `_record_json`.
-Query JSON fields with DuckDB's JSON operators:
-
-```sql
-SELECT player_id, prediction
-FROM analytics.app_analysis_rankings
-WHERE position = 'QB' AND horizon = 'rest_of_season';
-
-SELECT _record_json::JSON ->> 'id' AS entry_id
-FROM analytics.app_analysis_registry;
-```
+table-reading routes. It pins the published query catalog for the request and fails
+closed when the catalog changes mid-request. Successful observation responses carry
+`X-Data-Engine: duckdb`.
 
 League captures live under `data/league/<league-id>/<season>/data` and use the same
 `tables.build`, verification, and native cache implementation. Typed tables include
@@ -115,10 +92,8 @@ observations; a table-only replica is sufficient for direct SQL and Team analysi
 
 ```mermaid
 flowchart LR
-    A[Capture sources] --> B[Validate source batch]
-    B --> C[Build and validate products]
-    C --> D[Select application release]
-    D --> E[Build registered tables and dependents]
+    A[Capture sources] --> B[Validate observation batch]
+    B --> E[Build registered tables and dependents]
     E --> F[Atomically select table catalog]
     F --> G[Upload immutable Parquet and manifests]
     G --> H[Publish consumer catalog and handoff reference]
@@ -136,13 +111,11 @@ just data-refresh --status
 just data-refresh --version weekly_unique_id --upload  # resume this run after failure
 ```
 
-This captures the next completed regular-season week, builds a validated source
-batch, rebuilds the application products, selects their consistent release, then
-builds all refreshable registered tables and uploads the resulting query catalog.
-An unchanged week still checks recipes and retries any unfinished upload. Frozen
-research imports remain manual. `--force` incorporates reviewed same-week source
-corrections. Source acquisition, forecast eligibility and season-end rules are
-explained in [refreshing application data](refresh-data.md).
+This captures the next completed regular-season week, builds a validated observation
+batch, then builds all refreshable registered tables and uploads the resulting query
+catalog. An unchanged week still checks recipes and retries any unfinished upload.
+Frozen research imports remain manual. `--force` incorporates reviewed same-week
+source corrections. The weekly cadence is explained in [refresh data](refresh-data.md).
 
 For table development using already captured sources, without source acquisition
 or forecast/model rebuilds:
@@ -163,21 +136,19 @@ to the objects and manifests; uploading does not make private data public.
 
 | Stage | Implementation | Result |
 |---|---|---|
-| Production orchestration | `engine.data.pipeline`, `engine.data.refresh` | Capture, build, select products, refresh/upload tables |
-| Source contracts | `engine.tables.contracts` | Keys, cutoff-safe features, labels, quality checks |
+| Production orchestration | `engine.data.pipeline`, `engine.data.refresh` | Capture, register, enrich, build the observation batch, refresh/upload tables |
+| Enrichment | `engine.data.enrich` (`sql/*.sql`) | DuckDB recipes over preserved nflverse files: positions, league scoring, identities, college |
+| Source contracts | `engine.tables.contracts` | Keys, finite quantities, per-table specs |
 | Table recipes | `engine.tables.registry`, `registry.yaml`, `builders.py` | Declared keys, dependencies, cadence, code |
-| Application promotion | `engine.tables.products` | Selected product outputs and publication history become `app_*` recipes |
-| Application reads | `engine.tables.application` | Request-scoped SQL, source/product agreement, no artifact fallback |
+| Application reads | `engine.tables.application`, `engine.tables.observations` | Request-scoped pinned catalog and the observation SQL the API uses |
 | League captures | `engine.tables.league` | Typed local Parquet catalogs and native DuckDB queries using the same build/cache code |
 | Table building | `engine.tables.build` | Versioned Parquet, schema, null counts, code snapshots, lineage |
 | Publication/retry | `engine.tables.workflow`, `transport` | Verified objects, completion manifest, consumer catalog, reference |
 | Byte transfer | `engine.data.shared`, `shared_gcs` | Content-addressed objects, deduplication, checksums, pinned generations |
 | Local query/cache | `engine.tables.query` | Read-only DuckDB snapshot of a selected catalog |
 
-`research/data_pipeline.py` and `research/refresh_nextgen.py` are compatibility
-wrappers only. `engine.board.pipeline` supports archived board/metric exports and
-source enrichment; it is not an alternative table publishing system. `engine
-clear-cache` removes download/derived caches; it does not refresh published data.
+`engine clear-cache` removes the nflverse download cache; it does not refresh
+published data.
 
 ### Publication and failure rules
 
@@ -191,9 +162,8 @@ clear-cache` removes download/derived caches; it does not refresh published data
   manifest, then the consumer catalog. Only after success is the small local
   handoff reference updated. Upload failure retains validated local tables and
   the previous published reference. Rerun the same command to retry.
-- Application publication and table publication are separate atomic steps. If
-  table building fails after application publication, Team analysis withholds
-  mismatched observations until the refresh succeeds. Resume the run or execute
+- Batch building and table publication are separate atomic steps. If table
+  building fails after a batch is built, resume the run or execute
   `just tables refresh team_player_games --upload`.
 - `--due` measures elapsed hours since a successful build. Scheduling does not
   create new source observations: the full data refresh captures them first.
@@ -206,13 +176,13 @@ data refresh --upload`. No scheduler is installed automatically. Equivalent cron
 15 6 * * * cd /absolute/path/fantasy && /absolute/path/uv run --extra shared-data engine data refresh --upload >> /absolute/path/data-refresh.log 2>&1
 ```
 
-Advanced bootstrap/staged builds use `engine data build`, `enrich`, `tables`,
-`products`, `publish`, and `verify`; inspect each command's `--help`. `build` stages
-an immutable source batch; `publish` selects a validated application/product set.
-After manual application publication, run the table refresh/upload command above.
-The normal `data refresh` command performs these steps in order.
+Advanced bootstrap/staged builds use `engine data build`, `enrich`, `tables`, and
+`verify`; inspect each command's `--help`. `build` stages an immutable observation
+batch; the latest accepted batch is the source for registered `kind: source` tables.
+After a manual build, run the table refresh/upload command above. The normal
+`data refresh` command performs these steps in order.
 
-## Add or promote a table
+## Add a table
 
 For a refreshable finding, add a SQL file next to the registry and declare a recipe:
 
@@ -257,7 +227,7 @@ one output with `kind: parquet`, `source: research/my_study_001/tables/RESULT.pa
 explicit keys, cutoff and limitations, and the archive manifest in `inputs`.
 Omit `refresh_hours` for a frozen study. Include the archive in a distribution with
 `just tables publish UNIQUE_RELEASE --research my_study_001`; query consumers need
-only the promoted tables, not the research profile.
+only the registered tables, not the research profile.
 
 ## Consume from another system
 
@@ -310,11 +280,10 @@ way to select queryable tables. See [shared research inputs](shared-data.md).
 
 ## Inventory, storage, and Team analysis
 
-The unified release contains 93 tables: 25 cleaned source tables, two explicit
-postgame schedules, four analysis tables, and 62 selected application/product-history
-tables. Local league catalogs are separate. Run `just tables list` for the full
-schema inventory. Representative sources are `players`, `nfl_player_weeks`,
-`current_weeks`, `college_annual`, `preseason_features` and `season_outcomes`.
+The catalog contains the cleaned observation source tables, two explicit postgame
+schedules, and the analysis tables. Local league catalogs are separate. Run
+`just tables list` for the full schema inventory. Representative sources are
+`players`, `nfl_player_weeks`, `current_weeks`, `nfl_schedule` and `college_annual`.
 
 | Analytical table | Contents |
 |---|---|
@@ -361,18 +330,17 @@ data/tables/catalogs/<hash>.json      # immutable consistent query selection
 data/tables/current.json             # atomic local query-catalog pointer
 data/cache/tables/*.duckdb            # disposable native query database
 data/league/<league-id>/<season>/data/ # separate local league table catalog/cache
-data/research/<run>/                 # retained studies; explicit promotion only
+data/research/<run>/                 # retained studies; frozen imports by explicit recipe
 data/releases/tables/<release>.json  # immutable distribution reference
 data/releases/tables/current.json    # shareable reference to selected published tables
 ```
 
-`data/current.json` selects application forecasts/products, while the table pointer
-selects queryable datasets. Old `data/gold/` artifacts and serialized product keys
-remain readable through compatibility adapters; there is no new gold query layer.
-Never rewrite immutable historical manifests or move their referenced files.
+The table pointer selects queryable datasets; campaign bundles under
+`data/campaigns/` hold model outputs and are read directly by `/api/chairstats`.
+Old `data/gold/` batches remain readable as accepted batches; there is no gold
+query layer. Never rewrite immutable historical manifests or move their files.
 
-Validation: `uv run pytest tests/test_application_queries.py tests/test_tables.py tests/test_weekly_refresh.py
- tests/test_data_pipeline.py tests/test_team_correlations.py`. The suite checks
+Validation: `uv run pytest tests/test_tables.py tests/test_observations.py tests/test_team_correlations.py`. The suite checks
 source verification, atomic builds, dependency freshness, upload failure/retry,
 consumer inventories, fresh/offline fetch, application SQL/research isolation,
 league capture round trips, and Team analysis behavior.

@@ -1,11 +1,17 @@
 # Research
 
+Start with the [model library](../operations/model-library.md) for current methods, saved models, run inventory and scoped claim cleanup. Dated reports below remain historical evidence.
+
 Dated audits, experiments, literature reviews, and league snapshots. Each report
 retains its original scope and evidence limitations. Roster recommendations apply
 to their recorded date; research gains do not imply serving approval. Future ideas
 inside a report are not automatically scheduled work; see [plans](../plans/README.md).
 
 - [Tracking source capture and measured coverage](tracking_source_inventory_2026-10-02.md)
+- [Opening Drive: initial RB, QB, and WR tree campaign](opening_drive_2026-10-09.md)
+- [Opening Drive v2 dated availability experiment](opening_drive_v2_2026-10-10.md)
+- [Opening Drive v2 tight end extension](opening_drive_v2_te_2026-10-10.md)
+- [RB GPU trees, raw-feature landscape, and player profiles](rb_gpu_campaign_2026-10-03.md)
 - [Data integrity audit and RB role research](data_integrity_and_role_research_2026-09-22.md)
 - [Target-count integrity finding in the consolidated data](enriched_target_quality_2026-09-23.md)
 - [Research focus: predict what the strong baseline misses](incremental_information_2026-09-22.md)

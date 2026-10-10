@@ -10,10 +10,31 @@ import polars as pl
 from engine.config.settings import get_settings
 from engine.data import nflverse
 from engine.data.releases import digest, write_json
-from engine.metrics.positions import canonical_positions
-from engine.metrics.rookies import completed_cutoff
 from engine.scoring.bonuses import extract_touchdown_bonuses
 from engine.scoring.engine import score_components
+
+
+def canonical_positions(frame: pl.DataFrame, column: str = "position") -> pl.DataFrame:
+    """FB/HB are RB everywhere observations are grouped by position."""
+    return frame.with_columns(
+        pl.col(column).str.to_uppercase().replace({"FB": "RB", "HB": "RB"}).alias(column)
+    )
+
+
+def completed_cutoff(schedule: pl.DataFrame, weeks: pl.DataFrame, season: int) -> int:
+    """Only consecutive finished weeks with stat coverage for every scheduled team."""
+    games = schedule.filter((pl.col("season") == season) & (pl.col("game_type") == "REG"))
+    stats = weeks.filter(pl.col("season") == season)
+    cutoff = 0
+    for week in range(1, 19):
+        now = games.filter(pl.col("week") == week)
+        if not now.height or now["home_score"].null_count() or now["away_score"].null_count():
+            break
+        teams = set(now["home_team"]) | set(now["away_team"])
+        if not teams.issubset(set(stats.filter(pl.col("week") == week)["team"])):
+            break
+        cutoff = week
+    return cutoff
 
 
 def mapped_snaps(raw: pl.DataFrame, identities: pl.DataFrame) -> pl.DataFrame:

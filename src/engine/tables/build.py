@@ -75,11 +75,6 @@ def refresh(
     now = now or datetime.now(UTC)
     data_dir = data_dir.resolve()
     with lock(data_dir / ".runtime/table-refresh"):
-        from engine.tables.products import recipes, selection
-
-        application = selection(data_dir) if registry_path == DEFAULT_REGISTRY else {}
-        product_recipes = recipes(data_dir) if application else {}
-        registry.update(product_recipes)
         catalog = current(data_dir)
         manifests = {
             name: load_table(data_dir, name, ref)[1] for name, ref in catalog["tables"].items()
@@ -100,14 +95,9 @@ def refresh(
         order(registry, targets)
         # Rebuilding a dependency must never leave its published dependents stale.
         selected = set(order(registry, targets))
-        # Application outputs must advance with their selected source/products,
-        # even when an individual analytical table was explicitly requested.
-        selected.update(product_recipes)
         # A validated input batch is imported as a unit, so querying two base
         # tables cannot accidentally combine different source vintages.
-        if any(registry[n].kind == "source" for n in selected) or (
-            application and application != catalog.get("application")
-        ):
+        if any(registry[n].kind == "source" for n in selected):
             selected.update(n for n, spec in registry.items() if spec.kind == "source")
         while True:
             dependents = {
@@ -118,11 +108,8 @@ def refresh(
                 break
             selected = expanded
         build_order = order(registry, sorted(selected))
-        refs = {
-            name: ref
-            for name, ref in catalog["tables"].items()
-            if not (application and name.startswith("app_") and name not in product_recipes)
-        }
+        # Tables that are no longer in the registry leave the catalog on the next publish.
+        refs = {name: ref for name, ref in catalog["tables"].items() if name in registry}
         results = {}
         source = (
             load_tables(data_dir)
@@ -148,8 +135,6 @@ def refresh(
             table_source = (
                 source_ref if spec.kind == "source" else (provenance[0] if provenance else None)
             )
-            if spec.builder == "engine.tables.products:build_product":
-                table_source = spec.parameters["source_release"]
             cutoffs = [m["observation_cutoff"] for _, m in dep_tables.values()]
             inherited = cutoffs[0] if cutoffs and all(c == cutoffs[0] for c in cutoffs) else {}
             cutoff = spec.observation_cutoff or (
@@ -236,16 +221,9 @@ def refresh(
             results[name] = f"built ({frame.height} rows)"
         if source and load_tables(data_dir).ref != source_ref:
             raise ValueError("Source batch changed during refresh; rerun against the new release")
-        checked_registry = read_registry(registry_path)
-        if application:
-            if selection(data_dir) != application:
-                raise ValueError("Application selection changed during table refresh")
-            checked_registry.update(recipes(data_dir))
-        if checked_registry != registry:
+        if read_registry(registry_path) != registry:
             raise ValueError("Registry changed during refresh")
-        if refs != catalog["tables"] or application != catalog.get("application", {}):
+        if refs != catalog["tables"]:
             catalog = {"schema_version": 1, "published_at": now.isoformat(), "tables": refs}
-            if application:
-                catalog["application"] = application
             publish_catalog(data_dir, catalog)
         return {"tables": results, "catalog": content_hash(catalog)}

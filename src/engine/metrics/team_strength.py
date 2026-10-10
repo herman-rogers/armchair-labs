@@ -1,7 +1,7 @@
-"""Team diagnostics: observed results, published weekly points and legal depth.
+"""Team diagnostics: observed results, campaign per-game points and legal depth.
 
 Concentration describes the allocation of points, not a calibrated floor or win
-probability. All current estimates come from our weekly forecast, never ESPN.
+probability. All current estimates come from the requested campaign, never ESPN.
 """
 
 from collections import defaultdict
@@ -111,11 +111,10 @@ def team_strength(snapshot, forecasts=None):
     ]
     aligned = bool(
         forecasts
-        and forecasts.get("source") in ("nextgen_weekly_model", "nextgen_weekly_reference")
+        and forecasts.get("source") == "campaign_per_game"
         and forecasts.get("season") == snapshot.season
         and forecasts.get("requested_week") == snapshot.week
         and forecasts.get("current_week") == snapshot.week
-        and forecasts.get("through_week") == snapshot.week - 1
         and forecasts.get("captured_at") == snapshot.captured_at
     )
     predicted = (
@@ -448,8 +447,14 @@ def team_strength(snapshot, forecasts=None):
         season=snapshot.season,
         week=snapshot.week,
         captured_at=snapshot.captured_at,
-        version=forecasts.get("version") if aligned else None,
+        campaign_id=forecasts.get("campaign_id") if aligned else None,
+        campaign_name=forecasts.get("campaign_name") if aligned else None,
+        horizon=forecasts.get("horizon") if aligned else None,
         forecast_available=aligned,
-        forecast_label="NextGen weekly estimates",
+        forecast_label=(
+            f"{forecasts['campaign_name']} per-game estimates"
+            if aligned
+            else "No campaign forecast"
+        ),
         teams=teams,
     )

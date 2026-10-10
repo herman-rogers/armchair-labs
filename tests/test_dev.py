@@ -6,9 +6,32 @@ import io
 import os
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
+from threading import Event
+from unittest.mock import Mock
+
+import pytest
 
 from engine import dev
+
+
+def test_readiness_fails_for_data_errors_even_if_server_is_running(monkeypatch):
+    error = urllib.error.HTTPError(
+        "http://localhost/api/status", 409, "Conflict", {}, io.BytesIO(b"stale tables")
+    )
+    monkeypatch.setattr(dev.urllib.request, "urlopen", Mock(side_effect=error))
+    process = Mock()
+    process.poll.return_value = None
+    with pytest.raises(RuntimeError, match="stale tables"):
+        dev.wait_ready([error.url], [process], Event())
+
+
+def test_readiness_rejects_a_server_that_exited():
+    process = Mock()
+    process.poll.return_value = 1
+    with pytest.raises(RuntimeError, match="server exited"):
+        dev.wait_ready(["http://localhost"], [process], Event())
 
 
 def test_state_round_trip(tmp_path: Path) -> None:

@@ -58,46 +58,7 @@ tables:
     limitations:
       - Frozen historical study; not updated by the daily refresh job.
 
-  # Cleaned pipeline outputs are ordinary SQL tables in this same catalog.
-  forecast_quarantine:
-    description: Candidate folds with only later market admission evidence; excluded from features.
-    grain: One row per player_id, forecast_season, forecast_cutoff_date.
-    primary_key:
-    - player_id
-    - forecast_season
-    - forecast_cutoff_date
-    kind: source
-    source: forecast_quarantine
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: quarantine
-  preseason_features:
-    description: One player / forecast season / cutoff; production statistics refer to source_season.
-    grain: One row per player_id, forecast_season, forecast_cutoff_date.
-    primary_key:
-    - player_id
-    - forecast_season
-    - forecast_cutoff_date
-    kind: source
-    source: preseason_features
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: asof_features
-  season_outcomes:
-    description: Realized outcomes for the same candidate keys; incomplete seasons remain null.
-    grain: One row per player_id, forecast_season, forecast_cutoff_date.
-    primary_key:
-    - player_id
-    - forecast_season
-    - forecast_cutoff_date
-    kind: source
-    source: season_outcomes
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: labels
+  # Cleaned pipeline observations are ordinary SQL tables in this same catalog.
   players:
     description: Stable NFL identities and biographical/draft fields; not historical roster states.
     grain: One row per gsis_id.
@@ -141,31 +102,6 @@ tables:
     - season
     kind: source
     source: nfl_player_seasons
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: observations
-  nfl_team_seasons:
-    description: Observed records; filter by event/known date before joining a forecast cutoff.
-    grain: One row per team, season.
-    primary_key:
-    - team
-    - season
-    kind: source
-    source: nfl_team_seasons
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: observations
-  nfl_weekly_usage:
-    description: Observed records; filter by event/known date before joining a forecast cutoff.
-    grain: One row per player_id, season, week.
-    primary_key:
-    - player_id
-    - season
-    - week
-    kind: source
-    source: nfl_weekly_usage
     min_rows: 0
     refresh_hours: 24
     parameters:
@@ -261,17 +197,6 @@ tables:
     - player_id
     kind: source
     source: current_players
-    min_rows: 0
-    refresh_hours: 24
-    parameters:
-      role: observations
-  nfl_transactions:
-    description: Source records with a release-local row key; unresolved evidence is retained.
-    grain: One row per record_id.
-    primary_key:
-    - record_id
-    kind: source
-    source: nfl_transactions
     min_rows: 0
     refresh_hours: 24
     parameters:

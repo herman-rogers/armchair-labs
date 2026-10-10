@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "purpose": "Campaign provenance and display labels; not a model-serving or promotion registry",
+  "campaigns": [
+    {
+      "campaign_id": "scout_team_v1",
+      "campaign_name": "Scout Team v1",
+      "entity_kind": "campaign",
+      "role": "Common campaign for preserved original RB models and saved QB forecasts; capacities differ by model",
+      "positions": [
+        "RB",
+        "QB"
+      ],
+      "family_ids": [
+        "rb-gpu",
+        "rb-representations",
+        "rb-draft",
+        "rb-play-context",
+        "qb-passing",
+        "qb-capacity"
+      ],
+      "run_patterns": [
+        "data/campaigns/scout_team_v1",
+        "data/research/qb_boosting_capacity_20260924_r1",
+        "data/research/weekly_20261008_w4_r3_qb_research",
+        "data/research/weekly_20261008_w4_r3_passing_research",
+        "experiments/future_player_lab/runs/scout_team_import_20261010_001"
+      ],
+      "config_paths": [],
+      "saved_model_manifest": "data/campaigns/scout_team_v1/manifest.json",
+      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists; RB saved estimators retained, QB exports saved forecasts only",
+      "api_bundle": "data/campaigns/scout_team_v1",
+      "sources": [
+        "docs/operations/model-campaigns.md",
+        "docs/research/rb_gpu_campaign_2026-10-03.md",
+        "docs/research/qb_boosting_capacity_2026-09-24.md"
+      ],
+      "source_artifact_paths": [
+        "data/research/weekly_20261008_w4_r3_delivery/qb_variations/manifest.json",
+        "data/research/weekly_20261008_w4_r3_delivery/qb_variations/report.json",
+        "data/research/weekly_20261008_w4_r3_delivery/qb_variations/decisions.json",
+        "data/research/weekly_20261008_w4_r3_delivery/qb_variations/predictions.parquet",
+        "data/research/weekly_20261008_w4_r3_delivery/qb_passing/report.json",
+        "data/research/weekly_20261008_w4_r3_delivery/qb_passing/current.parquet",
+        "data/research/qb_boosting_capacity_20260924_r1/report.json"
+      ],
+      "limitations": [
+        "QB passing forecasts use selected attempt and yards-per-attempt policies; the QB capacity study supplies evidence, not saved estimator weights.",
+        "Membership is not a claim that all historical models were GPU trees or predict comparable targets."
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/rb_campaign_comparison_20261010_001",
+      "saved_model_manifest_sha256": "dd762aa30d44b3977357437a6646947afbe4126facc37af4cbe444f02d5899c4"
+    },
+    {
+      "campaign_id": "rb_exploratory_research",
+      "campaign_name": "RB Exploratory Research",
+      "role": "Original RB exploratory source study retained within Scout Team v1; original fits and controlled extensions preserved for comparison",
+      "positions": [
+        "RB"
+      ],
+      "family_ids": [
+        "rb-gpu",
+        "rb-representations",
+        "rb-draft",
+        "rb-play-context"
+      ],
+      "run_patterns": [
+        "experiments/future_player_lab/runs/rb_gpu_*",
+        "experiments/future_player_lab/runs/rb_ppr_2026_w2_*"
+      ],
+      "config_paths": [
+        "experiments/future_player_lab/forecasting/registry/rb_ppr_v1.json"
+      ],
+      "saved_model_manifest": "experiments/future_player_lab/runs/rb_gpu_20261003_001/final_models/manifest.json",
+      "saved_model_manifest_sha256": "d3f88c1b431060c08d2e5551ffad2f5a8b596e77c562e03239ba8302aee3a7a7",
+      "access": "Source study and original saved-model loader retained; verified exported RB forecasts are grouped under Scout Team v1",
+      "api_bundle": null,
+      "sources": [
+        "docs/research/rb_gpu_campaign_2026-10-03.md",
+        "experiments/future_player_lab/forecasting/README.md"
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/rb_campaign_comparison_20261010_001",
+      "entity_kind": "source_study",
+      "parent_campaign_id": "scout_team_v1"
+    },
+    {
+      "campaign_id": "opening_drive_v1",
+      "campaign_name": "Opening Drive v1",
+      "role": "New position-specific RB, QB and WR weights under the first shared campaign protocol",
+      "positions": [
+        "RB",
+        "QB",
+        "WR"
+      ],
+      "family_ids": [
+        "campaign-trees"
+      ],
+      "run_patterns": [
+        "experiments/future_player_lab/runs/opening_drive_v1_*",
+        "experiments/future_player_lab/runs/opening_drive_review_*",
+        "experiments/future_player_lab/runs/opening_drive_qb_comparison_*",
+        "data/campaigns/opening_drive_v1"
+      ],
+      "config_paths": [
+        "experiments/future_player_lab/campaigns/configs/opening_drive_v1.json"
+      ],
+      "saved_model_manifest": "data/campaigns/opening_drive_v1/manifest.json",
+      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists",
+      "api_bundle": "data/campaigns/opening_drive_v1",
+      "sources": [
+        "docs/operations/model-campaigns.md",
+        "experiments/future_player_lab/campaigns/README.md"
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/rb_campaign_comparison_20261010_001",
+      "entity_kind": "campaign"
+    },
+    {
+      "campaign_id": "opening_drive_v2",
+      "campaign_name": "Opening Drive v2",
+      "entity_kind": "campaign",
+      "role": "Dated availability and corrected rookie admission, with prior-year-selected QB opportunity and efficiency policies",
+      "positions": [
+        "RB",
+        "QB",
+        "WR"
+      ],
+      "family_ids": [
+        "campaign-trees"
+      ],
+      "run_patterns": [
+        "experiments/future_player_lab/runs/opening_drive_v2_[0-9]*",
+        "experiments/future_player_lab/runs/opening_drive_v2_review_*",
+        "data/campaigns/opening_drive_v2",
+        "experiments/future_player_lab/runs/opening_drive_v2_update_*"
+      ],
+      "config_paths": [
+        "experiments/future_player_lab/campaigns/configs/opening_drive_v2.json"
+      ],
+      "saved_model_manifest": "data/campaigns/opening_drive_v2/manifest.json",
+      "api_bundle": "data/campaigns/opening_drive_v2",
+      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists",
+      "sources": [
+        "docs/research/opening_drive_v2_2026-10-10.md",
+        "experiments/future_player_lab/campaigns/README.md"
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/opening_drive_v2_update_20261010_001/export",
+      "limitations": [
+        "Historical development comparison; gains are modest and mixed, with no pristine holdout.",
+        "Current draft-fact repair recovers omitted rookies; current source coverage remains incomplete.",
+        "QB revision changes attempts and passing yards only; seven other target weights are retained."
+      ],
+      "saved_model_manifest_sha256": "ce90935b2f03d84f593955cb14a30e1813b2ca3cd29a9cb61ffefb46adfe5fa7"
+    },
+    {
+      "campaign_id": "opening_drive_v2_te",
+      "campaign_name": "Opening Drive v2 \u2014 Tight End",
+      "entity_kind": "campaign",
+      "role": "TE extension of the v2 boosted-tree and dated-availability protocol with a fixed receiving/usage feature mask",
+      "positions": [
+        "TE"
+      ],
+      "family_ids": [
+        "campaign-trees"
+      ],
+      "run_patterns": [
+        "experiments/future_player_lab/runs/opening_drive_v2_te_*",
+        "data/campaigns/opening_drive_v2_te"
+      ],
+      "config_paths": [
+        "experiments/future_player_lab/campaigns/configs/opening_drive_v2_te.json"
+      ],
+      "saved_model_manifest": "data/campaigns/opening_drive_v2_te/manifest.json",
+      "api_bundle": "data/campaigns/opening_drive_v2_te",
+      "access": "Verified TE preseason and after-Week-2 forecasts through the campaign API when the local bundle exists",
+      "sources": [
+        "docs/research/opening_drive_v2_te_2026-10-10.md",
+        "experiments/future_player_lab/campaigns/README.md"
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/opening_drive_v2_te_review_20261010_001",
+      "limitations": [
+        "Historical development evaluation; no pristine holdout.",
+        "New TE population; no matched TE v1 comparison exists.",
+        "No blocking-quality or individual matchup prediction; source coverage is incomplete."
+      ],
+      "saved_model_manifest_sha256": "9d0c07931f073f3a289df445a1778df3822176258175499cd6875bfd0866f7cd"
+    }
+  ]
+}

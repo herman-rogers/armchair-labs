@@ -4,10 +4,9 @@
 default:
     @just --list
 
-# Install Python and Node dependencies.
+# Prepare dependencies, data, query tables, and ESPN without starting services.
 setup:
-    uv sync
-    cd web && npm install
+    uv run engine setup
 
 # Fast offline unit suite. Must pass without network access.
 test:
@@ -40,93 +39,21 @@ auth-login *ARGS:
 auth-status:
     uv run engine auth status
 
-# Build the draft board into data/outputs/.
-board *ARGS:
-    uv run engine board {{ARGS}}
-
-# Rebuild the rolling v2 metric backtest and frontend report.
-metric-report *ARGS:
-    uv run engine metric-report {{ARGS}}
-
-# Run report-only automated feature discovery on the retained historical folds.
-feature-discovery *ARGS:
-    uv run engine feature-discovery {{ARGS}}
-
-# Refresh rookie production, historical analogs, and walk-forward checks.
-rookie-watch history *ARGS:
-    uv run python research/rookie_watch.py --history {{history}} {{ARGS}}
-
-# Build a new immutable outlook version from repaired history and a captured NFL snapshot.
-player-outlook history current_report version:
-    uv run python research/player_outlook.py --history {{history}} --current-report {{current_report}} --version {{version}}
-
 # Pin and capture the longest public college player-stat history (no credentials).
 college-capture version through_season:
     uv run python research/capture_college.py --version {{version}} --through-season {{through_season}}
 
-# Link college careers to audited NFL outcomes; publish research without changing boards.
-college-translation source history version:
-    uv run python research/college_translation.py --source {{source}} --history {{history}} --version {{version}}
-
-# Build unified player histories from the accepted college and current outlook releases.
-player-profiles version season="2026":
-    uv run python research/player_profiles.py --version {{version}} --season {{season}}
-
-# Preserve captured sources, replay enrichment, and validate a create-only table batch.
+# Preserve captured sources, enrich offline, and validate a create-only observation batch.
 data-build *ARGS:
     uv run engine data build {{ARGS}}
-
-# Build downstream products against one table batch, without publishing the catalog.
-data-products version prefix:
-    uv run engine data products --version {{version}} --prefix {{prefix}}
-
-# Validate the complete data/product set and atomically make it current.
-data-publish version prefix:
-    uv run engine data publish --version {{version}} --prefix {{prefix}}
 
 # Verify a table batch and every raw/enriched dependency.
 data-verify version:
     uv run engine data verify --version {{version}}
 
-# Full generation → validation → table build → optional GCS upload. Use --upload on the publisher.
+# Capture the latest completed week, build the observation batch, publish tables. Use --upload on the publisher.
 data-refresh *ARGS:
     uv run --extra shared-data engine data refresh {{ARGS}}
-
-# Compatibility alias for existing automation; same implementation as data-refresh.
-nextgen-refresh *ARGS:
-    @just data-refresh {{ARGS}}
-
-# Fit cutoff-safe ranking candidates; retains every historical evaluation and decision.
-nextgen-rankings version *ARGS:
-    uv run python research/nextgen_rankings.py --version {{version}} {{ARGS}}
-
-# Verify and publish a new delivery release, preserving the source research run.
-nextgen-rankings-publish source version:
-    uv run python research/publish_nextgen_rankings.py --source {{source}} --version {{version}} --publish
-
-# Search QB rates/production and the cross-fitted fantasy bridge on all earlier history.
-qb-variations version *ARGS:
-    uv run python research/qb_variations.py --version {{version}} {{ARGS}}
-
-# Publish only target/horizon policies that passed their frozen checks.
-qb-variations-publish source version *ARGS:
-    uv run python research/publish_qb_variations.py --source {{source}} --version {{version}} --publish {{ARGS}}
-
-# Score the frozen deployed QB policies as later completed weeks become available.
-qb-variations-score source version:
-    uv run python research/score_qb_variations.py --source {{source}} --version {{version}}
-
-# Grade the frozen 2026 prospective forecast against final outcomes (post-season only).
-grade-prospective *ARGS:
-    uv run engine grade-prospective {{ARGS}}
-
-# Rebuild ignoring every cache.
-rebuild:
-    uv run engine board --force
-
-# Compare a fresh build against the published 2026 draft board.
-validate:
-    uv run engine validate
 
 # Drop cached nflverse downloads and derived artifacts.
 clear-cache:
@@ -140,7 +67,7 @@ api:
 web:
     cd web && npm run dev
 
-# Backend and frontend together.
+# Prepare the system and start backend and frontend together.
 dev:
     uv run engine dev
 
@@ -158,10 +85,6 @@ dev-status:
 
 # Everything CI would run.
 check: lint typecheck test
-
-# Precompute version-bound API profiles, historical summaries, rankings and comparisons.
-data-serving *ARGS:
-    uv run python research/build_read_models.py {{ARGS}}
 
 # Strip embedded Jupyter outputs; marimo source files already contain code only.
 notebooks-clean:
@@ -198,3 +121,23 @@ tables-refresh:
 # Fetch the published query catalog; no training/source archives required.
 data-fetch *ARGS:
     uv run --extra shared-data engine tables fetch {{ARGS}}
+
+# Inspect and verify ChairStats campaign bundles; every bundle is queryable through the API.
+campaigns *ARGS:
+    uv run --no-sync engine campaigns {{ARGS}}
+
+# Train/evaluate a campaign in the prepared GPU research environment.
+campaign-train *ARGS:
+    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.run {{ARGS}}
+
+# Score saved weights and assemble a new immutable campaign API bundle.
+campaign-score *ARGS:
+    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.forecast {{ARGS}}
+
+# Reproduce predictions directly from a published campaign bundle, offline.
+campaign-replay *ARGS:
+    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.replay {{ARGS}}
+
+# Preserve pre-Opening-Drive QB/RB research in the shared campaign store; no fitting.
+campaign-import-scout *ARGS:
+    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.scout_team {{ARGS}}

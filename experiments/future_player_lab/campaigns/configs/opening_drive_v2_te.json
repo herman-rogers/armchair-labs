@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "campaign_id": "opening_drive_v2_te",
+  "name": "Opening Drive v2 \u2014 Tight End",
+  "positions": [
+    "TE"
+  ],
+  "horizons": [
+    "remaining",
+    "season"
+  ],
+  "origin_weeks": {
+    "season": 0,
+    "remaining": 2
+  },
+  "targets": {
+    "TE": [
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "targets",
+      "receptions",
+      "receiving_yards",
+      "receiving_tds",
+      "points"
+    ]
+  },
+  "scoring": {
+    "TE": "PPR: 0.1*(rushing_yards+receiving_yards)+receptions+6*(rushing_tds+receiving_tds); excludes passing, fumbles and bonuses"
+  },
+  "validation_years": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "evaluation_years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "recipes": {
+    "xgb_raw_draft": {
+      "engine": "xgboost",
+      "depth": 3,
+      "child": 20,
+      "lambda": 15,
+      "view": "all"
+    },
+    "xgb_shallow_draft": {
+      "engine": "xgboost",
+      "depth": 2,
+      "child": 40,
+      "lambda": 30,
+      "view": "all"
+    },
+    "xgb_no_provider_draft": {
+      "engine": "xgboost",
+      "depth": 3,
+      "child": 20,
+      "lambda": 15,
+      "view": "no_provider"
+    },
+    "lightgbm_raw_draft": {
+      "engine": "lightgbm",
+      "view": "all"
+    }
+  },
+  "selection": "uniform_top2_previous3_years_equal_year_mse",
+  "lineage": "Opening Drive v2 protocol; new TE population and fixed receiving/usage feature mask",
+  "disposition": "research_preview",
+  "availability": {
+    "version": 1,
+    "cutoff": "Preseason: opening regular-season game date at 12:00 UTC; remaining: day after final Week 2 game at 12:00 UTC",
+    "transaction_clock": "Event date plus one day at 12:00 UTC; retrospective archive, not publication-time capture",
+    "roster_clock": "Completed week final game date plus one day at 12:00 UTC; undated season rosters excluded",
+    "eligibility": "Exclude latest unambiguous formal RET only; retirement announcements are features; unknown, injured, reserve, suspended and released players remain",
+    "population": "Prior-season TE participants, TE participants observed by cutoff, and exactly linked TE draft entrants; exclude only latest unambiguous formal RET. Unlinked newcomers may be absent. Team context remains last observed.",
+    "features": "Fixed TE receiving/usage mask on shared numeric history windows, plus 23 availability__ fields; no outcome-based feature selection",
+    "source_vintage": "Retrospective reconstructed cutoffs; no pristine prospective claim"
+  }
+}

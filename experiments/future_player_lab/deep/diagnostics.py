@@ -90,9 +90,12 @@ def input_coverage(data):
     # horizons as four independent sources of preseason information.
     for position in ["QB", "RB", "WR", "TE"]:
         for population in ["all", "rookie", "returner", "market_only"]:
-            mask = (panel["position"].to_numpy() == position) & (
-                panel["horizon"].to_numpy() == "season"
-            ) & (panel["year"].to_numpy() >= 2019) & (panel["year"].to_numpy() <= 2025)
+            mask = (
+                (panel["position"].to_numpy() == position)
+                & (panel["horizon"].to_numpy() == "season")
+                & (panel["year"].to_numpy() >= 2019)
+                & (panel["year"].to_numpy() <= 2025)
+            )
             if population != "all":
                 mask &= panel["population"].to_numpy() == population
             if not mask.any():

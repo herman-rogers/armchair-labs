@@ -1,10 +1,10 @@
-import { RankMovement } from './RankMovement'
-import { weeklyForecastsQuery, rankingHistoryQuery, leagueQuery, matchupsQuery, rankingsQuery } from '../api/queries'
+import { weeklyForecastsQuery, leagueQuery, matchupsQuery, rankingsQuery } from '../api/queries'
+import { useCampaignChoice } from '../api/queries/hooks'
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from 'react-router'
 import { lazy, Suspense, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { refreshObservations } from '../api/nextgen'
-import type { WeeklyForecastSide, LeagueObservations, MatchupSide, ObservedLineup, RankingsResponse } from '../api/nextgen'
+import { refreshObservations, type WeeklyForecastSide, type LeagueObservations, type MatchupSide, type ObservedLineup } from '../api/league'
+import { describeHorizon, type RankingsResponse } from '../api/chairstats'
 import { useDataRelease } from '../dataRelease'
 import { DataTable, type Column } from './DataTable'
 import { LeagueAttention, PlayerStatus, PlayerNotes } from './LeagueAttention'
@@ -12,7 +12,8 @@ import { leaguePath, matchupPath, playerPath, teamPath, useUrlFlag, useUrlState 
 import { LeagueOverview } from './LeagueOverview'
 import { TeamSelect } from './TeamSelect'
 import { StickyFooter } from './StickyFooter'
-import { forecastFor, forecastBasis, leagueSummary } from '../leagueSummary'
+import { CampaignSelect } from './CampaignSelect'
+import { forecastFor, leagueSummary } from '../leagueSummary'
 import { PlayerLink } from './PlayerLink'
 import { PositionOptions, QueryError, SelectField } from './Controls'
 import { LEAGUE_POSITION_FILTERS } from '../positions'
@@ -33,34 +34,28 @@ const rosterColumns: Column<LeaguePlayer>[] = [
 ]
 
 function Roster({ rows, rankings, sortParam }: { rows: LeaguePlayer[]; rankings?: RankingsResponse; sortParam?: string }) {
-  const { token } = useDataRelease()
-  const history = useQuery(rankingHistoryQuery('rest_of_season', token))
-  const previous = history.data?.version === rankings?.version ? history.data?.snapshots.at(-1) : undefined
-  const priorRanks = new Map(previous?.rankings.map(r => [r.player_id, r.overall_rank]))
   const byId = new Map(rankings?.rankings.map(r => [r.player_id, r]))
-  const ranked = rows.map(r => ({ ...r, nextgen_overall: byId.get(r.player_id ?? '')?.overall_rank, nextgen_rank: byId.get(r.player_id ?? '')?.position_rank, nextgen_points: byId.get(r.player_id ?? '')?.prediction, nextgen_basis: byId.get(r.player_id ?? '')?.evidence_status }))
+  const label = rankings ? rankings.campaign_name : 'Campaign'
+  const ranked = rows.map(r => { const f = byId.get(r.player_id ?? ''); return { ...r, model_overall: f?.overall_rank, model_rank: f?.position_rank, model_points: f?.prediction, model_per_game: f?.points_per_game } })
   const columns: Column<typeof ranked[number]>[] = [...rosterColumns.slice(0, 2),
-    { key: 'nextgen_overall', label: 'NextGen · overall', title: 'Published rest-of-season points rank across the full skill-player pool, before ownership or search filters.', initial: 'asc', render: r => rank(r.nextgen_overall) },
-    { key: 'rank_movement', label: 'Rank change', title: previous ? `Overall rank movement from the published Week ${previous.through_week} cutoff to Week ${rankings?.report.through_week}.` : 'No previous published rank available.', value: r => { const prior = priorRanks.get(r.player_id ?? ''); return prior != null && r.nextgen_overall != null ? prior - r.nextgen_overall : null }, render: r => <RankMovement current={r.nextgen_overall} previous={priorRanks.get(r.player_id ?? '')} /> },
-    { key: 'nextgen_rank', label: 'NextGen · position', title: 'Rest-of-season points rank across the full position pool, before ownership filtering.', initial: 'asc', render: r => r.nextgen_rank == null ? '—' : `${r.position}${r.nextgen_rank}` },
-    { key: 'nextgen_points', label: 'Remaining points', title: 'Published NextGen forecast; not a weekly lineup estimate or bid.', render: r => fixed(r.nextgen_points) },
+    { key: 'model_overall', label: `${label} · overall`, title: 'Rank across every position in the chosen campaign and horizon, before ownership or search filters.', initial: 'asc', render: r => rank(r.model_overall) },
+    { key: 'model_rank', label: `${label} · position`, title: 'Rank within the model that forecast this position.', initial: 'asc', render: r => r.model_rank == null ? '—' : `${r.position}${r.model_rank}` },
+    { key: 'model_points', label: `${rankings ? describeHorizon(rankings.horizon) : 'Horizon'} points`, title: 'Predicted points over the horizon; not a weekly lineup estimate or bid.', render: r => fixed(r.model_points) },
+    { key: 'model_per_game', label: 'Per game', title: 'Horizon points divided by scheduled games.', render: r => fixed(r.model_per_game) },
     ...rosterColumns.slice(2),
-    { key: 'nextgen_basis', label: 'Forecast basis', title: 'Historically tested model or explicitly labelled reference.', align: 'left', render: r => r.nextgen_basis === 'validated_forecast' ? 'Historically validated' : r.nextgen_basis === 'reference' ? 'Reference' : 'Unavailable' },
   ]
-  return <>
-    <DataTable rows={ranked} columns={columns} defaultSort="nextgen_points" sortParam={sortParam} rowKey={r => r.espn_id} rowLabel={r => r.player_display_name}
+  return <DataTable rows={ranked} columns={columns} defaultSort="model_points" sortParam={sortParam} rowKey={r => r.espn_id} rowLabel={r => r.player_display_name}
     emptyMessage="No captured players match these filters." rowClass={r => r.attention?.some(f => f.severity === 'urgent') ? 'attention-row' : undefined} profileHref={r => r.player_id ? playerPath(r.player_id) : undefined} />
-  </>
 }
 
 function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: MatchupSide; forecast?: WeeklyForecastSide; players?: LeaguePlayer[]; currentPlayers?: LeaguePlayer[]; rankings?: RankingsResponse }) {
   const playersByEspnId = new Map(players?.map(p => [p.espn_id, p]))
   const ranksByPlayerId = new Map(rankings?.rankings.map(r => [r.player_id, r.overall_rank]))
-  const nextgenRank = (row: ObservedLineup) => ranksByPlayerId.get(playersByEspnId.get(row.espn_id)?.player_id ?? '')
+  const modelRank = (row: ObservedLineup) => ranksByPlayerId.get(playersByEspnId.get(row.espn_id)?.player_id ?? '')
   const columns: Column<ObservedLineup>[] = [
     { key: 'slot', label: 'Slot', title: 'The lineup slot recorded for this week, colored by player position.', align: 'left', initial: 'asc', render: r => <span className={`pos ${r.position ?? ''}`} title={r.position ? `Position: ${r.position}` : undefined}>{r.slot}</span> },
     { key: 'player_display_name', label: 'Player', title: 'Recorded weekly lineup; includes kickers and defenses.', align: 'left', render: r => <PlayerLink playerId={currentPlayers?.find(p => p.espn_id === r.espn_id)?.player_id}>{r.player_display_name}</PlayerLink> },
-    { key: 'nextgen_overall', label: 'NextGen · overall', title: 'Current published remaining-season points rank across the full skill-player pool, not a rank for the selected week.', initial: 'asc', value: nextgenRank, render: r => rank(nextgenRank(r)) },
+    { key: 'model_overall', label: `${rankings?.campaign_name ?? 'Campaign'} · overall`, title: 'Overall rank in the chosen campaign and horizon, not a rank for the selected week.', initial: 'asc', value: modelRank, render: r => rank(modelRank(r)) },
     ...(currentPlayers ? [
       { key: 'injury_status', label: 'Status', title: 'Captured ESPN status from the current snapshot only.', align: 'left' as const,
         value: (r: ObservedLineup) => currentPlayers.find(p => p.espn_id === r.espn_id)?.injury_status,
@@ -69,7 +64,7 @@ function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: M
         render: (r: ObservedLineup) => { const p = currentPlayers.find(p => p.espn_id === r.espn_id); return p ? <PlayerNotes player={p} /> : null } },
     ] : []),
     { key: 'points', label: 'Points', title: 'ESPN fantasy points recorded for this week.', render: r => fixed(r.points) },
-    { key: 'model_points', label: 'NextGen weekly points', title: 'One-week model points for this week; reference scopes are labeled. Missing forecasts remain unknown.', value: r => forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction, render: r => fixed(forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction) },
+    { key: 'model_points', label: 'Per-game points', title: 'Campaign horizon points per scheduled game for this player. Missing forecasts remain unknown.', value: r => forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction, render: r => fixed(forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction) },
     { key: 'pro_opponent', label: 'Opponent', title: 'NFL opponent recorded for the selected week.', align: 'left', render: r => r.on_bye ? 'Bye' : r.pro_opponent ?? '—' },
   ]
   const benchColumns: Column<ObservedLineup>[] = [
@@ -77,16 +72,16 @@ function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: M
     ...columns.slice(1),
   ]
   return <section><h4>{side.team_name}</h4>
-    <p>{fixed(side.score)} recorded points · {fixed(forecast?.model_projection)} NextGen weekly points</p>
+    <p>{fixed(side.score)} recorded points · {fixed(forecast?.model_projection)} campaign per-game points</p>
     {side.lineup_available ? <><h5>Starters</h5><DataTable rows={side.lineup.filter(r => r.started)} columns={columns} defaultSort="slot" rowKey={r => r.espn_id} />
       <h5>Bench & reserve</h5><DataTable rows={side.lineup.filter(r => !r.started)} columns={benchColumns} defaultSort="points" rowKey={r => r.espn_id} emptyMessage="No recorded bench or reserve entries." /></>
       : <p>No lineup captured for this week. Current rosters are available under Team Strength.</p>}
   </section>
 }
 
-function Matchups({ overview, rankings }: { overview?: LeagueObservations; rankings?: RankingsResponse }) {
+function Matchups({ overview, rankings, campaignId, horizon }: { overview?: LeagueObservations; rankings?: RankingsResponse; campaignId: string; horizon: string }) {
   const { token } = useDataRelease()
-  const modelQuery = useQuery(weeklyForecastsQuery(token))
+  const modelQuery = useQuery(weeklyForecastsQuery(campaignId, horizon, token))
   const { matchupWeek, homeId, awayId } = useParams()
   const validPath = /^[1-9]\d*$/.test(matchupWeek ?? '') && Number(matchupWeek) <= 25 && /^\d+$/.test(homeId ?? '') && /^\d+$/.test(awayId ?? '')
   const week = validPath ? Number(matchupWeek) : null
@@ -108,49 +103,52 @@ function Matchups({ overview, rankings }: { overview?: LeagueObservations; ranki
       <h3>{game.home.team_name} vs {game.away.team_name}</h3></div>{game.involves_me && <span className="badge mine">Your matchup</span>}</div>
     <div className="matchup-scoreboard">{[game.home, game.away].map(side => <section key={side.team_id}>
       <h4>{side.team_name}</h4><strong>{fixed(side.score)}</strong><p>Recorded points</p>
-      <p>{fixed(forecastForSide(side.team_id)?.model_projection)} NextGen weekly points</p>
+      <p>{fixed(forecastForSide(side.team_id)?.model_projection)} campaign per-game points</p>
       <Link to={teamPath(side)}>View team strength →</Link>
     </section>)}</div>
-    <QueryError query={modelQuery} label="NextGen weekly forecasts unavailable" />
+    <QueryError query={modelQuery} label="Campaign forecasts unavailable" />
     <h3>Recorded lineups</h3>
-    <p className="legend">Armchair Labs ranks use today's remaining-season forecasts. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
+    <p className="legend">Ranks use the chosen campaign's horizon forecast. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
     {data.requested_week === data.current_week && !currentPlayers && <p className="notice">Current injury details are unavailable for this matchup snapshot. Review the roster alerts or refresh the league.</p>}
-    <div className="league-lineups matchup-detail-lineups">{[game.home, game.away].map(side => <Lineup key={side.team_id} side={side} forecast={forecastForSide(side.team_id)} players={overview?.players} currentPlayers={currentPlayers} rankings={rankings?.report.season === data.season ? rankings : undefined} />)}</div>
-    {data.requested_week === data.current_week && <p className="legend">Current roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.nextgen_team_rank)} · ${fixed(t?.forecast_points)} remaining player points` }).join(' / ')}. These roster totals include the bench.</p>}
+    <div className="league-lineups matchup-detail-lineups">{[game.home, game.away].map(side => <Lineup key={side.team_id} side={side} forecast={forecastForSide(side.team_id)} players={overview?.players} currentPlayers={currentPlayers} rankings={rankings} />)}</div>
+    {data.requested_week === data.current_week && <p className="legend">Current roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.team_rank)} · ${fixed(t?.forecast_points)} horizon player points` }).join(' / ')}. These roster totals include the bench.</p>}
     <nav className="page-links" aria-label="Other matchups">
       {gameIndex > 0 && <Link to={gamePath(data.matchups[gameIndex - 1])}>← Previous matchup</Link>}
       {gameIndex < data.matchups.length - 1 && <Link to={gamePath(data.matchups[gameIndex + 1])}>Next matchup →</Link>}
     </nav>
   </section>
 }
-/** League observations and the matching-season forecasts, shared by every league route through the query cache. */
+
+/** League observations plus the chosen campaign's rankings, shared by every league route through the query cache. */
 function useLeague() {
   const { token } = useDataRelease()
+  const choice = useCampaignChoice()
   const query = useQuery(leagueQuery(token))
-  const rankingQuery = useQuery(rankingsQuery('rest_of_season', token))
+  const rankingQuery = useQuery(rankingsQuery(choice.campaignId, choice.horizon))
   const data = query.data
-  const rankings = data && rankingQuery.data?.report.season === data.season ? rankingQuery.data : undefined
-  return { query, rankingQuery, data, rankings }
+  const rankings = data && rankingQuery.data?.rankings.every(r => r.season === data.season) ? rankingQuery.data : undefined
+  return { query, rankingQuery, data, rankings, choice }
 }
 
-/** Layout for `/league/*`: snapshot context, refresh and alerts. */
+/** Layout for `/league/*`: snapshot context, campaign choice, refresh and alerts. */
 export function LeagueWorkspace() {
   const { token } = useDataRelease()
   const { pathname } = useLocation()
   const isMatchups = pathname.startsWith('/league/matchups')
-  const { query, rankingQuery, data, rankings } = useLeague()
+  const { query, rankingQuery, data, rankings, choice } = useLeague()
   const client = useQueryClient()
   const refresh = useMutation({ mutationFn: () => refreshObservations(token), onSuccess: () => client.invalidateQueries({ queryKey: ['league-observations'] }) })
   const context = <>
     <div className="section-heading"><div><h3>{data?.league_name ?? 'League'}</h3></div>
       <button type="button" className="button" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? 'Refreshing…' : 'Refresh league'}</button></div>
     {data && <p className="legend">{data.season}, Week {data.week} · Captured {new Date(data.captured_at).toLocaleString()}{data.stale ? ' · saved snapshot is stale' : ''}</p>}
+    <div className="analysis-controls"><CampaignSelect choice={choice} /></div>
     {data && <LeagueAttention data={data} />}
     <QueryError query={query} /><QueryError query={refresh} />
-    <QueryError query={rankingQuery} label="Armchair Labs forecasts unavailable">. League results remain available.</QueryError>
-    {rankingQuery.isLoading && <p role="status">Loading Armchair Labs roster forecasts…</p>}
-    {data && rankingQuery.data && !rankings && <p className="notice">The forecast season does not match this league season; ranks are withheld.</p>}
-    {rankings && <p className="legend">Armchair Labs remaining-season forecasts · {rankings.report.season}, production through Week {rankings.report.through_week} · forecast through Week {Math.max(...rankings.rankings.map(r => r.end_week), rankings.report.through_week)} · published {new Date(rankings.report.published_at ?? rankings.report.generated_at).toLocaleString()}. Reference forecasts are labelled; current injury tags may be newer. Refresh league updates ESPN, not the published forecast.</p>}
+    <QueryError query={rankingQuery} label="Campaign forecasts unavailable">. League results remain available.</QueryError>
+    {rankingQuery.isLoading && <p role="status">Loading campaign forecasts…</p>}
+    {data && rankingQuery.data && !rankings && <p className="notice">The campaign's saved forecast is for another season; ranks are withheld.</p>}
+    {rankings && <p className="legend">{rankings.campaign_name} · {describeHorizon(rankings.horizon)} · saved {[...new Set(rankings.models.map(m => `${m.season} as of week ${m.origin_week}`))].join('; ')}. Forecasts do not update with news after their cutoff. Refresh league updates ESPN, not the campaign.</p>}
     {!data && !query.isError && <p role="status">Loading league observations…</p>}
   </>
   return <section aria-label="League workspace">
@@ -175,14 +173,14 @@ function TeamNavigationFooter({ data }: { data: LeagueObservations }) {
 
 /** `/league/overview` */
 export function LeagueOverviewPage() {
-  const { data, rankings } = useLeague()
-  return data ? <LeagueOverview data={data} rankings={rankings} /> : null
+  const { data, rankings, choice } = useLeague()
+  return data ? <LeagueOverview data={data} rankings={rankings} campaignId={choice.campaignId} horizon={choice.horizon} /> : null
 }
 
 /** Weekly schedule and dedicated game pages share the same cached observations. */
 export function LeagueMatchups() {
-  const { data, rankings } = useLeague()
-  return <Matchups overview={data} rankings={rankings} />
+  const { data, rankings, choice } = useLeague()
+  return <Matchups overview={data} rankings={rankings} campaignId={choice.campaignId} horizon={choice.horizon} />
 }
 
 /** Search, position and alert filters shared by the roster and free-agent pages. */
@@ -201,7 +199,7 @@ function usePlayerFilters() {
 
 /** Teams are routes, while roster filters remain optional URL search parameters. */
 export function LeagueTeams() {
-  const { data, rankings } = useLeague()
+  const { data, rankings, choice } = useLeague()
   const { rows, controls } = usePlayerFilters()
   const { teamId, teamSlug } = useParams()
   const location = useLocation()
@@ -237,7 +235,7 @@ export function LeagueTeams() {
     </div>
     {!team && (teamId ? <p className="notice" role="alert">Team not found. Choose a team above.</p> : <p className="legend">Choose a team to view its starting lineup, scoring balance, usable depth and results.</p>)}
     {team && <>
-    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id}>
+    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id} campaignId={choice.campaignId} horizon={choice.horizon}>
       <div className="analysis-controls">{controls}</div>
       <Roster rankings={rankings} rows={roster} sortParam="sort" />
     </TeamStrength></Suspense>
@@ -252,7 +250,7 @@ export function LeagueFreeAgents() {
   if (!data) return null
   return <>
     <div className="analysis-controls">{controls}</div>
-    <h3>Captured free agents</h3><p className="legend">Ownership is from ESPN; recently dropped players may still require waivers. NextGen ranks expected remaining points, not acquisition prices.</p>
+    <h3>Captured free agents</h3><p className="legend">Ownership is from ESPN; recently dropped players may still require waivers. Campaign ranks expected horizon points, not acquisition prices.</p>
     <Roster rankings={rankings} rows={rows.filter(r => r.availability === 'free_agent')} sortParam="sort" />
   </>
 }
@@ -274,14 +272,14 @@ export function LeagueTransactions() {
 export function LeagueDraft() {
   const { data, rankings } = useLeague()
   if (!data) return null
-  const draftRows = data.draft.map(p => { const playerId = p.player_id ?? data.players.find(r => r.espn_id === p.espn_id)?.player_id; const f = forecastFor(playerId, rankings); return {...p, player_id: playerId, nextgen_overall: f?.overall_rank, nextgen_position: f ? `${f.position}${f.position_rank ?? '—'}` : '—', nextgen_points: f?.prediction, nextgen_basis: forecastBasis(f)} })
-  return <><h3>Draft recap</h3><p className="legend">Original draft order alongside today’s published remaining-season NextGen ranks. These are current forecasts, not the rankings available on draft day or retrospective draft grades. Uncovered players, kickers and defenses remain unranked.</p><DataTable rows={draftRows} columns={[
+  const label = rankings?.campaign_name ?? 'Campaign'
+  const draftRows = data.draft.map(p => { const playerId = p.player_id ?? data.players.find(r => r.espn_id === p.espn_id)?.player_id; const f = forecastFor(playerId, rankings); return {...p, player_id: playerId, model_overall: f?.overall_rank, model_position: f ? `${f.position}${f.position_rank ?? '—'}` : '—', model_points: f?.prediction} })
+  return <><h3>Draft recap</h3><p className="legend">Original draft order alongside the chosen campaign's current forecast ranks. These are saved forecasts, not the rankings available on draft day or retrospective draft grades. Uncovered players, kickers and defenses remain unranked.</p><DataTable rows={draftRows} columns={[
     {key:'overall',label:'Pick',title:'Actual overall selection.',initial:'asc'}, {key:'round',label:'Round',title:'Draft round.'},
     {key:'player_display_name',label:'Player',title:'Drafted player.',align:'left'}, {key:'team_name',label:'Team',title:'Drafting team.',align:'left'},
-    {key:'nextgen_overall',label:'NextGen · overall',title:'Current published remaining-season rank across the full skill-player pool.',initial:'asc',render:r=>rank(r.nextgen_overall)},
-    {key:'nextgen_position',label:'NextGen · position',title:'Current published position rank.',align:'left'},
-    {key:'nextgen_points',label:'Remaining points',title:'Current remaining-season forecast, not the original draft-day projection.',render:r=>fixed(r.nextgen_points)},
-    {key:'nextgen_basis',label:'Forecast basis',title:'Historically validated or explicitly labelled reference.',align:'left'},
+    {key:'model_overall',label:`${label} · overall`,title:'Overall rank in the chosen campaign and horizon.',initial:'asc',render:r=>rank(r.model_overall)},
+    {key:'model_position',label:`${label} · position`,title:'Position rank in the chosen campaign.',align:'left'},
+    {key:'model_points',label:'Horizon points',title:'Saved campaign forecast, not the original draft-day projection.',render:r=>fixed(r.model_points)},
     {key:'bid_amount',label:'Auction bid',title:'Recorded bid, when applicable.'}, {key:'keeper',label:'Keeper',title:'ESPN keeper designation.',render:r => r.keeper ? 'Yes' : '—'},
   ]} defaultSort="overall" sortParam="sort" rowKey={r => r.overall} rowClass={r => data.my_team_id != null && r.team_id === data.my_team_id ? 'mine-row' : undefined} profileHref={r => r.player_id ? playerPath(r.player_id) : undefined} rowLabel={r => r.player_display_name} emptyMessage="No draft captured." /></>
 }

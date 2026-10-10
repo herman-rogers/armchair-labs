@@ -14,8 +14,12 @@ from html import unescape
 import polars as pl
 from build_injury_archive import CACHE, GOLD, OUT, ensure_open
 
-from engine.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
-from engine.metrics.experimental import _normalized_name
+from engine.data.historical_evidence import (
+    ArticleIndexParser,
+    EvidenceCapture,
+    article_content,
+    normalized_name,
+)
 
 
 def text_of(html):
@@ -65,7 +69,7 @@ def corroborate(article, html, reports, schedule):
     for row in rows.to_dicts():
         if not row["gsis_id"] or not row["report_status"] or not row["report_primary_injury"]:
             continue
-        name = _normalized_name(row["full_name"])
+        name = normalized_name(row["full_name"])
         injuries = set(re.findall(r"[a-z]+", row["report_primary_injury"].lower())) - {
             "left",
             "right",
@@ -76,7 +80,7 @@ def corroborate(article, html, reports, schedule):
                 continue
             for mention in re.finditer(r"(?:^|,\s*)([A-Z]{1,4})\s+([^()]+?)\s*\(([^()]+)\)", text):
                 injury_words = set(re.findall(r"[a-z]+", mention[3].lower()))
-                if _normalized_name(mention[2]) == name and injuries and injuries <= injury_words:
+                if normalized_name(mention[2]) == name and injuries and injuries <= injury_words:
                     matches.append(mention[0].lstrip(", "))
         if not matches:
             continue

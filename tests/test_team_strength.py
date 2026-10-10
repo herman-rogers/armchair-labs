@@ -86,12 +86,13 @@ def fixture():
             )
         sides.append(dict(team_id=i, forecasts=predictions))
     forecast = dict(
-        source="nextgen_weekly_model",
-        version="test",
+        source="campaign_per_game",
+        campaign_id="fixture_v1",
+        campaign_name="Fixture",
+        horizon="remaining",
         season=2026,
         requested_week=3,
         current_week=3,
-        through_week=2,
         captured_at=snapshot.captured_at,
         matchups=[dict(home=sides[0], away=sides[1])],
     )
@@ -135,7 +136,6 @@ def test_no_provider_or_partial_week_leakage_and_missing_forecast_no_fallback():
     [
         ("captured_at", "old"),
         ("season", 2025),
-        ("through_week", 1),
         ("source", "espn_observations"),
     ],
 )

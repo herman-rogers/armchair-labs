@@ -10,22 +10,19 @@
 import { createBrowserRouter, redirect, type LoaderFunctionArgs } from 'react-router'
 import App, { NotFound, RouteError } from './App'
 
-const workspace = () => import('./components/NextGenView')
+const workspace = () => import('./components/Workspace')
 const league = () => import('./components/LeagueWorkspace')
-const archivedIntelligence = () => import('./components/IntelligenceView')
-const archivedLeague = () => import('./components/LeagueView')
 const profile = () => import('./components/PlayerPage')
 
 const go = (path: string) => () => redirect(path)
 
 /** Links and bookmarks from the old single-page `/?section=…` scheme. */
 const legacyRankingParams: Record<string, string> = { rank_horizon: 'horizon', rank_position: 'position', rank_search: 'q', rank_ownership: 'pool' }
-const legacyResearchViews: Record<string, string> = { evidence: 'evidence', 'qb-variations': 'qb-experiments', forecasts: 'forecasts', archive: 'archive' }
 function dashboardIndex({ request }: LoaderFunctionArgs) {
   const old = new URL(request.url).searchParams
   const section = old.get('section')
   if (section === 'league') return redirect('/league/overview')
-  if (section === 'research') return redirect(`/research/${legacyResearchViews[old.get('research') ?? ''] ?? 'evidence'}`)
+  if (section === 'research') return redirect('/research/models')
   const view = old.get('intelligence')
   if (view === 'qb-passing' || view === 'rookies') return redirect(`/intelligence/${view}`)
   const params = new URLSearchParams()
@@ -50,7 +47,7 @@ export const router = createBrowserRouter([{
           lazy: () => workspace().then(m => ({ Component: m.AnalysisSection })),
           children: [
             { index: true, loader: go('/intelligence/rankings') },
-            { path: 'rankings', lazy: () => import('./components/NextGenRankings').then(m => ({ Component: m.NextGenRankings })) },
+            { path: 'rankings', lazy: () => import('./components/ChairStatsRankings').then(m => ({ Component: m.ChairStatsRankings })) },
             { path: 'teams', lazy: () => import('./components/TeamAnalysis').then(m => ({ Component: m.TeamAnalysis })) },
             { path: 'qb-passing', lazy: () => import('./components/QBPassing').then(m => ({ Component: m.QBPassing })) },
             { path: 'rookies', lazy: () => workspace().then(m => ({ Component: m.IntelligenceRookies })) },
@@ -76,32 +73,9 @@ export const router = createBrowserRouter([{
           path: 'research',
           lazy: () => workspace().then(m => ({ Component: m.AnalysisSection })),
           children: [
-            { index: true, loader: go('/research/evidence') },
-            { path: 'evidence', lazy: () => workspace().then(m => ({ Component: m.ResearchEvidence })) },
-            { path: 'qb-experiments', lazy: () => workspace().then(m => ({ Component: m.ResearchQBExperiments })) },
-            { path: 'forecasts', lazy: () => workspace().then(m => ({ Component: m.ReferenceForecasts })) },
-            {
-              path: 'archive',
-              children: [
-                { index: true, lazy: () => workspace().then(m => ({ Component: m.ResearchArchive })) },
-                {
-                  path: 'intelligence',
-                  lazy: () => archivedIntelligence().then(m => ({ Component: m.ArchivedIntelligence })),
-                  children: [
-                    { index: true, loader: go('/research/archive/intelligence/players') },
-                    { path: ':view', lazy: () => archivedIntelligence().then(m => ({ Component: m.ArchivedIntelligenceView })) },
-                  ],
-                },
-                {
-                  path: 'league',
-                  lazy: () => archivedLeague().then(m => ({ Component: m.LeagueView })),
-                  children: [
-                    { index: true, loader: go('/research/archive/league/overview') },
-                    { path: ':view', lazy: () => archivedLeague().then(m => ({ Component: m.LeagueViewTab })) },
-                  ],
-                },
-              ],
-            },
+            { index: true, loader: go('/research/models') },
+            { path: 'models', lazy: () => workspace().then(m => ({ Component: m.ResearchModels })) },
+            { path: '*', loader: go('/research/models') },
           ],
         },
       ],

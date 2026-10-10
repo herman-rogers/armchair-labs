@@ -60,9 +60,10 @@ export interface CorrelationRisk {
   }[];
 }
 export interface TeamStrengthResponse {
-  season: number; week: number; captured_at: string; version: string | null;
+  season: number; week: number; captured_at: string;
+  campaign_id: string | null; campaign_name: string | null; horizon: string | null;
   forecast_available: boolean; forecast_label: string; forecast_issue: string | null;
   stale: boolean; teams: TeamStrength[];
 }
-export const nextgenTeamStrength = (token?: string, signal?: AbortSignal) =>
-  get<TeamStrengthResponse>('/api/nextgen/league/team-strength', token, undefined, signal)
+export const fetchTeamStrength = (campaign: string, horizon: string, token?: string, signal?: AbortSignal) =>
+  get<TeamStrengthResponse>(`/api/league/team-strength?${new URLSearchParams({ campaign, horizon })}`, token, signal)

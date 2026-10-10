@@ -13,6 +13,10 @@ from engine.data.shared import inside, json_bytes, sha256, write_new
 from engine.data.verification import observe, verified
 from engine.tables.registry import TableSpec, table_name
 
+# JSON-document tables keep a stable row order and the exact source payload.
+ROW = "_record_number"
+PAYLOAD = "_record_json"
+
 
 def content_hash(value: dict) -> str:
     return hashlib.sha256(json_bytes(value)).hexdigest()

@@ -13,16 +13,19 @@ import json
 import re
 import threading
 import time
+import unicodedata
 from datetime import UTC, date, datetime
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import polars as pl
 import requests
 
 from engine.data.nfl_transactions import _OfficialTransactionParser, parse_official_transactions
+from engine.scoring.columns import require_columns
 
 BACKFILL_FILE = "historical_transaction_backfill.parquet"
 BACKFILL_MANIFEST = "historical_backfill_manifest.json"
@@ -242,3 +245,89 @@ def article_content(html: str) -> dict:
         "paragraphs": parser.paragraphs,
         "text": " ".join(" ".join(parser.parts).split()),
     }
+
+
+def normalized_name(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode()
+    tokens = re.sub(r"[^a-z0-9 ]", " ", text.lower().replace("'", "").replace(".", "")).split()
+    while tokens and tokens[-1] in {"jr", "sr", "ii", "iii", "iv", "v"}:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def transaction_aliases(players: pl.DataFrame) -> dict[str, set[str]]:
+    """Full-name nflverse aliases keyed by GSIS id, excluding short-name aliases."""
+    aliases: dict[str, set[str]] = {}
+    available = set(players.columns)
+    for row in players.to_dicts():
+        player_id = str(row.get("gsis_id") or "")
+        if not player_id:
+            continue
+        values = [row.get("display_name")]
+        first = row.get("first_name")
+        last = row.get("last_name")
+        if first and last:
+            values.append(f"{first} {last}")
+        common = row.get("common_first_name")
+        if common and last:
+            values.append(f"{common} {last}")
+        football = row.get("football_name")
+        if football and last:
+            values.append(f"{football} {last}")
+        aliases[player_id] = {
+            normalized
+            for value in values
+            if value is not None and (normalized := normalized_name(value))
+        }
+    # Keep the schema check explicit even though aliases tolerate optional columns.
+    require_columns(list(available), ("gsis_id", "display_name"), "transaction identity input")
+    return aliases
+
+
+def season_games(season: int) -> int:
+    if season < 2004:
+        raise ValueError("Absence reconstruction supports forecast seasons 2004 onward")
+    return 17 if season >= 2021 else 16
+
+
+def validate_absences(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fail closed on malformed identity, chronology, or game scope."""
+    seen = set()
+    identities: dict[str, tuple[str, int]] = {}
+    for event in events:
+        for key in (
+            "evidence_id",
+            "absence_id",
+            "player_id",
+            "player_name",
+            "source_url",
+            "summary",
+        ):
+            if not isinstance(event.get(key), str) or not event[key].strip():
+                raise ValueError(f"Absence evidence requires {key}")
+        if event["evidence_id"] in seen:
+            raise ValueError(f"Duplicate absence evidence: {event['evidence_id']}")
+        seen.add(event["evidence_id"])
+        if not event["source_url"].startswith("https://"):
+            raise ValueError("Absence source requires an HTTPS URL")
+        published = date.fromisoformat(event["source_published_on"])
+        known = date.fromisoformat(event["known_on"])
+        date.fromisoformat(event["verified_on"])
+        if known < published:
+            raise ValueError("Absence cannot be known before its supporting source")
+        season = event["season"]
+        if type(season) is not int:
+            raise ValueError("Absence season must be an integer")
+        identity = (event["player_id"], season)
+        if identities.setdefault(event["absence_id"], identity) != identity:
+            raise ValueError("An absence incident cannot change player or season")
+        if event["kind"] not in {"suspension", "injury", "opt_out", "retirement"}:
+            raise ValueError("Unsupported absence kind")
+        games = event["unavailable_games"]
+        if (
+            not isinstance(games, list)
+            or any(type(game) is not int or not 1 <= game <= season_games(season) for game in games)
+            or len(games) != len(set(games))
+        ):
+            raise ValueError("Absences require unique regular-season team game numbers")
+    return events

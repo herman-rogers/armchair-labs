@@ -1,0 +1,14 @@
+{
+  "campaign_id": "opening_drive_v2",
+  "comparison": "Same eligible player outcomes; v1 exclusion-only selection reported separately",
+  "files": {
+    "experiments/future_player_lab/runs/opening_drive_v2_review_20261010_001/report.json": "750e888dbd23ba8e341ab1d84fa848ab75cd46c318bf1bd0acf78d395e0dfa31",
+    "experiments/future_player_lab/runs/opening_drive_v2_review_20261010_001/baseline/report.json": "327e2302679e2066e0961a64fabdf8a3df94762b72ab5aef1845101b6f5c0054",
+    "experiments/future_player_lab/runs/opening_drive_v2_review_20261010_001/replay.json": "186ce02c779adb275d01322c37b307e5af31c87571a2a9052b5481e1237c11f1",
+    "experiments/future_player_lab/runs/opening_drive_v2_review_20261010_001/api_checks.json": "d2b99773ef2feb81f819eb7c3ed414107f581218d6520131b47649db886bb1ce",
+    "experiments/future_player_lab/runs/opening_drive_v2_001/method_equivalence.json": "7ef6753361c93c3216c014c891a6041164fffd564a7a51d93dbe790695d06b21",
+    "data/campaigns/opening_drive_v2/manifest.json": "43ecaf34fe32b4defdeeb7ada0cf29bcabfd0ce44ab4c62e8b05556dcdec6f2c",
+    "data/research/opening_drive_v2_sources/manifest.json": "22df1b66a5816702be11309fa3f443910378a0292c8c5b5b3c6b61bc80b3108d",
+    "docs/research/assets/opening_drive_v2_2026-10-10_metrics.csv": "051127c83d8e867caba62df270968082b0de2766e3ff1a89a461516841b3fc29"
+  }
+}

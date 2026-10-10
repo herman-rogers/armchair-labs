@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "rb_ppr_v1",
+  "campaign_id": "rb_exploratory_research",
+  "campaign_name": "RB Exploratory Research",
+  "position": "RB",
+  "horizon": "remaining",
+  "target": "points",
+  "supported_origins": [2],
+  "default_policy": "ensemble_top3",
+  "model_directory": "experiments/future_player_lab/runs/rb_gpu_20261003_001/final_models",
+  "model_manifest_sha256": "d3f88c1b431060c08d2e5551ffad2f5a8b596e77c562e03239ba8302aee3a7a7",
+  "scoring": "Rushing/receiving PPR: yards / 10 + receptions + 6 * touchdowns. Excludes fumbles, passing, returns, conversions and bonuses.",
+  "status": "research_preview"
+}

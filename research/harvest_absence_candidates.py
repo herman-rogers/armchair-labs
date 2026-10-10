@@ -11,8 +11,12 @@ from pathlib import Path
 
 import polars as pl
 
-from engine.data.historical_evidence import EvidenceCapture, article_content
-from engine.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import (
+    EvidenceCapture,
+    article_content,
+    normalized_name,
+    transaction_aliases,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +33,7 @@ def main():
     )
     args = parser.parse_args()
     forecasts = pl.read_parquet(args.forecasts)
-    names = _transaction_aliases(pl.read_parquet(args.players))
+    names = transaction_aliases(pl.read_parquet(args.players))
     identity = defaultdict(set)
     for pid, aliases in names.items():
         for alias in aliases:
@@ -52,7 +56,7 @@ def main():
         year = article["published_on"].year
         if args.legacy and year >= 2012:
             continue
-        words = _normalized_name(re.sub(r"['’]s\b", "", article["title"])).split()
+        words = normalized_name(re.sub(r"['’]s\b", "", article["title"])).split()
         matched = set()
         for size in range(2, 6):
             for start in range(len(words) - size + 1):

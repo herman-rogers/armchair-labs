@@ -11,7 +11,7 @@ from engine.metrics.team_correlations import analyze_team
 from engine.metrics.transaction_events import _CLUBS
 from engine.tables.team_analysis import TableVersionChanged, team_session
 
-router = APIRouter(prefix="/api/nextgen", tags=["Team analysis"])
+router = APIRouter(prefix="/api/team-analysis", tags=["Team analysis"])
 
 
 def unavailable(exc: Exception) -> HTTPException:
@@ -22,7 +22,7 @@ def unavailable(exc: Exception) -> HTTPException:
     )
 
 
-@router.get("/team-analysis/catalog")
+@router.get("/catalog")
 def team_analysis_catalog():
     """The verified table version and coverage used to key browser analysis caches."""
     try:
@@ -33,7 +33,7 @@ def team_analysis_catalog():
         raise unavailable(exc) from exc
 
 
-@router.get("/team-analysis")
+@router.get("")
 def team_analysis(
     team: str = "LA",
     start: int = Query(2021, ge=2013, le=2100),

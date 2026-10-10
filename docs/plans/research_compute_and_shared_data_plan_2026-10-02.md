@@ -2,6 +2,17 @@
 
 > Planning document. Proposed work is not a statement of shipped behavior; use the [plans index](README.md) for scope and status.
 
+Implementation update, October 3, 2026: shared storage is documented in the
+[shared-data runbook](../operations/shared-data.md). Optional NVIDIA cuML,
+XGBoost CUDA and CatBoost GPU backends, explicit device checks, dependency locks,
+and representative CPU/GPU benchmarks now exist; see
+[GPU setup](../operations/gpu_research_setup.md). The independent
+[raw RB campaign](../../experiments/future_player_lab/gpu_lab/README.md) adds
+resumable model searches and saved preprocessing/models. The dated proposal below
+remains the original scope; not every proposed model, target, source, or serving
+integration is implemented by these additions.
+Measured results are retained in the [October 3 RB findings](../research/rb_gpu_campaign_2026-10-03.md).
+
 Status: planned work, October 2, 2026. Marimo and notebooks always run locally.
 Shared storage is **GCS + Parquet with a verified local cache**. Live deployment,
 bucket provisioning, and authentication setup are deferred. This document does not

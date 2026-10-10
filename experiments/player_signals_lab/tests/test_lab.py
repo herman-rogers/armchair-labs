@@ -9,10 +9,9 @@ import polars as pl
 import pytest
 from data import make_panel, role_state
 from evaluation import calibrated_intervals, paired_summary
+from experiments.player_signals_lab.nextgen import COUNTERS
 from methods import add_rates, fit_pool, matrix, mix_predictions, role_mixture
 from safety import new_run, sha256, snapshot, verify_source_pins
-
-from engine.metrics.nextgen import COUNTERS
 
 LAB = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((LAB / "config.json").read_text())

@@ -50,10 +50,9 @@ flowchart LR
 |---|---|---|
 | Preserved inputs | `data/raw/objects/<prefix>/<sha256>` | Exact copies of captured bytes, deduplicated by content hash. Original captures are never edited or hard-linked to mutable caches. |
 | Raw snapshots | `data/raw/snapshots/<version>/manifest.json` | Inventory, origin paths, hashes, source kinds, captured observation cutoffs, configuration, and retained reference provenance. |
-| Enriched | `data/enriched/releases/<version>/` | Reproducible parsing, identity resolution, repaired positions, league scoring, event replay, historical feature construction, college normalization, and retained source details. |
-| Gold | `data/gold/releases/<version>/` | Named, validated tables with schemas, primary keys, column null counts, roles, quality results, coverage, exclusions, and dependencies. |
-| Derived products | `data/research/<product-version>/` | Versioned models, profiles, reports, and validation results, bound to one gold manifest. |
-| Current catalog | `data/current.json` | Atomic selection of one gold release and a consistent set of products. Older releases remain reproducible. |
+| Enriched | `data/enriched/releases/<version>/` | DuckDB SQL recipes over the preserved provider files (`engine.data.enrich`): repaired positions, league scoring from scoring.yaml, identity resolution, college normalization. Observations only; no model features. |
+| Table batch | `data/tables/batches/<version>/` (older: `data/gold/releases/`) | Named, validated observation tables with schemas, primary keys, column null counts, roles, quality results, and dependencies. The latest accepted batch feeds the registered `kind: source` tables. |
+| Campaign bundles | `data/campaigns/<campaign_id>/` | Sealed model outputs served by `/api/chairstats`; every bundle is queryable, none is selected. |
 
 The raw store preserves what we actually have. Existing nflverse and college
 captures are provider-cache Parquet snapshots, not reconstructed original HTTP

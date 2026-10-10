@@ -7,46 +7,43 @@ Parquet datasets. See [`src/engine/api/`](../../src/engine/api/) and the
 
 ## Data and serving layers
 
-Preserved raw bytes → enriched observations → validated tables (Parquet storage, native DuckDB queries) →
-versioned research/analysis products → API responses → frontend queries.
+Observations: preserved raw bytes → enriched observations → validated tables
+(Parquet storage, native DuckDB queries) → `/api/tables`, `/api/team-analysis` and
+league joins. Models: campaign bundles under `data/campaigns/` → `/api/chairstats`.
+League: ESPN captures → local league catalog → `/api/league`.
 
-`data/current.json` atomically selects a consistent analytical release. Builds and
-research readers use Polars; analysis and league data reads use native DuckDB
-tables. Statistical calculations may still use Python/Polars after SQL selection. Manifests and
-dependency verification establish identity and integrity. The system does not require a database server or Redis service.
-Optional precomputed API JSON bundles and bounded in-process dataframe/response
-caches reduce repeated loading and serialization. They remain subordinate to source
-verification. [Pipeline contracts](data_pipeline.md) include the original migration
-record and the current serving-product contract.
+Nothing selects a model. Every published campaign bundle is queryable; the request
+names the campaign, and the frontend keeps that choice in the URL. Builds and
+research readers use Polars; observation reads use native DuckDB tables, pinned to
+one catalog per request. Manifests and dependency verification establish identity
+and integrity. The system does not require a database server or Redis service.
+[Pipeline contracts](data_pipeline.md) record the original migration.
 
 The frontend uses **TanStack Query** for server state, with centralized query options
-in [`web/src/api/queries/`](../../web/src/api/queries/). Analytical query keys include
-the catalog identity; verified release data can remain fresh until that identity
-changes. Catalog polling, request cancellation, and prefetching coordinate loads.
-Mutable league data uses a shorter freshness policy. Directory filters operate on
-the compact directory response; college results use server pagination. See the
-[frontend guide](../../web/README.md) for the precise cache and test behavior.
+in [`web/src/api/queries/`](../../web/src/api/queries/). Observation query keys include
+the table catalog checksum; campaign query keys include the campaign id and
+horizon, and responses carry the bundle's manifest checksum. Catalog polling,
+request cancellation, and prefetching coordinate loads. Mutable league data uses a
+shorter freshness policy. See the [frontend guide](../../web/README.md).
 
 ## Named analytical tables
 
 Cleaned inputs and derived analytical tables share one embedded DuckDB catalog, with recipes in `src/engine/tables/registry.yaml` and an independent
 `data/tables/current.json` selection. Research archives retain original studies;
-promoted tables have explicit keys, dependencies, cadence, and provenance.
+registered tables have explicit keys, dependencies, cadence, and provenance.
 Native DuckDB snapshots are the default query store and remain disposable caches. GCS sharing reuses the
 existing immutable transport. Production orchestration lives in `engine.data.pipeline` and `engine.data.refresh`.
 Both source refreshes and recipe-only refreshes use `engine.tables.workflow`.
 See [the data pipeline](../operations/tables.md)
-for querying, promotion, refreshes, and sharing.
+for querying, refreshes, and sharing.
 
 Team analysis uses `analytics.team_player_games` through DuckDB for its team/year
 sample, retaining the existing QB filters and complete-case statistical functions.
-Its browser cache pins the table manifest as well as the application release.
+Its browser cache pins the table manifest.
 Normal weekly publication refreshes this table and its dependent summaries.
 
 The application HTTP boundary enables `engine.tables.application.query_scope` for
-analysis and league endpoints. Published product outputs become `app_*` tables
-through `engine.tables.products`; source and product selections must match or the
-request fails closed. Research scope keeps the existing artifact readers.
+table-reading endpoints; a catalog change mid-request fails closed.
 `engine.tables.league` captures ESPN observations, reviewed news and pregame logs
 as local Parquet tables using the same build/verification/native-cache machinery.
 League observations are queried before roster, matchup and forecast calculations.
@@ -56,8 +53,9 @@ poll and is not included in the shared GCS analytics publication.
 ## Evidence and release policy
 
 The [NextGen system design](nextgen_system_design_2026-09-23.md) records the design
-implemented in September 2026: descriptive measurements, forecasts, and league
-decisions have separate evidence requirements. Its release-specific details are
+implemented in September 2026 and retired in October 2026 in favour of ChairStats
+campaign bundles: descriptive measurements, forecasts, and league decisions have
+separate evidence requirements. Its release-specific details are
 dated, not a promise that every proposed model now serves.
 
 For current commands use [operations](../operations/README.md). For the remaining

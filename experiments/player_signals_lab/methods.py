@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 from data import FAMILIES, MARKET, PROXY
+from experiments.player_signals_lab.nextgen import constrained
 from scipy.optimize import minimize
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
-
-from engine.metrics.nextgen import constrained
 
 
 def matrix(rows, columns):

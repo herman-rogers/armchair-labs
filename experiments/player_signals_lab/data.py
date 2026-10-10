@@ -5,8 +5,7 @@ from __future__ import annotations
 import math
 
 import polars as pl
-
-from engine.metrics.nextgen import build_panel
+from experiments.player_signals_lab.nextgen import build_panel
 
 RATE_PAIRS = {
     "passing": ("passing_yards", "attempts"),

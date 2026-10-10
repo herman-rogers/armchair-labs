@@ -18,9 +18,8 @@ import yaml
 from engine.data.releases import digest
 from engine.data.shared import json_bytes, lock, write_new
 from engine.tables.build import refresh
-from engine.tables.products import PAYLOAD, ROW
 from engine.tables.query import connect
-from engine.tables.storage import content_hash, load_catalog
+from engine.tables.storage import PAYLOAD, ROW, content_hash, load_catalog
 
 
 def record_schema(cls) -> dict:

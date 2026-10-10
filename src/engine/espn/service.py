@@ -27,16 +27,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-
-import polars as pl
 
 from engine.config.league import LeagueConfig, get_league
 from engine.config.settings import Settings, get_settings
 from engine.espn import credentials as creds
-from engine.espn import crosswalk, sync
-from engine.espn.crosswalk import JoinReport
+from engine.espn import sync
 
 logger = logging.getLogger(__name__)
 
@@ -56,22 +52,6 @@ class NotAuthenticatedError(RuntimeError):
     """Raised when no ESPN credentials are stored."""
 
 
-@dataclass
-class LeagueState:
-    """A snapshot plus everything derived from it."""
-
-    snapshot: sync.LeagueSnapshot
-    tagged_board: pl.DataFrame
-    join_report: JoinReport
-    fetched_at: float
-    #: True when the last refresh failed and this is the previous good snapshot.
-    stale: bool = False
-
-    @property
-    def age_seconds(self) -> float:
-        return time.monotonic() - self.fetched_at
-
-
 class LeagueService:
     """Holds league state for the API. Thread-safe, TTL-refreshed, disk-backed."""
 
@@ -88,28 +68,10 @@ class LeagueService:
         self._fetched_at: float = 0.0
         self._stale = False
         self._lock = threading.Lock()
-        # Derived state is per metric version: the snapshot is ESPN data and version
-        # independent, but the board it joins against is not. Keyed by (version,
-        # board mtime) so a `engine board` run is picked up without a restart.
-        self._states: dict[str, LeagueState] = {}
-        self._board_cache: dict[tuple[str, float], pl.DataFrame] = {}
 
     @property
     def snapshot_path(self) -> Path:
         return self._settings.outputs_dir / SNAPSHOT_NAME
-
-    def board_path(self, version: str = "v1") -> Path:
-        """Where the built board lives, preferring the versioned file."""
-        if version == "v1":
-            from engine.artifacts import verify_draft
-
-            archive = self._settings.static_dir / f"draft_{self._config.draft_season}"
-            if archive.exists():
-                return verify_draft(archive)
-        versioned = self._settings.outputs_dir / f"board_{version}.json"
-        if version == "v1" and not versioned.exists():
-            return self._settings.outputs_dir / "board.json"
-        return versioned
 
     def is_authenticated(self) -> bool:
         stored = creds.read(self._settings.env_path)
@@ -122,44 +84,6 @@ class LeagueService:
                 "No ESPN credentials stored. Run `engine auth login` to sign in."
             )
         return stored
-
-    def _load_board(self, version: str) -> pl.DataFrame:
-        """The built board, re-read when the file on disk changes.
-
-        Keyed by mtime rather than held forever, so a `engine board` run while the
-        server is up is picked up without a restart.
-        """
-        path = self.board_path(version)
-        if not path.exists():
-            raise FileNotFoundError(f"No board at {path}. Run `engine board` to build one.")
-
-        key = (version, path.stat().st_mtime)
-        cached = self._board_cache.get(key)
-        if cached is not None:
-            return cached
-
-        board = pl.read_json(path)
-        # Bounded: one entry per version per board build, and old mtimes are dropped.
-        self._board_cache = {k: v for k, v in self._board_cache.items() if k[0] != version}
-        self._board_cache[key] = board
-        return board
-
-    def _build_state(self, snapshot: sync.LeagueSnapshot, version: str) -> LeagueState:
-        board = self._load_board(version)
-        ids, names = crosswalk.board_lookups(board)
-        players, report = crosswalk.resolve_player_ids(snapshot.to_frame(), ids, names)
-        tagged = crosswalk.attach_ownership(board, players, snapshot.my_team_id)
-        tagged = crosswalk.append_espn_fallbacks(tagged, players, snapshot.my_team_id)
-
-        # §8's instruction: log unmatched loudly. The API surfaces this too, so a
-        # degraded join is visible in the UI rather than only in a log nobody reads.
-        logger.info(report.summary())
-        return LeagueState(
-            snapshot=snapshot,
-            tagged_board=tagged,
-            join_report=report,
-            fetched_at=time.monotonic(),
-        )
 
     def _restore_from_disk(self) -> bool:
         """Load the persisted snapshot, aged by the file's real mtime.
@@ -178,27 +102,8 @@ class LeagueService:
         file_age = time.time() - self.snapshot_path.stat().st_mtime
         self._snapshot = snapshot
         self._fetched_at = time.monotonic() - file_age
-        self._states.clear()
         logger.info("restored snapshot from disk, %.0fs old", file_age)
         return True
-
-    def _derive(self, version: str) -> LeagueState:
-        """Join the current snapshot to `version`'s board, caching per version."""
-        assert self._snapshot is not None
-        cached = self._states.get(version)
-        if cached is not None and cached.fetched_at == self._fetched_at:
-            return cached
-
-        state = self._build_state(self._snapshot, version)
-        state.fetched_at = self._fetched_at
-        state.stale = self._stale
-        self._states[version] = state
-        return state
-
-    def get(self, version: str = "v1", force: bool = False) -> LeagueState:
-        """Archived model state, using the shared snapshot refresh lifecycle."""
-        self._refresh(force)
-        return self._derive(version)
 
     def observations(self, *, force: bool = False) -> tuple[sync.LeagueSnapshot, bool, float]:
         """Current league observations without reading or calculating any model board."""
@@ -262,7 +167,6 @@ class LeagueService:
                 self._snapshot = snapshot
                 self._fetched_at = time.monotonic()
                 self._stale = False
-                self._states.clear()
             except NotAuthenticatedError:
                 raise
             except Exception as error:  # noqa: BLE001 - unofficial API, many failure modes
@@ -271,8 +175,6 @@ class LeagueService:
                 # Stale-if-error: an old wire beats no wire.
                 logger.warning("ESPN refresh failed, serving stale state: %s", error)
                 self._stale = True
-                for state in self._states.values():
-                    state.stale = True
 
             return
         finally:
@@ -291,7 +193,6 @@ class LeagueService:
             }
 
         snapshot = self._snapshot
-        report = next(iter(self._states.values()), None)
         payload: dict[str, object] = {
             "authenticated": authenticated,
             "synced": True,
@@ -303,15 +204,6 @@ class LeagueService:
             "week": snapshot.week,
             "my_team_id": snapshot.my_team_id,
         }
-        if report is not None:
-            join = report.join_report
-            payload["join"] = {
-                "matched": join.matched_by_id + join.matched_by_name,
-                "total": join.total,
-                "match_rate": round(join.match_rate, 3),
-                "unmatched": len(join.unmatched),
-                "not_ranked": join.not_ranked,
-            }
         return payload
 
 

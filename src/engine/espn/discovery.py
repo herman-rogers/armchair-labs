@@ -118,7 +118,13 @@ def discover_leagues(credentials: EspnCredentials) -> list[DiscoveredLeague]:
     return leagues
 
 
-def verify(credentials: EspnCredentials, league_id: int, season: int) -> tuple[bool, str]:
+def verify(
+    credentials: EspnCredentials,
+    league_id: int,
+    season: int,
+    *,
+    raise_unavailable: bool = False,
+) -> tuple[bool, str]:
     """Check whether the credentials can actually read the league.
 
     Returns:
@@ -145,7 +151,10 @@ def verify(credentials: EspnCredentials, league_id: int, season: int) -> tuple[b
             "Check the league id, or run `engine auth login` to rediscover it."
         )
     except Exception as error:  # noqa: BLE001 - unofficial API, unbounded failure modes
-        return False, f"Could not read league {league_id}: {type(error).__name__}: {error}"
+        message = f"Could not read league {league_id}: {type(error).__name__}: {error}"
+        if raise_unavailable:
+            raise DiscoveryError(message) from error
+        return False, message
 
     return True, (
         f"Connected to '{league.settings.name}' — "

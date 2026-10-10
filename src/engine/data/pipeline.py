@@ -1,9 +1,11 @@
-"""Supported data lifecycle: capture → validate → build → publish → GCS.
+"""Observation ingestion: register captured sources → enrich with DuckDB → build a table batch.
 
 Local, single-writer Parquet pipeline. No network is used after source registration.
-Products are built separately and the complete catalog is published atomically.
-`engine data refresh --upload` orchestrates the full production workflow.
-`engine tables refresh --upload` rebuilds recipes from already captured inputs.
+The batch holds observation tables only; models read them through DuckDB and
+publish their own campaign bundles. `engine data refresh --upload` captures the
+latest completed week and runs this end to end; `engine tables refresh --upload`
+rebuilds recipes from an already built batch. Enrichment lives in
+``engine.data.enrich``: one SQL recipe per table over the preserved provider files.
 """
 
 from __future__ import annotations
@@ -11,21 +13,17 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
-import os
 import shutil
-import socket
-import subprocess
 import sys
-import tempfile
 from collections import Counter
 from datetime import UTC, datetime
 from importlib.metadata import version as package_version
 from pathlib import Path
 
 import polars as pl
-from polars.testing import assert_frame_equal
 
 from engine.config.settings import REPO_ROOT
+from engine.data.enrich import enrich
 from engine.data.releases import (
     digest,
     identifier,
@@ -36,7 +34,7 @@ from engine.data.releases import (
     reference,
     write_json,
 )
-from engine.tables.contracts import clean_floats, coverage, split_forecasts, table_spec
+from engine.tables.contracts import clean_floats, table_spec
 
 ROOT = REPO_ROOT
 
@@ -46,7 +44,7 @@ def now():
 
 
 def register_sources(data: Path, args) -> Path:
-    from engine.api.research_sources import accepted_version
+    from engine.data.history import accepted_version
 
     history, acceptance, old_manifest = accepted_version(args.history)
     root = data / "raw/snapshots" / identifier(args.version)
@@ -75,15 +73,12 @@ def register_sources(data: Path, args) -> Path:
         else:
             kind = "reference_input"
         add("history/" + name, history / name, kind, expected)
-    for path in sorted((history / "implementation/engine/config").glob("*.yaml")):
+    configuration = history / "implementation/engine/config"
+    if not configuration.is_dir():
+        # Accepted archives created before the package rename retain their paths.
+        configuration = history / "implementation/patron/config"
+    for path in sorted(configuration.glob("*.yaml")) if configuration.is_dir() else []:
         add("configuration/" + path.name, path, "configuration")
-    for name in ("historical_inputs.parquet", "research_audited_weekly_points.parquet"):
-        add(
-            "checks/" + name,
-            history / "outputs" / name,
-            "accepted_replay_reference",
-            old_manifest["output_sha256"]["outputs/" + name],
-        )
     add("checks/history_manifest.json", history / "manifest.json", "accepted_replay_reference")
     add("checks/history_acceptance.json", history / "acceptance.json", "accepted_replay_reference")
 
@@ -138,171 +133,6 @@ def register_sources(data: Path, args) -> Path:
     return root
 
 
-def enrich(data: Path, version: str) -> Path:
-    raw, snapshot = load_manifest(data, "raw", reference(data / "raw/snapshots" / version))
-    root = data / "enriched/releases" / identifier(version)
-    root.mkdir(parents=True, exist_ok=False)
-    tables = root / "tables"
-    tables.mkdir()
-    write_json(root / "build_state.json", {"status": "building", "started_at": now()})
-    implementation = root / "implementation"
-    shutil.copytree(
-        ROOT / "src/engine", implementation / "engine", ignore=shutil.ignore_patterns("__pycache__")
-    )
-    shutil.copy2(Path(__file__), implementation / "data_pipeline.py")
-    shutil.copy2(ROOT / "uv.lock", implementation / "uv.lock")
-    shutil.copy2(ROOT / "pyproject.toml", implementation / "pyproject.toml")
-
-    def offline(*args, **kwargs):
-        raise RuntimeError("Data pipeline is offline: a required source was not captured")
-
-    # Enrichment runs in its own subprocess; block all network access there.
-    socket.socket.connect = offline  # type: ignore[method-assign]
-    socket.socket.connect_ex = offline  # type: ignore[method-assign]
-    with tempfile.TemporaryDirectory(prefix="engine-enrich-") as temporary:
-        work = Path(temporary)
-        for name, asset in snapshot["assets"].items():
-            relative = name.removeprefix("history/")
-            target = inside(work, relative)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(inside(data, asset["object"]), target)
-        os.environ["DATA_DIR"] = str(work)
-        os.environ["NFLVERSE_CACHE_DURATION"] = "3153600000"
-        from engine.config import settings as configuration
-
-        configuration.CONFIG_DIR = work / "configuration"
-        configuration.get_settings.cache_clear()
-        from engine.board import pipeline
-        from engine.data import nflverse
-        from engine.metrics.backtest import MetricReportConfig
-
-        settings = configuration.Settings(data_dir=work, nflverse_cache_duration=3153600000)
-        nflverse.configure_cache(settings)
-        config = MetricReportConfig.from_config()
-        print("Enrichment: replaying historical statistics and dated evidence", flush=True)
-        result = pipeline.build_metric_report(
-            settings=settings, report_config=config, analyze=False, enrichment_dir=tables
-        )
-        expected = pl.read_parquet(work / "checks/historical_inputs.parquet")
-        assert_frame_equal(
-            result.predictions.drop("rank").sort("forecast_season", "player_id"),
-            expected.drop("rank").sort("forecast_season", "player_id"),
-            check_column_order=False,
-            abs_tol=1e-9,
-            rel_tol=1e-9,
-        )
-        weekly = pl.read_parquet(tables / "nfl_player_weeks.parquet")
-        expected_weekly = pl.read_parquet(work / "checks/research_audited_weekly_points.parquet")
-        assert_frame_equal(
-            weekly.select(expected_weekly.columns).sort("player_id", "season", "week"),
-            expected_weekly.sort("player_id", "season", "week"),
-            check_dtypes=False,
-            abs_tol=1e-9,
-            rel_tol=1e-9,
-        )
-        print(
-            "Enrichment: forecast inputs and weekly scoring match accepted reconstruction",
-            flush=True,
-        )
-
-        # Schedule context is a separate observation table, never a future-result feature.
-        paths = [
-            p
-            for p in (work / "cache/nflverse").glob("*.parquet")
-            if {"game_id", "gameday", "home_team", "away_team", "gametime"}
-            <= set(pl.read_parquet_schema(p))
-        ]
-        if len(paths) != 1:
-            raise ValueError("Expected one captured historical schedule")
-        shutil.copyfile(paths[0], tables / "nfl_schedule.parquet")
-        # The metric builder only needs a narrow injury projection. Gold also
-        # serves player histories, so retain secondary injuries and source timestamps.
-        injury_paths = [
-            p
-            for p in (work / "cache/nflverse").glob("*.parquet")
-            if {"gsis_id", "report_primary_injury", "practice_status"}
-            <= set(pl.read_parquet_schema(p))
-        ]
-        if not injury_paths:
-            raise ValueError("Missing captured full injury reports")
-        pl.concat(
-            [pl.read_parquet(p) for p in sorted(injury_paths)], how="diagonal_relaxed"
-        ).write_parquet(tables / "nfl_injuries.parquet")
-        events = json.loads((work / "static/historical_absences.json").read_text())["events"]
-        pl.DataFrame(events, infer_schema_length=None).write_parquet(
-            tables / "absence_events.parquet"
-        )
-        for name in ("weeks", "snaps", "schedule", "players"):
-            shutil.copyfile(
-                work / "current" / (name + ".parquet"), tables / f"current_{name}.parquet"
-            )
-
-        from engine.data.college import normalize_season
-        from engine.data.college_identity import build_links
-        from engine.metrics.college_translation import annual_rows
-
-        cm = json.loads((work / "college/manifest.json").read_text())
-        seasons, games, audits = [], [], []
-        for year in range(cm["start_season"], cm["through_season"] + 1):
-            frame, game, audit = normalize_season(
-                *[
-                    pl.read_parquet(work / "college/raw" / f"{kind}_{year}.parquet")
-                    for kind in ("players", "rosters", "schedule")
-                ]
-            )
-            seasons.append(frame)
-            games.append(game)
-            audits.append(audit)
-        college = pl.concat(seasons, how="diagonal_relaxed").sort("college_id", "season", "team_id")
-        college.write_parquet(tables / "college_seasons.parquet")
-        pl.concat(games, how="diagonal_relaxed").write_parquet(tables / "college_games.parquet")
-        links, registry, identity_audit = build_links(
-            college,
-            pl.read_parquet(tables / "nfl_players.parquet"),
-            pl.read_parquet(tables / "nfl_identity_crosswalk.parquet"),
-            json.loads((work / "static/college_identity_overrides.json").read_text()),
-        )
-        links.write_parquet(tables / "college_identity_links.parquet")
-        registry.write_parquet(tables / "college_identity_registry.parquet")
-        pl.DataFrame(annual_rows(college), infer_schema_length=None).write_parquet(
-            tables / "college_annual.parquet"
-        )
-        write_json(root / "college_quality.json", {"coverage": audits, "identity": identity_audit})
-
-    write_json(root / "build_state.json", {"status": "complete", "completed_at": now()})
-    checks = {
-        "historical_input_replay_except_legacy_tied_rank": True,
-        "audited_weekly_scoring_replay": True,
-        "offline_build": True,
-    }
-    write_json(root / "quality.json", {"checks": checks, "coverage_complete": False})
-    manifest = {
-        "schema_version": 1,
-        "layer": "enriched",
-        "version": version,
-        "status": "accepted",
-        "generated_at": now(),
-        "quality_passed": all(checks.values()),
-        "input": reference(raw),
-        "history": snapshot["history"],
-        "current_observations": snapshot["current_observations"],
-        "environment": {
-            "python": sys.version,
-            "packages": {
-                name: package_version(name)
-                for name in ("polars", "pyarrow", "nflreadpy", "numpy", "scikit-learn")
-            },
-        },
-        "files": {
-            str(p.relative_to(root)): digest(p) for p in sorted(root.rglob("*")) if p.is_file()
-        },
-        "tables": {p.stem: str(p.relative_to(root)) for p in tables.glob("*.parquet")},
-    }
-    write_json(root / "manifest.json", manifest)
-    print(f"Enriched release: {len(manifest['tables'])} tables", flush=True)
-    return root
-
-
 def build_tables(data: Path, version: str, enriched_version: str | None = None) -> Path:
     enriched, em = load_manifest(
         data, "enriched", reference(data / "enriched/releases" / (enriched_version or version))
@@ -317,6 +147,7 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
     for source in (
         Path(__file__),
         ROOT / "src/engine/tables/contracts.py",
+        ROOT / "src/engine/data/enrich/__init__.py",
         ROOT / "src/engine/data/target_quality.py",
         ROOT / "src/engine/data/releases.py",
         ROOT / "uv.lock",
@@ -341,42 +172,6 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
             "nonfinite_values_to_null": nonfinite,
         }
 
-    features, labels, exclusions = split_forecasts(read("historical_inputs"))
-    from engine.tables.contracts import FORECAST_KEY
-
-    quarantine = pl.DataFrame(
-        exclusions["quarantined_candidates"],
-        schema={
-            "player_id": pl.String,
-            "forecast_season": pl.Int32,
-            "forecast_cutoff_date": pl.Date,
-            "player_display_name": pl.String,
-            "player_population": pl.String,
-            "reason": pl.String,
-        },
-    )
-    save(
-        "forecast_quarantine",
-        quarantine,
-        FORECAST_KEY,
-        "quarantine",
-        "Candidate folds with only later market admission evidence; excluded from features.",
-    )
-
-    save(
-        "preseason_features",
-        features,
-        FORECAST_KEY,
-        "asof_features",
-        "One player / forecast season / cutoff; production statistics refer to source_season.",
-    )
-    save(
-        "season_outcomes",
-        labels,
-        FORECAST_KEY,
-        "labels",
-        "Realized outcomes for the same candidate keys; incomplete seasons remain null.",
-    )
     players = read("nfl_players").drop_nulls("gsis_id")
     # Identity dimension only: no current team/status/position or mutable experience.
     identity_columns = [
@@ -402,8 +197,6 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
     for name, keys in {
         "nfl_player_weeks": ["player_id", "season", "week"],
         "nfl_player_seasons": ["player_id", "season"],
-        "nfl_team_seasons": ["team", "season"],
-        "nfl_weekly_usage": ["player_id", "season", "week"],
         "absence_events": ["evidence_id"],
         "college_seasons": ["college_id", "season", "team_id"],
         "college_annual": ["college_id", "season"],
@@ -435,7 +228,6 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
     # Preserve source-local record grain for feeds without a clean natural key.
     # Exact duplicates are collapsed; differing records are retained, not resolved by order.
     for name in (
-        "nfl_transactions",
         "nfl_injuries",
         "nfl_snap_counts",
         "college_games",
@@ -501,25 +293,16 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
         if not frame.equals(tables[name]):
             spec = specs[name]
             save(name, frame, spec["primary_key"], spec["role"], spec["description"])
-    for name in ("nfl_player_weeks", "nfl_player_seasons", "preseason_features"):
+    for name in ("nfl_player_weeks", "nfl_player_seasons"):
         if corrected[name].filter(pl.col("receptions") > pl.col("targets")).height:
             raise ValueError(f"Invalid target history remains in {name}")
-    features = corrected["preseason_features"]
     write_json(root / "target_quality.json", target_quality)
-    cov = coverage(features)
-    write_json(root / "coverage.json", cov)
-    write_json(root / "feature_policy.json", exclusions)
     write_json(
         root / "quality.json",
         {
             "checks": {
                 "unique_nonnull_primary_keys": True,
-                "matching_feature_label_keys": True,
-                "no_future_evidence_in_preseason_features": True,
-                "pending_outcomes_null": True,
-                "known_absence_caps": True,
                 "current_observation_cutoff": True,
-                "historical_replay_in_enriched": True,
                 "nonfinite_quantities_are_null": True,
                 "known_receptions_do_not_exceed_known_targets": True,
                 "transitive_target_mask": True,
@@ -554,17 +337,14 @@ def build_tables(data: Path, version: str, enriched_version: str | None = None) 
             "Historical statistics are retrospective reconstructions, "
             "not original publication vintages.",
             "Cleaned tables do not imply complete source coverage.",
-            "Observation tables require time filtering; "
-            "only preseason_features is a forecast-cutoff view.",
+            "Observation tables require time filtering before joining a forecast cutoff.",
             "Provider identifiers and linked college identities "
             "are retrospective identity mappings.",
         ],
     }
     write_json(root / "manifest.json", manifest)
     load_tables(data, version)
-    print(
-        f"Table batch: {len(specs)} tables; {features.height:,} forecast feature rows", flush=True
-    )
+    print(f"Table batch: {len(specs)} tables", flush=True)
     return root
 
 
@@ -589,21 +369,15 @@ def main(argv: list[str] | None = None):
     build.add_argument("--history", required=True)
     build.add_argument("--college-source", required=True)
     build.add_argument("--current-report", required=True, type=Path)
-    for command in ("enrich", "verify"):
-        sub.add_parser(command).add_argument("--version", required=True)
+    sub.add_parser("verify").add_argument("--version", required=True)
+    enrich_parser = sub.add_parser("enrich")
+    enrich_parser.add_argument("--version", required=True)
+    enrich_parser.add_argument(
+        "--raw-version", help="Raw snapshot to enrich; defaults to --version"
+    )
     tables = sub.add_parser("tables")
     tables.add_argument("--version", required=True)
     tables.add_argument("--enriched-version")
-    products = sub.add_parser("products")
-    products.add_argument("--version", required=True, help="Source table batch")
-    products.add_argument("--prefix", required=True, help="Create-only product version prefix")
-    products.add_argument("--publish", action="store_true")
-    publish = sub.add_parser("publish")
-    publish.add_argument("--version", required=True, help="Source table batch")
-    publish.add_argument("--prefix", required=True, help="Previously built product version prefix")
-    publish.add_argument(
-        "--analysis", help="Verified NextGen analysis release to publish with products"
-    )
     args = parser.parse_args(argv)
     from engine.config.settings import get_settings
 
@@ -612,7 +386,7 @@ def main(argv: list[str] | None = None):
         from engine.data import refresh as refresh_pipeline
 
         if args.status:
-            path = data / ".runtime/nextgen_refresh.json"
+            path = data / ".runtime/observation_refresh.json"
             print(path.read_text() if path.exists() else '{"status": "never_run"}')
         else:
             print(json.dumps(refresh_pipeline.run(args), indent=2))
@@ -622,79 +396,15 @@ def main(argv: list[str] | None = None):
         source = load_tables(data, args.version)
         print(json.dumps({"table_release": source.ref, "tables": len(source.manifest["tables"])}))
     elif args.command == "enrich":
-        enrich(data, args.version)
+        enrich(data, args.version, args.raw_version)
     elif args.command == "tables":
         build_tables(data, args.version, args.enriched_version)
-    elif args.command in {"products", "publish"}:
-        from concurrent.futures import ThreadPoolExecutor
-
-        from engine.data.catalog import publish_catalog
-        from engine.data.player_profiles import build_profiles
-
-        source = load_tables(data, args.version)
-        season = source.manifest["current_observations"]["season"]
-        names = {
-            key: identifier(args.prefix + "_" + suffix)
-            for key, suffix in {
-                "college": "college",
-                f"outlook_{season}": "outlook",
-                "profiles": "profiles",
-            }.items()
-        }
-        (data / ".runtime").mkdir(parents=True, exist_ok=True)
-        with (data / ".runtime/data_pipeline.lock").open("w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            if args.command == "products":
-                commands = [
-                    [
-                        sys.executable,
-                        str(ROOT / "research" / script),
-                        "--gold",
-                        args.version,
-                        "--version",
-                        names[key],
-                        "--no-publish",
-                    ]
-                    for script, key in (
-                        ("college_translation.py", "college"),
-                        ("player_outlook.py", f"outlook_{season}"),
-                    )
-                ]
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    futures = [
-                        pool.submit(subprocess.run, command, check=True) for command in commands
-                    ]
-                    for future in futures:
-                        future.result()
-                build_profiles(
-                    names["profiles"],
-                    season,
-                    gold_version=args.version,
-                    college_ref=reference(data / "research" / names["college"]),
-                    outlook_ref=reference(data / "research" / names[f"outlook_{season}"]),
-                    publish=False,
-                )
-            if args.command == "publish" or args.publish:
-                if getattr(args, "analysis", None):
-                    names["analysis"] = identifier(args.analysis)
-                catalog = publish_catalog(data, args.version, names)
-                print(json.dumps(catalog, indent=2))
-            else:
-                print(
-                    json.dumps(
-                        {"table_release": source.ref, "products": names, "published": False},
-                        indent=2,
-                    )
-                )
     else:
         (data / ".runtime").mkdir(parents=True, exist_ok=True)
         with (data / ".runtime/data_pipeline.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             register_sources(data, args)
-            subprocess.run(
-                [sys.executable, "-m", "engine.data.pipeline", "enrich", "--version", args.version],
-                check=True,
-            )
+            enrich(data, args.version)
             build_tables(data, args.version)
 
 

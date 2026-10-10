@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "campaign_id": "opening_drive_v2",
+  "name": "Opening Drive v2",
+  "positions": [
+    "QB",
+    "WR",
+    "RB"
+  ],
+  "horizons": [
+    "remaining",
+    "season"
+  ],
+  "origin_weeks": {
+    "season": 0,
+    "remaining": 2
+  },
+  "targets": {
+    "RB": [
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "targets",
+      "receptions",
+      "receiving_yards",
+      "receiving_tds",
+      "points"
+    ],
+    "WR": [
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "targets",
+      "receptions",
+      "receiving_yards",
+      "receiving_tds",
+      "points"
+    ],
+    "QB": [
+      "attempts",
+      "completions",
+      "passing_yards",
+      "passing_tds",
+      "passing_interceptions",
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "points"
+    ]
+  },
+  "scoring": {
+    "RB": "PPR: 0.1*(rushing_yards+receiving_yards)+receptions+6*(rushing_tds+receiving_tds); excludes passing, fumbles and bonuses",
+    "WR": "PPR: 0.1*(rushing_yards+receiving_yards)+receptions+6*(rushing_tds+receiving_tds); excludes passing, fumbles and bonuses",
+    "QB": "4-point passing TD: .04*passing_yards+4*passing_tds-2*interceptions+.1*rushing_yards+6*rushing_tds; excludes receiving, fumbles and bonuses"
+  },
+  "validation_years": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "evaluation_years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "recipes": {
+    "xgb_raw_draft": {
+      "engine": "xgboost",
+      "depth": 3,
+      "child": 20,
+      "lambda": 15,
+      "view": "all"
+    },
+    "xgb_shallow_draft": {
+      "engine": "xgboost",
+      "depth": 2,
+      "child": 40,
+      "lambda": 30,
+      "view": "all"
+    },
+    "xgb_no_provider_draft": {
+      "engine": "xgboost",
+      "depth": 3,
+      "child": 20,
+      "lambda": 15,
+      "view": "no_provider"
+    },
+    "lightgbm_raw_draft": {
+      "engine": "lightgbm",
+      "view": "all"
+    }
+  },
+  "selection": "uniform_top2_previous3_years_equal_year_mse",
+  "lineage": "Opening Drive v1: frozen base panels plus dated availability",
+  "disposition": "research_preview",
+  "availability": {
+    "version": 1,
+    "cutoff": "Preseason: opening regular-season game date at 12:00 UTC; remaining: day after final Week 2 game at 12:00 UTC",
+    "transaction_clock": "Event date plus one day at 12:00 UTC; retrospective archive, not publication-time capture",
+    "roster_clock": "Completed week final game date plus one day at 12:00 UTC; undated season rosters excluded",
+    "eligibility": "Exclude latest unambiguous formal RET only; retirement announcements are features; unknown, injured, reserve, suspended and released players remain",
+    "population": "V1 candidate universe; no outcome-conditioned player additions or deletions",
+    "features": "V1 frozen numeric matrix plus availability__ fields; fixed vocabulary",
+    "source_vintage": "Retrospective reconstructed cutoffs; no pristine prospective claim"
+  }
+}

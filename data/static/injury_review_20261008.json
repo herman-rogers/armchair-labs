@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "scope": "Week 5 roster injury review; retained earlier league-wide evidence keeps its original known-on dates. Practice participation does not imply game clearance or a return date.",
+  "sources": [
+    {
+      "url": "https://www.nfl.com/news/giants-qb-jaxson-dart-season-ending-knee-surgery",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0040691",
+          "espn_id": 4689114,
+          "player_name": "Jaxson Dart",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "reported_expectation",
+          "summary": "NFL Network reports expected knee surgery ending the 2026 season.",
+          "body_part": "knee",
+          "event_on": "2026-09-21",
+          "season_ending_reported": true,
+          "affected_period": "remaining_2026_regular_season",
+          "earliest_affected_week": 3
+        }
+      ]
+    },
+    {
+      "url": "https://www.giants.com/news/jaxson-dart-knee-injury-update-status-jameis-winston",
+      "published_on": "2026-09-23",
+      "observations": [
+        {
+          "player_id": "00-0040691",
+          "espn_id": 4689114,
+          "player_name": "Jaxson Dart",
+          "season": 2026,
+          "known_on": "2026-09-23",
+          "evidence_status": "team_statement",
+          "summary": "Team article describes ongoing evaluation; it does not itself confirm season-ending surgery.",
+          "body_part": "knee"
+        }
+      ]
+    },
+    {
+      "url": "https://www.seahawks.com/news/seahawks-planning-on-sam-darnold-returning-to-practice-this-week",
+      "published_on": "2026-09-21",
+      "observations": [
+        {
+          "player_id": "00-0034869",
+          "espn_id": 3912547,
+          "player_name": "Sam Darnold",
+          "season": 2026,
+          "known_on": "2026-09-21",
+          "evidence_status": "team_statement",
+          "summary": "Team planned a practice return this week after his glute injury; Week 3 participation remains unconfirmed.",
+          "body_part": "glute"
+        }
+      ]
+    },
+    {
+      "url": "https://www.nfl.com/news/dolphins-rb-devon-achane-miss-2026-season-acl-tear",
+      "published_on": "2026-09-28",
+      "observations": [
+        {
+          "player_id": "00-0039040",
+          "espn_id": 4429160,
+          "player_name": "De'Von Achane",
+          "season": 2026,
+          "known_on": "2026-09-28",
+          "evidence_status": "reported_expectation",
+          "summary": "Achane is out for the remainder of 2026 following an ACL tear.",
+          "body_part": "knee",
+          "event_on": "2026-09-27",
+          "season_ending_reported": true,
+          "affected_period": "remaining_2026_regular_season",
+          "earliest_affected_week": 4
+        }
+      ]
+    },
+    {
+      "url": "https://www.tennesseetitans.com/news/week-5-injury-report-titans-vs-texans",
+      "published_on": "2026-10-07",
+      "observations": [
+        {
+          "player_id": "00-0035261",
+          "espn_id": 3916148,
+          "player_name": "Tony Pollard",
+          "season": 2026,
+          "known_on": "2026-10-07",
+          "evidence_status": "team_statement",
+          "summary": "Titans list Pollard as not participating Wednesday with a foot injury; Week 5 game availability has not been determined.",
+          "body_part": "foot",
+          "practice_status": "DNP"
+        }
+      ]
+    },
+    {
+      "url": "https://www.steelers.com/news/week-5-injury-report-colts",
+      "published_on": "2026-10-07",
+      "observations": [
+        {
+          "player_id": "00-0036139",
+          "espn_id": 4038815,
+          "player_name": "Rico Dowdle",
+          "season": 2026,
+          "known_on": "2026-10-07",
+          "evidence_status": "team_statement",
+          "summary": "Dowdle returned to limited Wednesday practice after missing two games with a toe injury; his Week 5 availability remains uncertain.",
+          "body_part": "toe",
+          "practice_status": "LP"
+        }
+      ]
+    },
+    {
+      "url": "https://www.buffalobills.com/news/bills-issue-injury-update-on-wr-dj-moore-vs-patriots-week-4",
+      "published_on": "2026-10-04",
+      "observations": [
+        {
+          "player_id": "00-0034827",
+          "espn_id": 3915416,
+          "player_name": "DJ Moore",
+          "season": 2026,
+          "known_on": "2026-10-04",
+          "evidence_status": "team_statement",
+          "summary": "Moore left Week 4 with a shoulder injury and was doubtful to return in that game. This does not establish his Week 5 status; ESPN currently lists him as questionable.",
+          "body_part": "shoulder"
+        }
+      ]
+    }
+  ]
+}

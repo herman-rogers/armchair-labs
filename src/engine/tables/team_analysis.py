@@ -3,7 +3,6 @@
 from contextlib import contextmanager
 from pathlib import Path
 
-from engine.data.releases import current_catalog
 from engine.data.verification import verified
 from engine.tables.query import connect
 from engine.tables.storage import content_hash, current, load_table
@@ -26,18 +25,6 @@ REQUIRED_COLUMNS = {
 
 class TableVersionChanged(ValueError):
     """A client or in-flight request is pinned to a superseded table version."""
-
-
-def check_source(data_dir: Path, manifest: dict) -> None:
-    # Only compare the small app catalog's reference. Query replicas need no raw,
-    # enriched, or source batch files; integrity comes from the sealed table bundle.
-    app_catalog = current_catalog(data_dir)
-    source = manifest.get("source_release", manifest.get("gold"))
-    if app_catalog and source != app_catalog["gold"]:
-        raise ValueError(
-            "Team observations are behind the selected data release; "
-            "refresh team_player_games before serving this analysis"
-        )
 
 
 def coverage_report(data_dir: Path, catalog: dict, ref: dict) -> dict:
@@ -89,10 +76,8 @@ def team_session(data_dir: Path, expected_version: str | None = None):
     _, manifest = load_table(data_dir, TABLE, ref)
     if not manifest["columns"].keys() >= REQUIRED_COLUMNS:
         raise ValueError("The team_player_games table is missing required analysis columns")
-    check_source(data_dir, manifest)
     report = coverage_report(data_dir, catalog, ref)
     with connect(data_dir, catalog=catalog) as db:
         yield db, report
     if current(data_dir)["tables"].get(TABLE) != ref:
         raise TableVersionChanged("Team observations changed during the request; refresh and retry")
-    check_source(data_dir, manifest)

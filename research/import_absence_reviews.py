@@ -7,9 +7,13 @@ from pathlib import Path
 
 import polars as pl
 
-from engine.data.historical_evidence import EvidenceCapture, article_content
-from engine.metrics.availability import validate_absences
-from engine.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import (
+    EvidenceCapture,
+    article_content,
+    normalized_name,
+    transaction_aliases,
+    validate_absences,
+)
 
 
 def main():
@@ -22,7 +26,7 @@ def main():
     ledger = json.loads(path.read_text())
     players = pl.read_parquet(args.players)
     names = dict(players.select("gsis_id", "display_name").iter_rows())
-    aliases = _transaction_aliases(players)
+    aliases = transaction_aliases(players)
     capture = EvidenceCapture(args.data_dir / "cache/historical_evidence/v1")
     for decision in json.loads(args.reviews.read_text()):
         url = decision["source_url"]
@@ -39,7 +43,7 @@ def main():
             raise ValueError(f"Publication date disagrees with reviewed source: {url}")
         pid, season, kind = decision["player_id"], decision["season"], decision["kind"]
         name = names[pid]
-        body = f" {_normalized_name(re.sub(r'[’\x27]s\b', '', article['text']))} "
+        body = f" {normalized_name(re.sub(r'[’\x27]s\b', '', article['text']))} "
         if not any(f" {alias} " in body for alias in aliases[pid]):
             raise ValueError(f"Reviewed player identity is absent from source: {name}")
         existing = [

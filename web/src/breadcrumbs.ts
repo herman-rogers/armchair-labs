@@ -38,19 +38,6 @@ export function breadcrumbsFor(pathname: string, search = ''): Breadcrumb[] {
   const team = matchPath('/league/teams/:id/:slug?', pathname)
   if (team) return [...parents,
     { label: 'Team details', entity: { kind: 'team', id: team.params.id! } }]
-  const archive = matchPath('/research/archive/:workspace/:view?', pathname)
-  if (archive) {
-    const labels: Record<string, Record<string, string>> = {
-      intelligence: { players: 'Players', 'league-impact': 'League impact', research: 'Research' },
-      league: { overview: 'Overview', matchups: 'Matchups', players: 'Players', wire: 'Waiver Wire', draft: 'Draft recap' },
-    }
-    const { workspace, view } = archive.params
-    if (workspace && labels[workspace] && (!view || labels[workspace][view])) {
-      return [...parents,
-        { label: workspace === 'league' ? 'Archived league' : 'Archived intelligence', ...(view ? { href: `/research/archive/${workspace}` } : {}) },
-        ...(view ? [{ label: labels[workspace][view] }] : [])]
-    }
-  }
   if (navigation?.page.path === pathname.replace(/\/$/, '')) {
     return [parents[0], { label: navigation.page.title }]
   }

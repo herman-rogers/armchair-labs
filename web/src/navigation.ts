@@ -40,8 +40,7 @@ export function to(pathname: string, params: Record<string, ParamValue> = {}): T
 }
 
 /** Player profile sections, each addressable as `/players/:playerId/:section`. */
-export const PROFILE_SECTIONS = [['overview', 'Overview'], ['stats', 'Player stats'], ['history', 'Season history'], ['role', 'Role & participation'],
-  ['similar', 'Similar careers'], ['tracking', 'Next Gen Stats'], ['forecasts', 'Forecasts'], ['evidence', 'Sources & gaps']] as const
+export const PROFILE_SECTIONS = [['overview', 'Overview'], ['forecasts', 'Forecasts'], ['history', 'Season history'], ['games', 'Game log'], ['college', 'College']] as const
 export type ProfileSection = typeof PROFILE_SECTIONS[number][0]
 export const isProfileSection = (value: string | undefined): value is ProfileSection => PROFILE_SECTIONS.some(([id]) => id === value)
 
@@ -58,16 +57,7 @@ export const teamPath = (team: { team_id: number; team_name: string }) => {
 }
 export const matchupPath = (week: number, homeId: number, awayId: number) => `/league/matchups/${week}/${homeId}/${awayId}`
 export const leagueWeekPath = (week: number) => `/league/overview?week=${week}#matchups`
-export const researchPath = (view: 'evidence' | 'qb-experiments' | 'forecasts' | 'archive') => `/research/${view}`
-/** Views of the archived workspaces, each a route under `/research/archive/<workspace>/:view`. */
-export const ARCHIVED_VIEWS = {
-  intelligence: ['players', 'league-impact', 'research'],
-  league: ['overview', 'matchups', 'players', 'wire', 'draft'],
-} as const
-export const isArchivedView = <W extends keyof typeof ARCHIVED_VIEWS>(workspace: W, view: string | undefined): view is typeof ARCHIVED_VIEWS[W][number] =>
-  (ARCHIVED_VIEWS[workspace] as readonly string[]).includes(view ?? '')
-export const archivePath = <W extends keyof typeof ARCHIVED_VIEWS>(workspace: W, view?: typeof ARCHIVED_VIEWS[W][number]) =>
-  `/research/archive/${workspace}${view ? `/${view}` : ''}`
+export const researchPath = (view: 'models') => `/research/${view}`
 
 export type NavigateOptions = { replace?: boolean }
 

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening Drive · Player rankings</title>
+<style>
+:root{color-scheme:light;--ink:#193b32;--muted:#63716b;--paper:#f5f4ed;--line:#dce3da;--green:#176b51}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+header{background:#143e31;color:#fff;padding:32px max(24px,calc((100vw - 1240px)/2));border-bottom:5px solid #d6b66c}
+.masthead{display:flex;justify-content:space-between;gap:16px;align-items:center;font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+.status{color:#e4d2a5;border:1px solid #6f8978;border-radius:30px;padding:5px 12px;letter-spacing:.05em}
+h1{font:500 clamp(36px,5vw,58px)/1.1 Georgia,serif;margin:30px 0 12px}header p{color:#d1e0d7;max-width:850px;margin-bottom:8px}
+main{max-width:1290px;margin:auto;padding:26px 24px 50px}.summary{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:14px;margin-bottom:24px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 22px}.label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}.value{font-size:30px;font-weight:650;margin-top:4px}.caption{font-size:12px;color:var(--muted)}
+.notice{padding:14px 18px;background:#eee9db;border-left:3px solid #b4924b;border-radius:3px;margin-bottom:22px;font-size:13px}
+.toolbar{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin:20px 0 14px}label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+input,select,button{font:inherit}input,select{background:#fff;border:1px solid #bbc9be;border-radius:7px;padding:10px 12px;color:var(--ink)}input{width:100%}.search{flex:1;min-width:200px}button,.download{cursor:pointer;border:1px solid #bbc9be;border-radius:7px;background:#fff;color:var(--ink);padding:10px 15px}.filters{display:flex;gap:5px}.filters button[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #b4924b;outline-offset:3px}.result-line{display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:12px;margin:12px 0}.table-wrap{border:1px solid var(--line);border-radius:10px;background:white;overflow:auto;max-height:72vh}table{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}th{position:sticky;top:0;background:#e9efe7;z-index:1;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}th,td{padding:13px 18px;border-bottom:1px solid #e7ebe4}th button{padding:0;border:0;background:none;font-size:inherit;text-transform:inherit;letter-spacing:inherit}.num{text-align:right}.rank{color:#657c6e;font-weight:600;width:80px}.name{font-weight:650;white-space:nowrap}.team{color:var(--muted)}.points{font-weight:750;color:#175f48}.badge{font-size:12px;padding:5px 9px;border-radius:5px;background:#e6eee8;display:inline-block;min-width:52px;text-align:center;font-weight:700}.badge.QB{background:#e3eaf9;color:#354f81}.badge.WR{background:#f4e7d7;color:#835625}.player-row:hover{background:#f6f8f2}.detail-button{font-size:12px;padding:4px 8px}.details td{background:#f2f5ee;padding:18px 24px}.stats{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px}.stat strong{display:block;font-size:19px}.detail-note{font-size:12px;color:var(--muted)}.empty{text-align:center;padding:44px;color:var(--muted)}details.method{margin-top:24px;border-top:1px solid var(--line);padding-top:18px;font-size:13px}summary{cursor:pointer;font-weight:650}.method p{max-width:960px;color:var(--muted)}footer{margin-top:24px;font-size:12px;color:var(--muted)}a{color:var(--green)}.mono{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
+@media(max-width:700px){header{padding:24px 18px}main{padding:20px 12px}.summary{grid-template-columns:repeat(3,1fr);gap:8px}.summary .card:first-child{grid-column:1/-1}.card{padding:12px}.value{font-size:25px}th,td{padding:12px}.masthead{font-size:10px}.result-line{display:block}.toolbar{gap:10px}.table-wrap{max-height:70vh}}
+main{max-width:1560px}th,td{padding:13px 12px}th{white-space:normal}th button{max-width:100px}.table-wrap{scrollbar-gutter:stable}
+</style>
+</head>
+<body>
+<header><div class="masthead"><span>Armchair Labs / Model rankings</span><span class="status">Research preview</span></div>
+<h1>Opening Drive <span id="season-title"></span></h1><p>Every modeled player. One points leaderboard. Overall rank and position rank, side by side.</p><p id="subtitle"></p></header>
+<main>
+<div class="summary"><div class="card"><div class="label">Ranked players</div><div class="value" id="total"></div><div class="caption" id="coverage"></div></div><div class="card"><div class="label">Quarterbacks</div><div class="value" id="count-QB"></div><div class="caption" id="leader-QB"></div></div><div class="card"><div class="label">Running backs</div><div class="value" id="count-RB"></div><div class="caption" id="leader-RB"></div></div><div class="card"><div class="label">Wide receivers</div><div class="value" id="count-WR"></div><div class="caption" id="leader-WR"></div></div><div class="card"><div class="label">Tight ends</div><div class="value" id="count-TE"></div><div class="caption" id="leader-TE"></div></div></div>
+<div class="notice" id="notice"></div><div class="notice" id="actual-notice"></div>
+<div class="toolbar"><div><label for="snapshot">Forecast view</label><select id="snapshot"></select></div><div class="search"><label for="search">Find a player or team</label><input id="search" type="search" placeholder="Try Kenneth Walker or SEA" autocomplete="off"></div><div><label>Position</label><div class="filters" role="group" aria-label="Filter position"><button data-position="ALL" aria-pressed="true">All</button><button data-position="QB" aria-pressed="false">QB</button><button data-position="RB" aria-pressed="false">RB</button><button data-position="WR" aria-pressed="false">WR</button><button data-position="TE" aria-pressed="false">TE</button></div></div><button id="export">Export CSV</button></div>
+<div class="result-line"><span id="result-count" aria-live="polite"></span><span>Ranks stay fixed when filtering · Click a column to sort</span></div>
+<div class="table-wrap"><table><thead><tr><th aria-sort="ascending"><button data-sort="overall_rank">Model overall ↑</button></th><th><button data-sort="position_rank">Model position</button></th><th><button data-sort="player_name">Player</button></th><th><button data-sort="team">Team</button></th><th class="num"><button data-sort="points">Projected points</button></th><th class="num"><button data-sort="points_per_scheduled_game">Pts / game</button></th><th class="num"><button data-sort="scheduled_games">Sched. games</button></th><th><button data-sort="actual_overall_rank">Actual overall</button></th><th><button data-sort="actual_position_rank">Actual position</button></th><th class="num"><button data-sort="actual_points">Actual PPR</button></th><th>Stats</th></tr></thead><tbody id="rankings"></tbody></table></div>
+<details class="method"><summary>How to read these rankings</summary><p>Overall rank orders the positions included in this campaign by the model’s directly predicted fantasy-point total. Position rank uses the same points within each position. This is a points leaderboard, not a draft-value or value-over-replacement ranking; QB scoring naturally puts many quarterbacks near the top. Available positions are shown in the filters; kickers and defenses are outside this campaign.</p><p>RB, WR, and TE use PPR scoring: 1 point per reception, 0.1 per rushing or receiving yard, and 6 per touchdown. QB uses 0.04 per passing yard, 4 per passing touchdown, −2 per interception, 0.1 per rushing yard, and 6 per rushing touchdown. Fumbles and bonuses are excluded; QB receiving and RB/WR/TE passing are excluded.</p><p>Actual ranks use the saved nflverse standard PPR totals, including its fumble and conversion scoring, without league-specific bonuses. This differs from the narrower model scoring contract. Actual overall ranks cover the positions in this campaign, including observed players outside the model pool. Ties share a rank (1, 2, 2, 4). A dash means no recorded result in this snapshot, not zero points. Actual ranks remain season-to-date when switching forecast views.</p><p>Points are predicted by a separate target model, so they can differ from points calculated using the displayed component statistics. Points per game divide by scheduled team games, including games a player might miss; these are flat averages, not matchup-specific forecasts. All saved candidates are included, including players with little projected production. Teams reflect the saved snapshot.</p><p>These forecasts reconstruct an earlier cutoff from later source captures. Models trained through 2025; these are saved research predictions, not live injury-adjusted rankings.</p><p>Campaign: <span class="mono" id="campaign"></span><br>Verified manifest: <span class="mono" id="checksum"></span></p><p><a href="rankings.json">Download complete forecasts and source receipts (JSON)</a></p></details>
+<footer>Armchair Labs · <span id="campaign-label"></span> · Saved forecasts</footer>
+</main><script id="data" type="application/json">__RANKINGS_DATA__</script>
+<script>
+const data=JSON.parse(document.getElementById('data').textContent);
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=value=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(1):'—';
+let snapshot=data.snapshots[0],position='ALL',sort='overall_rank',direction=1,visible=[];
+const expanded=new Set();
+const actual=data.actuals;
+$('actual-notice').textContent=actual?`Actual ranks: standard PPR totals for Weeks 1–${actual.through_week}, across all ${actual.rows.length} observed ${actual.positions.join('/')} players. Actual production to date and model future totals cover different periods; this is not a forecast-accuracy score.`:'No actual-results snapshot supplied.';
+$('season-title').textContent=data.season;
+$('campaign').textContent=data.campaign_id;
+$('campaign-label').textContent=data.campaign_name;
+$('checksum').textContent=data.manifest_sha256;
+data.snapshots.forEach((s,i)=>{const option=document.createElement('option');option.value=i;option.textContent=s.horizon==='season'?'Preseason · full season':`Rest of season · after Week ${s.origin_week}`;$('snapshot').append(option)});
+function overview(){
+ const remaining=snapshot.horizon==='remaining',week=snapshot.origin_week;
+ $('subtitle').textContent=remaining?`${data.season} remaining-season projections · observation cutoff: end of Week ${week}`:`${data.season} full-season projections · preseason observation cutoff`;
+ $('notice').textContent=remaining?`Saved after-Week-${week} forecast, projecting Weeks ${week+1}–18. This is the latest available Opening Drive cutoff, reconstructed from later captures; it is not updated to today’s week.`:'Saved preseason forecast, projecting the full season. This reconstructs the preseason cutoff from later captures; it is not a current rest-of-season forecast.';
+ $('total').textContent=snapshot.rows.length;
+ $('coverage').textContent=remaining?`Weeks ${week+1}–18 · ranked by projected points`:'Weeks 1–18 · ranked by projected points';
+ for(const p of ['QB','RB','WR','TE']){$('count-'+p).closest('.card').hidden=!snapshot.counts[p];document.querySelector(`[data-position="${p}"]`).hidden=!snapshot.counts[p];$('count-'+p).textContent=snapshot.counts[p]||0;const leader=snapshot.rows.find(r=>r.position===p);$('leader-'+p).textContent=leader?`${p}1 · ${leader.player_name}`:'';}
+}
+function value(row,key){return key==='points'?row.predictions.points:row[key]??null;}
+function render(){
+ const query=$('search').value.trim().toLowerCase();
+ visible=snapshot.rows.filter(r=>(position==='ALL'||r.position===position)&&`${r.player_name} ${r.team||''} ${r.player_id}`.toLowerCase().includes(query));
+ visible.sort((a,b)=>{const av=value(a,sort),bv=value(b,sort);if(av===null&&bv!==null)return 1;if(bv===null&&av!==null)return -1;return direction*(typeof av==='number'?av-bv:String(av??'').localeCompare(String(bv??'')))||a.overall_rank-b.overall_rank});
+ $('result-count').textContent=`Showing ${visible.length} of ${snapshot.rows.length} players`;
+ $('rankings').innerHTML=visible.length?visible.map(r=>{
+  const open=expanded.has(r.player_id),id=esc(r.player_id);
+  const cells=`<tr class="player-row"><td class="rank">${r.overall_rank}</td><td><span class="badge ${esc(r.position)}">${esc(r.position)}${r.position_rank}</span></td><td class="name">${esc(r.player_name)}</td><td class="team">${esc(r.team||'—')}</td><td class="num points">${fmt(r.predictions.points)}</td><td class="num">${fmt(r.points_per_scheduled_game)}</td><td class="num">${r.scheduled_games}</td><td class="rank">${r.actual_overall_rank??'—'}</td><td>${r.actual_position_rank?`<span class="badge ${esc(r.actual_position)}">${esc(r.actual_position)}${r.actual_position_rank}</span>`:'—'}</td><td class="num">${fmt(r.actual_points)}</td><td><button class="detail-button" data-player="${id}" aria-label="${open?'Hide':'Show'} stats for ${esc(r.player_name)}" aria-expanded="${open}">${open?'Hide':'View'}</button></td></tr>`;
+  if(!open)return cells;
+  const stats=Object.entries(r.predictions).filter(([key])=>key!=='points').map(([key,v])=>`<div class="stat"><span class="label">${esc(key.replaceAll('_',' '))}</span><strong>${fmt(v)}</strong></div>`).join('');
+  return cells+`<tr class="details"><td colspan="11"><div class="stats">${stats}</div><div class="detail-note">${esc(r.model_id)} · ${id} · Component stats are predicted independently; their scored sum can differ from the points model.</div></td></tr>`;
+ }).join(''):'<tr><td colspan="11" class="empty">No matching players. Try another name or position.</td></tr>';
+ document.querySelectorAll('[data-sort]').forEach(button=>{const active=button.dataset.sort===sort;button.closest('th').setAttribute('aria-sort',active?(direction===1?'ascending':'descending'):'none');const title=button.textContent.replace(/ [↑↓]$/,'');button.textContent=title+(active?(direction===1?' ↑':' ↓'):'')});
+}
+$('search').addEventListener('input',render);
+$('snapshot').addEventListener('change',()=>{snapshot=data.snapshots[Number($('snapshot').value)];expanded.clear();overview();render()});
+document.querySelectorAll('[data-position]').forEach(button=>button.addEventListener('click',()=>{position=button.dataset.position;document.querySelectorAll('[data-position]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));render()}));
+document.querySelectorAll('[data-sort]').forEach(button=>button.addEventListener('click',()=>{const next=button.dataset.sort;direction=sort===next?-direction:['points','points_per_scheduled_game','scheduled_games','actual_points'].includes(next)?-1:1;sort=next;render()}));
+$('rankings').addEventListener('click',event=>{const button=event.target.closest('[data-player]');if(!button)return;const id=button.dataset.player;expanded.has(id)?expanded.delete(id):expanded.add(id);render();const restored=[...document.querySelectorAll('[data-player]')].find(b=>b.dataset.player===id);restored?.focus({preventScroll:true})});
+$('export').addEventListener('click',()=>{
+ const columns=['overall_rank','position_label','player_name','team','points','points_per_scheduled_game','scheduled_games','player_id','model_id','campaign_id','season','origin_week','horizon','actual_overall_rank','actual_position','actual_position_rank','actual_points','actual_through_week'];
+ const cell=v=>{const s=String(v??'');return '"'+(/^[=+@\-]/.test(s)?"'":'')+s.replaceAll('"','""')+'"'};
+ const lines=[columns.join(','),...visible.map(r=>columns.map(key=>cell(key==='position_label'?r.position+r.position_rank:key==='campaign_id'?data.campaign_id:key==='actual_through_week'?actual?.through_week:value(r,key))).join(','))];
+ const url=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${data.campaign_id}_${data.season}_week${snapshot.origin_week}_${position}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+overview();render();
+</script></body></html>

@@ -29,12 +29,12 @@ import numpy as np
 import polars as pl
 from data import FAMILIES, make_panel
 from evaluation import calibrated_intervals, interval_summary, summarize
+from experiments.player_signals_lab.nextgen import fit_fold
 from methods import add_rates, fit_pool, predict_regression, recipes, role_mixture
 from report import html_report, markdown_report
 from safety import install_write_guard, new_run, sha256, snapshot, verify_source_pins, write_json
 
 from engine.data.releases import load_gold
-from engine.metrics.nextgen import fit_fold
 
 
 def protected_paths(gold, config):

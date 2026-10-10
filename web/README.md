@@ -1,6 +1,6 @@
 # Armchair Labs — frontend
 
-React + TypeScript NextGen dashboard, served by Vite. Reads the FastAPI read API in
+React + TypeScript ChairStats dashboard, served by Vite. Reads the FastAPI read API in
 `src/engine/api/`; it computes nothing itself.
 
 ```bash
@@ -18,12 +18,14 @@ notice explaining what to start.
 |---|---|
 | `src/routes.tsx` | Every page as a React Router route (data router, lazy-loaded) |
 | `src/navigation.ts` | The navigation conventions, path builders and URL-state hooks |
-| `src/api/nextgen.ts` | Current measurements, forecasts and evidence contracts |
-| `src/components/NextGenView.tsx` | Dashboard/section layouts, research pages and the Research archive |
-| `src/components/NextGenRankings.tsx` | Published current-season ranks, filters, exports and evidence |
+| `src/api/chairstats.ts` | Campaign bundles, rankings, per-player forecasts and per-model targets |
+| `src/api/tables.ts` | Observation tables: catalog, players, rookies, college history |
+| `src/api/league.ts` | ESPN observations, matchups and campaign-joined forecasts |
+| `src/api/queries/hooks.ts` | `useCampaignChoice`: the campaign and horizon a page looks at, kept in the URL |
+| `src/components/Workspace.tsx` | Dashboard/section layouts, rookies and the campaign inventory |
+| `src/components/ChairStatsRankings.tsx` | Cross-position rankings of one campaign, filters and CSV export |
+| `src/components/CampaignSelect.tsx` | Campaign and horizon pickers shared by forecast-bearing pages |
 | `src/api/client.ts` | Fetch wrappers |
-| `src/components/BoardTable.tsx` | Archived board display; never the default analysis |
-| `src/components/Flags.tsx` | BUY / TD-luck / age / Ngms chips |
 | `src/index.css` | Light and dark palettes, dense tables, and tabular figures |
 
 The dashboard defaults to a soft light theme. The header toggle switches to dark
@@ -35,22 +37,17 @@ Use Node 22.12 or later in the Node 22 series; the repository's `.nvmrc` selects
 Node 22 (`nvm install && nvm use` from the repository root). The frontend currently
 uses Vite 7. Node 21 is outside Vite 7's supported range even if a local build succeeds.
 
-The current catalog pins data and analysis policy together. Archived requests use
-explicit research scope; current analysis fails closed when verification fails.
-Run `web/tests/nextgen_smoke.py` against local API and frontend servers for the
-current desktop/mobile flow. Older smoke scripts describe archived layouts.
+Observation queries are keyed by the published table catalog checksum; campaign
+queries are keyed by campaign id and horizon. No page depends on a selected model:
+`useCampaignChoice` reads `?campaign=` and `?horizon=` from the URL and defaults to
+the newest bundle.
 
-Navigation is organized into persistent page groups: **Analysis** (rankings,
-team analysis, QB passing, rookies), **League management** (overview, matchups, team
-strength, free agents, transactions, draft recap), and **Research** (model
-evidence, QB experiments, reference forecasts, archive). On small screens, Browse
-pages opens the same navigation. It stays available on player profiles.
-Rankings remain the entry page, with remaining-season/next-four-week
-horizons and explicit reference/validated status. Roster/free-agent tables and current
-profiles use the same published ranks. Dated preseason ECR remains a separate reference.
-Sorting/filtering covers full result sets before display pagination. Run
-`web/tests/rankings_smoke.py` for the ranking and league integration checks. See
-[workflow map](../docs/history/navigation_restoration_2026-09-23.md).
+Navigation is organized into persistent page groups: **Analysis** (ChairStats
+rankings, team analysis, QB production, rookies), **League** (overview, matchups,
+team strength, free agents, transactions, draft recap), and **Models** (campaign
+inventory with saved metrics). On small screens, Browse pages opens the same
+navigation. It stays available on player profiles. Browser smoke scripts for the
+previous NextGen layout were removed with it; `npm run build` type-checks every page.
 
 ## Navigation
 
@@ -86,8 +83,14 @@ production host, serve `web/dist/index.html` for non-file frontend paths (for ex
 `try_files $uri $uri/ /index.html` in nginx), while proxying `/api/` to FastAPI.
 This is required for direct links and refreshing any page.
 
-League overview combines standings, roster forecast summaries and recent activity,
-with navigation to other league pages in the sidebar. Weekly scores and lineups live
+League overview summarizes the same `/api/league/team-strength?campaign=…` response
+as each team’s detail page: assumed weekly offensive lineup points, actual scoring, all-play,
+backup coverage, scoring concentration and remaining-season roster rank. The shared
+`teamStrengthSummary` selector checks snapshot alignment and supplies weekly offensive lineup
+ranks and positional strengths to both pages. Weekly ranks require complete forecasts
+for every team; ties share rank. Row details link to the full team analysis.
+Matchup cards retain current selected-starter projections, explicitly distinguished
+from the assumed substitutions used for team strength. Weekly scores and lineups live
 on the Matchups schedule; the selected week remains in its URL. Each game opens
 `/league/matchups/:week/:homeId/:awayId` with scores and complete lineups. Game
 pages link back to their week, to adjacent matchups, and to current team rosters. See [league overview behavior](../docs/history/league_overview_2026-09-24.md).
@@ -113,15 +116,8 @@ sorts the complete filtered result with stable identity tie-breakers before slic
 Other small paginated responses use bounded concurrent loading with total/length
 checks, so local sorting still sees the complete population.
 
-Validation commands:
-
-```bash
-node web/tests/data_queries_test.mjs             # from the repository root
-.venv/bin/python web/tests/serving_smoke.py       # API :8000 + Vite :5173
-```
-
-The browser check blocks live ESPN calls and verifies search/query reuse, profile
-cutoffs, server pagination, mobile layout, and stale-catalog rejection.
+Validation: `npm run build` type-checks every page; the backend suite covers the
+API contracts the pages consume (`uv run pytest`).
 
 ## Team analysis
 
@@ -132,7 +128,7 @@ HTML data table: Recharts has no native heatmap, and the table preserves cell va
 sample-size labels, keyboard selection and row/column headers without custom chart
 rendering. Player selectors, KPIs and contribution tables remain standard UI.
 
-`/intelligence/teams` uses `/api/nextgen/team-analysis` for NFL QB/WR/TE
+`/intelligence/teams` uses `/api/team-analysis` for NFL QB/WR/TE
 relationships and selected-starter scoring variance. Team, season range,
 quarterback, participation, variance basis and selected player IDs live in the URL.
 The default quarterback is the most-used starter in the latest selected season.
@@ -157,58 +153,34 @@ or estimates of injury/availability risk. The within-season basis removes season
 means and divides by residual degrees of freedom; raw score means and quantiles
 remain separately labeled observations.
 
-Checks: `pytest tests/test_team_correlations.py` and
-`python web/tests/team_analysis_smoke.py` with the local API and frontend running.
+Checks: `pytest tests/test_team_correlations.py`.
 
-## Weekly rank movement
+## Campaign ranks in league pages
 
-Player rankings, roster/free-agent tables, and player profiles compare the current
-published ranks with the latest prior completed-week publication for the same
-season and horizon. `/api/nextgen/rankings/history` follows the verified catalog
-publication chain, keeps the final published revision per cutoff, and excludes
-unpublished experiments. Historical ranking eligibility is checked against that
-release's policy. Week labels make gaps explicit; missing ranks are never zero.
-Row details and profiles show the available weekly history. Recipe changes and
-changing forecast windows can affect the movement.
+Roster, free-agent, draft and matchup tables join the chosen campaign's horizon
+rankings (`/api/chairstats/rankings`) to ESPN players by NFL identity. The campaign
+and horizon come from `?campaign=` and `?horizon=`; changing them is a query, not a
+publication. Overview orders teams by projected weekly offensive lineup points
+(excluding K/DST), with depth and actual results alongside. This is a weekly points
+rank, not a composite strength score. The roster rank sums horizon forecasts.
 
-League overview reconstructs standings after each completed week using win
-percentage (ties count as half a win), then points scored. Equal totals share rank.
-These are labeled reconstructed standings, not official provider playoff seeds.
-An incomplete set of results withholds that week; the current partial week is
-excluded. Team row details show the season's weekly standings.
+Checks: `pytest tests/test_weekly_lineup.py tests/test_league_observations.py tests/test_team_strength.py`.
 
-Checks: `pytest tests/test_ranking_history.py tests/test_current_ranking_routes.py`,
-`node web/tests/standings_history_test.mjs`, and browser checks
-`web/tests/rank_movement_smoke.py` / `web/tests/league_overview_smoke.py`.
+## Weekly per-game points and accuracy
 
-## Weekly model points and accuracy
-
-League overview and matchup detail pages use `/api/nextgen/league/forecasts` for
-point estimates. The explicitly labeled `nextgen-weekly-reference-v1` recipe
-allocates each skill player's eligible published next-four forecast evenly across
-scheduled NFL games. K/DST estimates average up to four earlier recorded scores.
-No ESPN projections enter this recipe. ESPN remains the source of lineup selections,
-ownership and actual results. Missing starter forecasts withhold team totals and
-winner picks. This is a weekly reference, not a separately validated weekly model,
-opponent adjustment or calibrated win probability.
-
-Inputs must match the season and the immediately preceding completed week. Current
-or later scores are excluded from K/DST predictors; bench forecasts never enter
-starting totals. Details expose individual model points and coverage.
+League overview and matchup detail pages use `/api/league/forecasts?campaign=…`
+for point estimates. The `campaign_per_game` source allocates each skill player's
+horizon forecast evenly across scheduled NFL games. K/DST estimates average up to
+four earlier recorded scores. No ESPN projections enter this recipe. ESPN remains the
+source of lineup selections, ownership and actual results. Missing starter forecasts
+withhold team totals and winner picks. This is a per-game allocation, not a
+separately validated weekly model, opponent adjustment or calibrated win probability.
 
 Forecast requests preserve immutable captures under
-`data/outputs/weekly_forecasts/<league>/<season>/`. Accuracy starts at Week 1 and
-counts only saved forecasts generated, published and lineup-captured before 00:00
-UTC on the week's earliest NFL game date (a conservative cutoff because this
-schedule lacks kickoff times). The latest qualifying capture supplies each pick.
-Missing captures, incomplete forecasts and actual ties do not inflate the winner
-accuracy denominator. Point MAE is measured on verified complete team forecasts.
-Historical results remain visible without invented historical predictions. Capture
-happens while the forecast page is in use; this does not schedule an unattended job.
-
-Checks: `pytest tests/test_weekly_lineup.py tests/test_league_observations.py`,
-`node web/tests/league_outlook_test.mjs`, and
-`python web/tests/weekly_forecasts_smoke.py` with the local API and Vite running.
+`data/outputs/weekly_forecasts/<league>/<season>/`. Accuracy counts only saved
+forecasts generated, published and lineup-captured before 00:00 UTC on the week's
+earliest NFL game date. Missing captures, incomplete forecasts and actual ties do not
+inflate the winner accuracy denominator.
 
 ## Shared presentation components and Team Strength
 
@@ -257,10 +229,4 @@ same-team covariance terms add only on this common observed sample. Neither bran
 feeds forecasts or alters the existing results standard deviation. Connections use
 recorded lineup choices rather than forecast-driven substitutions.
 
-Checks: `pytest tests/test_roster_correlations.py tests/test_team_strength.py` and
-`python web/tests/team_correlation_smoke.py`.
-
-Checks: `pytest tests/test_team_strength.py` and
-`python web/tests/team_strength_smoke.py` against the API and Vite servers. Browser
-checks cover named routes, history, chart coverage, compact desktop layout, mobile
-resizing, theme switching, sticky-footer navigation, missing forecasts and stale data.
+Checks: `pytest tests/test_roster_correlations.py tests/test_team_strength.py`.

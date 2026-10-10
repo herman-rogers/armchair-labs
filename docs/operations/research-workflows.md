@@ -1,5 +1,17 @@
 # Research workflows
 
+## Raw running back GPU campaign
+
+The [GPU setup guide](gpu_research_setup.md) installs optional NVIDIA cuML,
+XGBoost CUDA and CatBoost GPU backends and documents measured hardware behavior.
+The [RB campaign guide](../../experiments/future_player_lab/gpu_lab/README.md)
+describes raw-input chronological searches, unsupervised representations,
+full-data profiles, conditional profile forecasts, and the separate handoff study.
+The [October 3 findings](../research/rb_gpu_campaign_2026-10-03.md) summarize measured
+accuracy against stronger baselines, representation tradeoffs, and limitations.
+These experiments retain fitted models and verified checkpoints under ignored
+`experiments/future_player_lab/runs/`; they do not publish application forecasts.
+
 ## Local notebooks
 
 ```bash
@@ -15,26 +27,10 @@ Experiments and protocols remain beside their code in `experiments/` and `resear
 The [research index](../research/README.md) collects dated findings. Running a model
 or retaining a dataset does not change the published serving policy by itself.
 
-## Archived metric and board experiments
+## Retired metric and board experiments
 
-These commands reproduce the earlier V2 system; they do not publish NextGen:
-
-```bash
-just metric-report
-just board
-just feature-discovery
-```
-
-The metric report writes `data/outputs/metric_report.json`, retained player/fold
-predictions in Parquet, and a Markdown summary. It includes per-position fitted
-ranker weights for the archived V2 board. A stored model must match the fit
-configuration, season, and depth-chart snapshot, so rebuild the metric report before
-rebuilding that board. `just metric-report --reanalyze` re-scores retained folds.
-See the [archived metric report reference](../reference/metric_report.md).
-
-Feature discovery consumes retained metric folds and richer source-aware weekly
-features, then evaluates challengers with nested walk-forward validation. It writes
-`feature_discovery_report.{json,md}` and `feature_discovery_predictions.parquet`.
-Use `--force-rich` to rebuild its rich panel and descriptors. This workflow is
-report-only: it does not change production metric configuration or the frozen
-2026 forecast.
+The V1/V2/Adaptive boards, the rolling metric report and feature discovery were
+removed in October 2026 together with the hand-coded feature matrix. Their findings
+remain in [docs/reference](../reference/README.md) and [docs/history](../history/README.md);
+the code is in git history only. Observation tables now come from the DuckDB
+recipes in `src/engine/data/enrich/sql/`.

@@ -1,49 +1,35 @@
-"""Dedicated weekly points, explicit reference scopes, and no provider fallback."""
+"""Weekly lineup forecasts from a campaign's horizon forecast, spread per scheduled game."""
 
 from collections import defaultdict
 from math import isfinite
 
 from engine.espn.observations import weekly_matchups
-from engine.metrics.current_rankings import team_code
 from engine.names import normalize
 
-RECIPE = "nextgen-weekly-reference-v1"
+
+def team_code(value):
+    return {"LAR": "LA", "STL": "LA", "SD": "LAC", "OAK": "LV"}.get(value, value)
 
 
 def number(value):
     return isinstance(value, (int, float)) and isfinite(value)
 
 
-def weekly_forecast(snapshot, rankings, identities, schedule, weekly=None):
+def weekly_forecast(snapshot, rankings, identities, schedule):
+    """Assign each ESPN starter a per-game point estimate from campaign rankings.
+
+    ``rankings`` is a ChairStats ranking response: rows with ``player_id``,
+    ``position``, ``team``, ``points_per_game`` and ``season``. K and D/ST use up to
+    four prior recorded ESPN scores because no campaign forecasts them.
+    """
     week = snapshot.week
-    report = rankings["report"]
-    aligned = (
-        rankings["horizon"] == "next4"
-        and report["season"] == snapshot.season
-        and report["through_week"] == week - 1
-    )
-    ranks = {r["player_id"]: r for r in rankings["rankings"]}
-    learned = (
-        {
-            r["player_id"]: r
-            for r in weekly["predictions"]
-            if r["season"] == snapshot.season
-            and r["target_week"] == week
-            and r["through_week"] == week - 1
-        }
-        if weekly
-        else {}
-    )
-    if weekly:
-        aligned = (
-            aligned
-            and weekly["manifest"]["season"] == snapshot.season
-            and weekly["manifest"]["through_week"] == report["through_week"]
-            and weekly["manifest"]["analysis"]["version"] == rankings["version"]
-        )
+    rows = rankings["rankings"]
+    seasons = {r["season"] for r in rows}
+    aligned = bool(rows) and seasons == {snapshot.season}
+    ranks = {r["player_id"]: r for r in rows}
     names = defaultdict(list)
-    for row in (learned if weekly else ranks).values():
-        names[normalize(row["player_display_name"]), row["position"]].append(row)
+    for row in rows:
+        names[normalize(row["player_display_name"] or ""), row["position"]].append(row)
     games = defaultdict(set)
     for row in schedule:
         if row["season"] == snapshot.season and row["game_type"] == "REG":
@@ -59,7 +45,7 @@ def weekly_forecast(snapshot, rankings, identities, schedule, weekly=None):
     def predict(player):
         value, reason, source = None, None, None
         if not aligned:
-            reason = "A NextGen release through the previous week is required."
+            reason = "The campaign has no forecast for the current season."
         elif player["on_bye"]:
             value, source = 0.0, "Scheduled bye"
         elif player["position"] in ("K", "DST", "D/ST"):
@@ -72,27 +58,24 @@ def weekly_forecast(snapshot, rankings, identities, schedule, weekly=None):
             else:
                 reason = "No earlier recorded K/DST scores."
         else:
-            row = (learned if weekly else ranks).get(identities.get(player["espn_id"]))
+            row = ranks.get(identities.get(player["espn_id"]))
             if row is None:
                 matches = names[normalize(player["player_display_name"]), player["position"]]
                 row = matches[0] if len(matches) == 1 else None
             if row is None or row["position"] != player["position"]:
-                reason = "No published NextGen forecast matched this player."
-            elif weekly:
-                value = row["prediction"] if number(row["prediction"]) else None
-                source = f"Dedicated weekly {row['recipe']} · {row['evidence_status']}"
-                constraint = ranks.get(row["player_id"])
-                if constraint and constraint.get("constraint") and constraint["prediction"] == 0:
-                    value, source = 0.0, "Dated published availability constraint"
-            elif not row["schedule_known"] or not games.get(team_code(row["team"])):
+                reason = "No campaign forecast matched this player."
+            elif not games.get(team_code(row["team"])):
                 reason = "NFL schedule unavailable."
             elif week not in games[team_code(row["team"])]:
                 value, source = 0.0, "Scheduled bye"
-            elif number(row["prediction"]) and row["scheduled_games"] > 0:
-                value = row["prediction"] / row["scheduled_games"]
-                source = "Published NextGen next-four points per scheduled game"
+            elif number(row["points_per_game"]):
+                value = row["points_per_game"]
+                source = (
+                    f"{rankings['campaign_name']} {row['horizon']} points per scheduled game "
+                    f"(as of week {row['origin_week']})"
+                )
             else:
-                reason = "No usable published next-four point forecast."
+                reason = "No usable point forecast."
         return dict(
             espn_id=player["espn_id"],
             player_display_name=player["player_display_name"],
@@ -105,7 +88,7 @@ def weekly_forecast(snapshot, rankings, identities, schedule, weekly=None):
         )
 
     result = weekly_matchups(snapshot, week)
-    result["source"] = "nextgen_weekly_model" if weekly else "nextgen_weekly_reference"
+    result["source"] = "campaign_per_game"
     for game in result["matchups"]:
         for side in (game["home"], game["away"]):
             side["forecasts"] = [predict(p) for p in side["lineup"]]
@@ -137,33 +120,22 @@ def weekly_forecast(snapshot, rankings, identities, schedule, weekly=None):
         and r["game_type"] == "REG"
         and r.get("gameday")
     ]
+    origins = sorted({(r["season"], r["origin_week"]) for r in rows})
     return dict(
         **result,
-        version=rankings["version"],
-        recipe="nextgen-weekly-model-v1" if weekly else RECIPE,
-        weekly_version=weekly["manifest"]["version"] if weekly else None,
-        evidence_status="weekly_model_with_reference_scopes"
-        if any(r["evidence_status"] != "reference" for r in learned.values())
-        else "reference",
-        through_week=report["through_week"],
-        published_at=max(
-            report.get("published_at", report["generated_at"]), weekly["manifest"]["generated_at"]
-        )
-        if weekly
-        else report.get("published_at", report["generated_at"]),
+        campaign_id=rankings["campaign_id"],
+        campaign_name=rankings["campaign_name"],
+        manifest_sha256=rankings["manifest_sha256"],
+        horizon=rankings["horizon"],
+        forecast_origins=[{"season": s, "origin_week": w} for s, w in origins],
         pregame_deadline=f"{min(dates)}T00:00:00+00:00" if dates else None,
         limitations=[
-            (
-                "Dedicated one-week offensive forecasts trained on earlier seasons. "
-                "Failed promotion scopes use dedicated weekly references; "
-                "no calibrated win probabilities."
-                if weekly
-                else "Weekly reference: next-four points allocated evenly across scheduled games; "
-                "no weekly opponent adjustment or calibrated win probability."
-            ),
+            "Horizon points allocated evenly across scheduled games; "
+            "no weekly opponent adjustment or calibrated win probability.",
             "K/DST use up to four prior recorded scores; "
             "no ESPN projections enter any point estimate.",
             "Starting lineups are observed ESPN selections. "
             "Missing starter forecasts withhold team totals and winner picks.",
+            *rankings.get("limitations", []),
         ],
     )

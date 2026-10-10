@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import type { AttentionFlag, LeagueObservations } from '../api/nextgen'
+import type { AttentionFlag, LeagueObservations } from '../api/league'
 import { leaguePath, teamPath, to } from '../navigation'
 
 type Player = LeagueObservations['players'][number]

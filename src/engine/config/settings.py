@@ -52,10 +52,6 @@ class Settings(BaseSettings):
         return self.cache_dir / "nflverse"
 
     @property
-    def derived_cache_dir(self) -> Path:
-        return self.cache_dir / "derived"
-
-    @property
     def outputs_dir(self) -> Path:
         return self.data_dir / "outputs"
 
@@ -85,7 +81,6 @@ class Settings(BaseSettings):
         """Create the generated-data directories. Safe to call repeatedly."""
         for path in (
             self.nflverse_cache_dir,
-            self.derived_cache_dir,
             self.outputs_dir,
             self.runtime_dir,
         ):
@@ -116,20 +111,3 @@ def load_league_config() -> dict[str, Any]:
 def load_scoring_config() -> dict[str, Any]:
     """Raw scoring.yaml. Prefer `engine.scoring.rules.get_rules()` for a typed view."""
     return _load_yaml("scoring.yaml")
-
-
-@functools.lru_cache(maxsize=1)
-def load_overrides_config() -> dict[str, Any]:
-    return _load_yaml("overrides.yaml")
-
-
-@functools.lru_cache(maxsize=1)
-def load_projections_config() -> dict[str, Any]:
-    """Forward-looking team and player assumptions used only by the v2 board."""
-    return _load_yaml("projections.yaml")
-
-
-@functools.lru_cache(maxsize=1)
-def load_metric_report_config() -> dict[str, Any]:
-    """Metric catalog and evaluation settings for the rolling v2 backtest."""
-    return _load_yaml("metric_report.yaml")

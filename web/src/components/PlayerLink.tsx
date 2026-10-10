@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useDataRelease } from '../dataRelease'
-import { profileQuery } from '../api/queries'
+import { playerForecastsQuery, playerQuery } from '../api/queries'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { collegePath, playerPath } from '../navigation'
@@ -12,13 +12,10 @@ export function ProfileRouteLink({ to, children, className = 'player-profile-lin
   const prefetch = () => {
     const url = new URL(to, window.location.origin)
     const [, kind, id] = url.pathname.split('/')
-    if (!id || !['players', 'college'].includes(kind)) return
-    const params = new URLSearchParams({ [kind === 'players' ? 'player_id' : 'college_id']: decodeURIComponent(id) })
-    if (url.searchParams.has('season')) {
-      params.set('season', url.searchParams.get('season')!)
-      params.set('week', url.searchParams.get('week') ?? '18')
-    }
-    void client.prefetchQuery(profileQuery(params, token))
+    if (!id || kind !== 'players') return
+    const playerId = decodeURIComponent(id)
+    void client.prefetchQuery(playerQuery(playerId, url.searchParams.get('season') ?? '', token))
+    void client.prefetchQuery(playerForecastsQuery(playerId))
   }
   return <Link onMouseEnter={prefetch} onFocus={prefetch} className={className} to={to}>{children}</Link>
 }

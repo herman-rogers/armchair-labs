@@ -16,13 +16,6 @@ MAX_BYTES = 128 * 1024 * 1024
 def read_frame(
     path: Path, *, columns: list[str] | None = None, player_id: str | None = None
 ) -> pl.DataFrame:
-    # Application HTTP reads use registered native DuckDB tables. Research and
-    # generation jobs retain the bounded Parquet reader below.
-    from engine.tables.application import active
-    from engine.tables.application import read_frame as query_frame
-
-    if active():
-        return query_frame(path, columns=columns, player_id=player_id)
     observe(path)
     key = (
         str(path.absolute()),

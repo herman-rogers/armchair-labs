@@ -147,6 +147,28 @@ def _chrome_binary() -> str | None:
     return shutil.which("google-chrome") or shutil.which("chromium")
 
 
+def _chrome_command(profile_dir: Path) -> list[str]:
+    binary = _chrome_binary()
+    if binary:
+        return [binary]
+    flatpak = shutil.which("flatpak")
+    if flatpak:
+        for app in ("com.google.Chrome", "org.chromium.Chromium"):
+            try:
+                result = subprocess.run(
+                    [flatpak, "info", app], capture_output=True, timeout=10, check=False
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if result.returncode == 0:
+                # Grant only this login profile, not access to the whole repository.
+                return [flatpak, "run", f"--filesystem={profile_dir}", app]
+    raise BrowserUnavailableError(
+        "No Chrome or Chromium found (including Flatpak). Install one, or set ESPN_S2 and "
+        "ESPN_SWID in .env by hand."
+    )
+
+
 def _launch_args(profile_dir: Path, port: int) -> list[str]:
     return [
         f"--user-data-dir={profile_dir}",
@@ -169,6 +191,7 @@ def launch(profile_dir: Path, port: int | None = None) -> BrowserSession:
     Raises:
         BrowserUnavailableError: if Chrome is missing or never came up.
     """
+    profile_dir = profile_dir.resolve()
     profile_dir.mkdir(parents=True, exist_ok=True)
     port = port or free_port()
     args = _launch_args(profile_dir, port)
@@ -178,17 +201,19 @@ def launch(profile_dir: Path, port: int | None = None) -> BrowserSession:
         # focusable. Launching the binary directly here reproduces the original bug.
         command = ["open", "-na", CHROME_APP_NAME, "--args", *args]
     else:
-        binary = _chrome_binary()
-        if binary is None:
-            raise BrowserUnavailableError(
-                "No Chrome or Chromium found. Install one, or set ESPN_S2 and "
-                "ESPN_SWID in .env by hand."
-            )
-        command = [binary, *args]
+        command = [*_chrome_command(profile_dir), *args]
 
     logger.debug("launching browser: %s", " ".join(command))
+    process = None
     try:
-        subprocess.run(command, check=True, capture_output=True, timeout=30)
+        if platform.system() == "Darwin":
+            subprocess.run(command, check=True, capture_output=True, timeout=30)
+        else:
+            # Linux browser launchers remain alive for the lifetime of the window.
+            # Wait for CDP readiness, not for the browser to exit.
+            process = subprocess.Popen(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
     except FileNotFoundError as error:
         raise BrowserUnavailableError(
             f"Could not find {CHROME_APP_NAME}. Install it from "
@@ -203,9 +228,26 @@ def launch(profile_dir: Path, port: int | None = None) -> BrowserSession:
         version = _probe(port)
         if version is not None:
             logger.info("browser ready: %s", version.get("Browser", "unknown"))
-            return BrowserSession(port=port, profile_dir=profile_dir, pid=_find_pid(profile_dir))
+            return BrowserSession(
+                port=port,
+                profile_dir=profile_dir,
+                pid=_find_pid(profile_dir) or (process.pid if process else None),
+            )
+        # A launcher can exit successfully after handing off to Chrome. Only a
+        # failure status proves startup failed; CDP remains the readiness signal.
+        if process is not None and process.poll() not in (None, 0):
+            raise BrowserUnavailableError(
+                f"Browser exited before opening its debugging port (status {process.returncode})."
+            )
         time.sleep(POLL_INTERVAL_SECONDS)
 
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
     raise BrowserUnavailableError(
         f"The browser did not open a debugging port within {STARTUP_TIMEOUT_SECONDS}s. "
         "If a Chrome window opened, close it and try again."

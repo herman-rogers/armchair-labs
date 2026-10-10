@@ -5,6 +5,8 @@ that every recommendation has shipped. Their dates identify the reviewed state.
 
 | Plan | Scope and status |
 |---|---|
+| [Player ability and team context](player_research_direction.md) | Agreed direction: separate ability ratings and team-context rankings. Catalog foundation delivered; ability definitions and models remain future work. |
+| [Forecast system naming](forecast_naming_plan_2026-10-09.md) | Proposed removal of internal NextGen branding across UI, code, APIs and new artifacts, with explicit compatibility and historical-provenance handling. Replacement naming pending. |
 | [Tracking data review and acquisition](tracking_data_review_and_acquisition_2026-10-02.md) | Acquired tracking/context datasets, public archive search, source gaps, and proposed identity, geometry and forecasting evaluations. |
 | [Data reliability and full dataset training](nextgen_data_training_review_2026-10-02.md) | Audit plus proposed source completeness, sample counts, transformation repairs, research cache contracts, and full eligible tree/representation inputs. Keep its acceptance criteria separate from app serving performance. |
 | [Local compute and shared data](research_compute_and_shared_data_plan_2026-10-02.md) | Proposed shared GCS/Parquet transport, verified local research cache, GPU evaluation, and experiment packaging. Local notebooks already exist; shared storage provisioning and deployment/authentication are not established by this plan. |

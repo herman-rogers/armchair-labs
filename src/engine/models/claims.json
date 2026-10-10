@@ -1,0 +1,84 @@
+[
+  {
+    "claim": "Volume is the sticky predictive half, so projections should universally lean on it.",
+    "disposition": "Removed from active source description",
+    "replacement": "Usage is observed opportunity; predictive value depends on target and comparison.",
+    "sources": [
+      "src/engine/metrics/opportunity.py",
+      "docs/research/incremental_information_2026-09-22.md"
+    ]
+  },
+  {
+    "claim": "A fixed RB age cliff represents universal biological decline.",
+    "disposition": "Deleted flag, threshold configuration and fixed age multipliers",
+    "replacement": "Measured age remains available; models must learn any relationship with outcomes.",
+    "sources": [
+      "src/engine/metrics/age.py",
+      "src/engine/config/league.yaml",
+      "experiments/player_signals_lab/research_queue.md"
+    ]
+  },
+  {
+    "claim": "Historical scoring floor determines who starts and guarantees future exceedance.",
+    "disposition": "Removed from active source description",
+    "replacement": "Sample quantiles and volatility describe historical scoring, not validated lineup utility.",
+    "sources": [
+      "src/engine/metrics/rates.py",
+      "experiments/player_signals_lab/research_queue.md"
+    ]
+  },
+  {
+    "claim": "NextGen identifies one model or a player-ability score.",
+    "disposition": "Narrowed in research model labels and catalog organization",
+    "replacement": "Distinct models have explicit targets, populations, horizons and evidence. No general ability estimator is established.",
+    "sources": [
+      "web/src/researchModels.ts",
+      "docs/plans/player_research_direction.md"
+    ]
+  },
+  {
+    "claim": "RB residual correction establishes a selection improvement.",
+    "disposition": "Excluded from recommended advancement; historical experiment retained",
+    "replacement": "Recorded experiment has uncertain selection gain and worse point MAE; no broad replacement claim.",
+    "sources": [
+      "docs/research/rb_residual_correction_2026-09-23.md"
+    ]
+  },
+  {
+    "claim": "More tree tuning establishes a broadly better QB model.",
+    "disposition": "Excluded from default methodological claims",
+    "replacement": "The recorded capacity search did not establish a broad improvement; scope-specific results remain available.",
+    "sources": [
+      "docs/research/qb_boosting_capacity_2026-09-24.md"
+    ]
+  },
+  {
+    "claim": "Published approval is proof of intrinsic player quality or market advantage.",
+    "disposition": "Explicitly rejected in catalog interpretation",
+    "replacement": "Approval is specific to an application target/horizon and evidence policy; ability and team context require separate definitions.",
+    "sources": [
+      "docs/operations/model-library.md",
+      "docs/plans/player_research_direction.md"
+    ]
+  },
+  {
+    "claim": "Named-player overrides and fixed depth discounts establish forecast value.",
+    "disposition": "Deleted override engine, player/team modifier files and depth multipliers",
+    "replacement": "Observed team and depth information remain; archived override deltas are ignored by new rankings.",
+    "sources": [
+      "src/engine/board/builder.py",
+      "src/engine/board/rank.py",
+      "src/engine/metrics/projection.py"
+    ]
+  },
+  {
+    "claim": "Hand-built athletic and career interaction scores are necessary model inputs.",
+    "disposition": "Deleted custom combine scores and legacy career-feature generation",
+    "replacement": "Keep measured combine tests and experience. Saved raw RB model input contracts are preserved.",
+    "sources": [
+      "src/engine/metrics/experimental.py",
+      "src/engine/metrics/backtest.py",
+      "research/individual_stat_data.py"
+    ]
+  }
+]

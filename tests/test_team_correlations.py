@@ -420,12 +420,3 @@ def test_table_replacement_during_calculation_rejects_response(client, table_sou
         client()
     assert exc.value.status_code == 409
     assert exc.value.headers == {"X-Table-Catalog-Stale": "true"}
-
-
-def test_app_gold_change_requires_table_refresh(client, monkeypatch):
-    from engine.tables import team_analysis
-
-    monkeypatch.setattr(team_analysis, "current_catalog", lambda _: {"gold": {"version": "new"}})
-    with pytest.raises(HTTPException) as exc:
-        client()
-    assert exc.value.status_code == 409 and "behind the selected data release" in exc.value.detail

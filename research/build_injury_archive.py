@@ -13,8 +13,13 @@ from pathlib import Path
 
 import polars as pl
 
-from engine.data.historical_evidence import ArticleIndexParser, EvidenceCapture, article_content
-from engine.metrics.experimental import _normalized_name, _transaction_aliases
+from engine.data.historical_evidence import (
+    ArticleIndexParser,
+    EvidenceCapture,
+    article_content,
+    normalized_name,
+    transaction_aliases,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data/research/injury_archive_20260925_r1"
@@ -95,7 +100,7 @@ def main():
     preseason = tables["preseason_features"]
     position_col = "position" if "position" in preseason.columns else "pos"
     rb_ids = set(preseason.filter(pl.col(position_col) == "RB")["player_id"])
-    aliases = _transaction_aliases(tables["players"].filter(pl.col("gsis_id").is_in(rb_ids)))
+    aliases = transaction_aliases(tables["players"].filter(pl.col("gsis_id").is_in(rb_ids)))
     identity = {}
     for pid, names in aliases.items():
         for name in names:
@@ -104,7 +109,7 @@ def main():
     for article in index.to_dicts():
         if not PATTERN.search(article["title"]):
             continue
-        words = _normalized_name(re.sub(r"['’]s\b", "", article["title"])).split()
+        words = normalized_name(re.sub(r"['’]s\b", "", article["title"])).split()
         matched = set()
         for size in range(2, 6):
             for start in range(len(words) - size + 1):
