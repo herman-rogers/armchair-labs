@@ -34,7 +34,7 @@ from methods import add_rates, fit_pool, predict_regression, recipes, role_mixtu
 from report import html_report, markdown_report
 from safety import install_write_guard, new_run, sha256, snapshot, verify_source_pins, write_json
 
-from engine.data.releases import load_gold
+from engine.data.releases import load_tables
 
 
 def protected_paths(gold, config):
@@ -50,7 +50,7 @@ def protected_paths(gold, config):
 
 def run(config, destination):
     verify_source_pins(REPO, config["source_sha256"])
-    gold = load_gold(REPO / "data", version=config["gold_version"])
+    gold = load_tables(REPO / "data", version=config["gold_version"])
     if gold.ref["manifest_sha256"] != config["gold_manifest_sha256"]:
         raise ValueError("Pinned gold manifest hash mismatch")
     paths = protected_paths(gold, config)

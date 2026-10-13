@@ -1,7 +1,7 @@
 """ChairStats: every saved campaign model, queryable at any time.
 
-There is no selected or promoted model. The request names the campaign; the
-response carries the manifest checksum it was read from.
+The campaign list declares the dashboard default. Explicit requests name the
+campaign; responses carry the manifest checksum they were read from.
 """
 
 from typing import Annotated
@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from engine.chairstats import CampaignStore, views
+from engine.chairstats.application import DEFAULT_CAMPAIGN, OpeningDriveStore
 from engine.chairstats.store import CampaignNotFound
 from engine.config.settings import get_settings
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/api/chairstats", tags=["ChairStats"])
 
 
 def store() -> CampaignStore:
-    return CampaignStore(get_settings().data_dir / "campaigns")
+    return OpeningDriveStore(get_settings().data_dir / "campaigns")
 
 
 def _read(operation):
@@ -45,7 +46,10 @@ def campaigns(response: Response):
     """Every available campaign with its models and latest saved forecasts."""
     response.headers["Cache-Control"] = "no-cache"
     manifests = _read(lambda: store().campaigns())
-    return {"campaigns": [views.summary(m) for m in manifests]}
+    return {
+        "default_campaign_id": DEFAULT_CAMPAIGN,
+        "campaigns": [views.summary(m) for m in manifests],
+    }
 
 
 @router.get("/campaigns/{campaign_id}")
@@ -131,6 +135,23 @@ def targets(
     )
 
 
+def _market(rows: list[dict]) -> str | None:
+    """Attach the latest consensus ranks when the observation tables are pinned."""
+    from engine.tables.application import active, connect
+    from engine.tables.observations import market_consensus
+
+    if not active():
+        return "Market consensus requires the observation tables."
+    try:
+        with connect() as db:
+            consensus = market_consensus(db)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f"Market consensus unavailable: {exc}"
+    for row in rows:
+        row.update(consensus.get(row["player_id"], {}))
+    return None if consensus else "No market rankings table is published."
+
+
 @router.get("/rankings")
 def rankings(
     request: Request,
@@ -142,15 +163,23 @@ def rankings(
     position: str = "ALL",
     search: str = "",
     player_id: str | None = None,
+    market: bool = True,
     limit: Annotated[int, Query(ge=1, le=2000)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    """All models of one campaign at one horizon, ranked together by predicted points."""
-    _campaign(campaign, request, response)
+    """Models of the named campaigns at one horizon, ranked together by predicted points.
+
+    ``campaign`` may list several ids separated by commas; the first covering a
+    position supplies it. ``market`` joins the latest FantasyPros
+    consensus ranks from the observation tables.
+    """
+    ids = [c for c in campaign.split(",") if c]
+    for campaign_id in ids:
+        _campaign(campaign_id, request, response)
     result = _read(
         lambda: views.rankings(
             store(),
-            campaign,
+            ids,
             horizon=horizon,
             season=season,
             origin_week=origin_week,
@@ -160,6 +189,7 @@ def rankings(
         )
     )
     rows = result.pop("rankings")
+    result["market_issue"] = _market(rows) if market else "Market consensus not requested."
     return {
         **result,
         "total": len(rows),

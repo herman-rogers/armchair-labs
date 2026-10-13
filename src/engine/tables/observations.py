@@ -20,6 +20,43 @@ def observation_cutoff(db) -> dict:
     return {"season": season, "through_week": week}
 
 
+def scoring_weeks(db, season: int) -> list[dict]:
+    """Current capture wins over historical overlap; preserve unknown stats as null.
+
+    This SQL projection refreshes with the existing weekly observation tables. It
+    deliberately does not mix model outputs into the observation catalog.
+    """
+    return db.execute(
+        """
+        WITH source AS (
+            SELECT player_id, player_display_name, position, team, week, league_points,
+                   passing_yards, passing_tds, passing_interceptions, rushing_yards,
+                   rushing_tds, receptions, receiving_yards, receiving_tds, 0 AS priority
+            FROM analytics.current_weeks WHERE season = ? AND season_type = 'REG'
+            UNION ALL
+            SELECT player_id, player_display_name, position, team, week, league_points,
+                   passing_yards, passing_tds, passing_interceptions, rushing_yards,
+                   rushing_tds, receptions, receiving_yards, receiving_tds, 1 AS priority
+            FROM analytics.nfl_player_weeks WHERE season = ? AND season_type = 'REG'
+        ), deduped AS (
+            SELECT * FROM source QUALIFY row_number() OVER (
+                PARTITION BY player_id, week ORDER BY priority
+            ) = 1
+        )
+        SELECT player_id, player_display_name, position, team, week, league_points,
+            CAST(CASE WHEN position = 'QB' THEN
+                .04 * passing_yards + 4 * passing_tds - 2 * passing_interceptions
+                + .1 * rushing_yards + 6 * rushing_tds
+            WHEN position IN ('RB', 'WR', 'TE') THEN
+                .1 * (rushing_yards + receiving_yards) + receptions
+                + 6 * (rushing_tds + receiving_tds)
+            ELSE NULL END AS DOUBLE) AS model_points
+        FROM deduped WHERE position IN ('QB', 'RB', 'WR', 'TE')
+        ORDER BY week, player_id
+        """, [season, season],
+    ).pl().to_dicts()
+
+
 def candidates(db, season: int) -> pl.DataFrame:
     """Latest known name, position and team for every player seen since ``season``."""
     return db.execute(
@@ -179,3 +216,31 @@ def college_seasons(db, college_id: str) -> list[dict]:
         .pl()
         .to_dicts()
     )
+
+
+def market_consensus(db, positions: tuple[str, ...] = SKILL) -> dict[str, dict]:
+    """Latest FantasyPros overall and positional ECR per NFL identity."""
+    if not db.execute(
+        "SELECT count(*) FROM information_schema.tables "
+        "WHERE table_schema = 'analytics' AND table_name = 'market_rankings'"
+    ).fetchone()[0]:
+        return {}
+    rows = db.execute(
+        """
+        WITH latest AS (
+            SELECT page_type, max(scrape_date) AS scrape_date FROM analytics.market_rankings
+            WHERE page_type LIKE 'redraft-%' GROUP BY page_type
+        )
+        SELECT m.player_id, m.page_type, m.scrape_date, m.ecr, m.sd, m.position
+        FROM analytics.market_rankings m JOIN latest USING (page_type, scrape_date)
+        WHERE m.player_id IS NOT NULL
+        """
+    ).fetchall()
+    result: dict[str, dict] = {}
+    for player_id, page, scrape_date, ecr, sd, position in rows:
+        entry = result.setdefault(player_id, {})
+        if page == "redraft-overall":
+            entry.update(ecr_overall=ecr, ecr_overall_sd=sd, ecr_overall_date=str(scrape_date))
+        elif page == f"redraft-{str(position).lower()}" and position in positions:
+            entry.update(ecr_position=ecr, ecr_position_sd=sd, ecr_position_date=str(scrape_date))
+    return result

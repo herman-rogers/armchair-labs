@@ -367,6 +367,7 @@ def run(
     reload: bool = True,
     prepare: bool = False,
     auth: bool = True,
+    rescore: bool = True,
     output: TextIO = sys.stdout,
 ) -> int:
     """Run API and Vite in the foreground until interrupted or either child fails."""
@@ -392,7 +393,7 @@ def run(
         from engine.startup import prepare as prepare_system
 
         try:
-            prepare_system(auth=auth)
+            prepare_system(auth=auth, rescore=rescore)
         except subprocess.SubprocessError as error:
             raise RuntimeError(f"Startup preparation failed: {error}") from error
 
@@ -451,9 +452,9 @@ def run(
             wait_ready(
                 [
                     f"http://{api_host}:{api_port}/api/status",
-                    f"http://{api_host}:{api_port}/api/nextgen/team-analysis/catalog",
+                    f"http://{api_host}:{api_port}/api/team-analysis/catalog",
                 ]
-                + ([f"http://{api_host}:{api_port}/api/nextgen/league/matchups"] if auth else []),
+                + ([f"http://{api_host}:{api_port}/api/league/matchups"] if auth else []),
                 [api],
                 stop_requested,
             )

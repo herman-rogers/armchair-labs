@@ -116,32 +116,33 @@ def snapshot(tmp_path):
         }
     )
     preserve("roster_weekly", rosters, 2025)
-    preserve(
-        "snap_counts",
-        pl.DataFrame(
-            {
-                "season": [2025],
-                "week": [1],
-                "game_id": ["g"],
-                "pfr_player_id": ["p"],
-                "position": ["FB"],
-            }
-        ),
-        2025,
-    )
-    preserve(
-        "injuries",
-        pl.DataFrame(
-            {
-                "season": [2025],
-                "week": [1],
-                "team": ["SF"],
-                "gsis_id": ["a"],
-                "report_status": ["Questionable"],
-            }
-        ),
-        2025,
-    )
+    for season in (2025, 2026):
+        preserve(
+            "snap_counts",
+            pl.DataFrame(
+                {
+                    "season": [season],
+                    "week": [1],
+                    "game_id": ["g"],
+                    "pfr_player_id": ["p"],
+                    "position": ["FB"],
+                }
+            ),
+            season,
+        )
+        preserve(
+            "injuries",
+            pl.DataFrame(
+                {
+                    "season": [season],
+                    "week": [1],
+                    "team": ["SF"],
+                    "gsis_id": ["a"],
+                    "report_status": ["Questionable"],
+                }
+            ),
+            season,
+        )
     preserve(
         "players",
         pl.DataFrame(
@@ -162,7 +163,10 @@ def snapshot(tmp_path):
             }
         ),
     )
-    preserve("ff_playerids", pl.DataFrame({"gsis_id": ["a"], "espn_id": [1]}))
+    preserve(
+        "ff_playerids",
+        pl.DataFrame({"fantasypros_id": ["100"], "gsis_id": ["a"], "espn_id": [1]}),
+    )
     manifest = {"assets": assets, "current_observations": {"season": 2026, "through_week": 1}}
     return data, manifest
 
@@ -225,7 +229,9 @@ def test_sql_scoring_matches_the_polars_rules_and_bonuses_credit_both_players(
         by[("a", 1)]["league_points"] + by[("a", 2)]["league_points"]
     )
     assert seasons["a"]["ppg"] == pytest.approx(seasons["a"]["total_pts"] / 2)
-    assert db.execute("SELECT position FROM nfl_snap_counts").fetchone() == ("RB",)
+    # Participation and injury history stop at completed seasons like the player weeks.
+    assert db.execute("SELECT position, season FROM nfl_snap_counts").fetchall() == [("RB", 2025)]
+    assert db.execute("SELECT season FROM nfl_injuries").fetchall() == [(2025,)]
 
 
 def test_sql_expressions_are_generated_from_the_rules():

@@ -14,7 +14,7 @@ from safety import sha256, snapshot, verify_source_pins, write_json
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from engine.data.releases import load_gold
+from engine.data.releases import load_tables
 
 LAB = Path(__file__).resolve().parent
 REPO = LAB.parents[1]
@@ -26,7 +26,7 @@ PARAMS = CONFIG["booster"]
 class Inputs:
     def __init__(self):
         verify_source_pins(REPO, CONFIG["source_sha256"])
-        self.release = load_gold(REPO / "data", version=CONFIG["gold_version"])
+        self.release = load_tables(REPO / "data", version=CONFIG["gold_version"])
         if self.release.ref["manifest_sha256"] != CONFIG["gold_manifest_sha256"]:
             raise ValueError("Gold pin mismatch")
         self.hashes = {}

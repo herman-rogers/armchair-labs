@@ -44,7 +44,7 @@ def bundle(tmp_path, monkeypatch):
         "forecasts": [{"season": 2026, "origin_week": 2, "path": forecasts}],
         "artifacts": {"model": weights},
     }
-    publish_campaign(root, {"campaign_id": "opening_drive_v1", "name": "Opening Drive"}, [model])
+    publish_campaign(root, {"campaign_id": "opening_drive_v2", "name": "Opening Drive"}, [model])
     monkeypatch.setattr(
         chairstats_routes, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path)
     )
@@ -53,7 +53,7 @@ def bundle(tmp_path, monkeypatch):
     return root, model, rows, TestClient(app)
 
 
-BASE = "/api/chairstats/campaigns/opening_drive_v1"
+BASE = "/api/chairstats/campaigns/opening_drive_v2"
 
 
 def _reseal(path):
@@ -76,7 +76,7 @@ def test_list_metadata_metrics_and_player_query(bundle):
     assert result.status_code == 200
     assert result.json()["rows"] == [rows[1]]
     assert result.json()["total"] == 1
-    assert CampaignStore(root).check("opening_drive_v1")["verified_artifacts"] == 3
+    assert CampaignStore(root).check("opening_drive_v2")["verified_artifacts"] == 3
 
 
 def test_snapshot_and_pagination_are_explicit(bundle):
@@ -106,7 +106,7 @@ def test_forecast_corruption_invalidates_cached_response_immediately(bundle):
     root, _, _, client = bundle
     path = f"{BASE}/models/qb_remaining/forecasts?season=2026&origin_week=2"
     assert client.get(path).status_code == 200
-    file = root / "opening_drive_v1/qb_remaining/forecasts/2026_2.json"
+    file = root / "opening_drive_v2/qb_remaining/forecasts/2026_2.json"
     file.write_text(file.read_text().replace("3000.0", "9999.0"))
     assert client.get(path).status_code == 409
 
@@ -114,7 +114,7 @@ def test_forecast_corruption_invalidates_cached_response_immediately(bundle):
 def test_manifest_corruption_and_escape_are_rejected(bundle):
     root, _, _, client = bundle
     assert client.get(BASE).status_code == 200
-    path = root / "opening_drive_v1/manifest.json"
+    path = root / "opening_drive_v2/manifest.json"
     manifest = json.loads(path.read_text())
     manifest["models"][0]["metrics"]["path"] = "../metrics.json"
     path.write_text(json.dumps(manifest))
@@ -122,14 +122,14 @@ def test_manifest_corruption_and_escape_are_rejected(bundle):
     _reseal(path)
     assert client.get(BASE).status_code == 409
     with pytest.raises(ValueError):
-        CampaignStore(root).campaign("../opening_drive_v1")
+        CampaignStore(root).campaign("../opening_drive_v2")
 
 
 def test_symlink_escape_rejected_after_cached_success(bundle, tmp_path):
     root, _, _, client = bundle
     path = f"{BASE}/models/qb_remaining/metrics"
     assert client.get(path).status_code == 200
-    metrics = root / "opening_drive_v1/qb_remaining/metrics.json"
+    metrics = root / "opening_drive_v2/qb_remaining/metrics.json"
     metrics.unlink()
     metrics.symlink_to(tmp_path / "metrics.json")
     assert client.get(path).status_code == 409
@@ -138,12 +138,12 @@ def test_symlink_escape_rejected_after_cached_success(bundle, tmp_path):
 def test_publish_is_create_only_and_source_cleanup_is_safe(bundle):
     root, model, _, client = bundle
     with pytest.raises(FileExistsError):
-        publish_campaign(root, {"campaign_id": "opening_drive_v1", "name": "Changed"}, [model])
+        publish_campaign(root, {"campaign_id": "opening_drive_v2", "name": "Changed"}, [model])
     model["metrics"].unlink()
     model["forecasts"][0]["path"].unlink()
     model["artifacts"]["model"].unlink()
     assert client.get(f"{BASE}/models/qb_remaining/metrics").status_code == 200
-    assert CampaignStore(root).check("opening_drive_v1")["status"] == "verified"
+    assert CampaignStore(root).check("opening_drive_v2")["status"] == "verified"
 
 
 @pytest.mark.parametrize("change", ["target", "position", "duplicate", "nonfinite", "training"])
@@ -167,15 +167,15 @@ def test_invalid_contract_never_publishes(bundle, change):
 
 def test_binary_artifacts_are_hashed_but_not_loaded(bundle):
     root, _, _, client = bundle
-    file = root / "opening_drive_v1/qb_remaining/artifacts/model.joblib"
+    file = root / "opening_drive_v2/qb_remaining/artifacts/model.joblib"
     file.write_bytes(b"corrupt weight")
     # Saved JSON remains inspectable; full check is the explicit weight audit.
     assert client.get(f"{BASE}/models/qb_remaining/metrics").status_code == 200
     with pytest.raises(ValueError, match="Saved model artifact checksum"):
-        CampaignStore(root).check("opening_drive_v1")
+        CampaignStore(root).check("opening_drive_v2")
 
 
-def test_forecast_receipt_passes_through_without_duplicate_rows(bundle):
+def test_forecast_receipt_passes_through_without_duplicate_rows(bundle, monkeypatch):
     root, model, rows, client = bundle
     receipt = {
         "campaign_id": "receipt_campaign",
@@ -193,6 +193,7 @@ def test_forecast_receipt_passes_through_without_duplicate_rows(bundle):
     }
     model["forecasts"][0]["path"].write_text(json.dumps({**receipt, "rows": rows}))
     publish_campaign(root, {"campaign_id": "receipt_campaign", "name": "Receipt"}, [model])
+    monkeypatch.setattr(chairstats_routes, "store", lambda: CampaignStore(root))
     response = client.get(
         "/api/chairstats/campaigns/receipt_campaign/models/qb_remaining/forecasts",
         params={"season": 2026, "origin_week": 2, "limit": 1},
@@ -223,34 +224,34 @@ def replacement_fixture(bundle):
     root, model, rows, client = bundle
     candidate_root = root.parent / "replacement_candidates"
     archive_root = root.parent / "campaign_revisions"
-    old = CampaignStore(root).campaign("opening_drive_v1")["manifest_sha256"]
+    old = CampaignStore(root).campaign("opening_drive_v2")["manifest_sha256"]
     rows[0]["predictions"]["passing_yards"] = 4000.0
     model["forecasts"][0]["path"].write_text(json.dumps(rows))
     publish_campaign(
-        candidate_root, {"campaign_id": "opening_drive_v1", "name": "Revised"}, [model]
+        candidate_root, {"campaign_id": "opening_drive_v2", "name": "Revised"}, [model]
     )
     return root, candidate_root, archive_root, old, client
 
 
 def test_replace_campaign_preserves_archive_and_invalidates_old_api_pin(bundle):
     root, candidate_root, archive_root, old, client = replacement_fixture(bundle)
-    original = (root / "opening_drive_v1/manifest.json").read_bytes()
+    original = (root / "opening_drive_v2/manifest.json").read_bytes()
     # Prime the existing verification cache before swapping the directory.
     assert client.get(BASE, headers={"X-Campaign-Manifest": old}).status_code == 200
-    result = replace_campaign(root, candidate_root, "opening_drive_v1", old, archive_root)
+    result = replace_campaign(root, candidate_root, "opening_drive_v2", old, archive_root)
     assert result["status"] == "activated"
-    assert result["campaign_id"] == "opening_drive_v1"
-    assert (archive_root / "opening_drive_v1" / old / "manifest.json").read_bytes() == original
-    assert (candidate_root / "opening_drive_v1/manifest.json").exists()
+    assert result["campaign_id"] == "opening_drive_v2"
+    assert (archive_root / "opening_drive_v2" / old / "manifest.json").read_bytes() == original
+    assert (candidate_root / "opening_drive_v2/manifest.json").exists()
     assert client.get(BASE, headers={"X-Campaign-Manifest": old}).status_code == 409
     assert (
         client.get(BASE, headers={"X-Campaign-Manifest": result["new_manifest_sha256"]}).status_code
         == 200
     )
     listed = client.get("/api/chairstats/campaigns").json()["campaigns"]
-    assert [row["campaign_id"] for row in listed] == ["opening_drive_v1"]
+    assert [row["campaign_id"] for row in listed] == ["opening_drive_v2"]
     assert listed[0]["name"] == "Revised"
-    assert CampaignStore(root).check("opening_drive_v1")["status"] == "verified"
+    assert CampaignStore(root).check("opening_drive_v2")["status"] == "verified"
     receipt = json.loads(Path(result["receipt_path"]).read_text())
     assert receipt["old_manifest_sha256"] == old
     assert not list(root.glob(".campaign-replace-*"))
@@ -263,12 +264,12 @@ def test_replace_rejects_invalid_input_without_changing_active(bundle, failure):
     if failure == "stale_pin":
         expected = "0" * 64
     elif failure == "tampered_candidate":
-        (candidates / "opening_drive_v1/qb_remaining/metrics.json").write_text("{}")
+        (candidates / "opening_drive_v2/qb_remaining/metrics.json").write_text("{}")
     else:
         archive = root / "old_revisions"
     with pytest.raises(ValueError):
-        replace_campaign(root, candidates, "opening_drive_v1", expected, archive)
-    assert CampaignStore(root).check("opening_drive_v1")["manifest_sha256"] == old
+        replace_campaign(root, candidates, "opening_drive_v2", expected, archive)
+    assert CampaignStore(root).check("opening_drive_v2")["manifest_sha256"] == old
     assert not list(root.glob(".campaign-replace-*"))
 
 
@@ -280,17 +281,17 @@ def test_replace_rolls_back_if_activation_receipt_fails(bundle, monkeypatch):
 
     def fail_after_exchange(path, receipt):
         if receipt["status"] == "activated":
-            assert CampaignStore(root).campaign("opening_drive_v1")["manifest_sha256"] != old
+            assert CampaignStore(root).campaign("opening_drive_v2")["manifest_sha256"] != old
             raise OSError("simulated receipt failure")
         write(path, receipt)
 
     monkeypatch.setattr(store, "_revision_receipt", fail_after_exchange)
     with pytest.raises(OSError, match="simulated receipt failure"):
-        replace_campaign(root, candidates, "opening_drive_v1", old, archive)
-    assert CampaignStore(root).check("opening_drive_v1")["manifest_sha256"] == old
-    receipt = json.loads(next((archive / "opening_drive_v1").glob("revision_*.json")).read_text())
+        replace_campaign(root, candidates, "opening_drive_v2", old, archive)
+    assert CampaignStore(root).check("opening_drive_v2")["manifest_sha256"] == old
+    receipt = json.loads(next((archive / "opening_drive_v2").glob("revision_*.json")).read_text())
     assert receipt["status"] == "rolled_back"
-    assert (archive / "opening_drive_v1" / old / "manifest.json").exists()
+    assert (archive / "opening_drive_v2" / old / "manifest.json").exists()
     assert not list(root.glob(".campaign-replace-*"))
 
 
@@ -304,8 +305,8 @@ def test_failed_atomic_exchange_keeps_active_and_candidate(bundle, monkeypatch):
 
     monkeypatch.setattr(store, "_exchange_directories", unsupported)
     with pytest.raises(OSError, match="exchange unavailable"):
-        replace_campaign(root, candidates, "opening_drive_v1", old, archive)
-    assert CampaignStore(root).check("opening_drive_v1")["manifest_sha256"] == old
-    assert CampaignStore(candidates).check("opening_drive_v1")["status"] == "verified"
-    receipt = json.loads(next((archive / "opening_drive_v1").glob("revision_*.json")).read_text())
+        replace_campaign(root, candidates, "opening_drive_v2", old, archive)
+    assert CampaignStore(root).check("opening_drive_v2")["manifest_sha256"] == old
+    assert CampaignStore(candidates).check("opening_drive_v2")["status"] == "verified"
+    receipt = json.loads(next((archive / "opening_drive_v2").glob("revision_*.json")).read_text())
     assert receipt["status"] == "aborted"

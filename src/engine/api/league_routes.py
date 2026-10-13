@@ -39,7 +39,13 @@ def status(service: ServiceDep):
 
 @router.post("/refresh")
 def refresh(service: ServiceDep):
+    from engine.data.refresh import refresh_local
+
     snapshot, stale, age = snapshot_observations(service, force=True)
+    try:
+        refresh_local()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(503, f"ESPN refreshed; {exc}") from exc
     return {"captured_at": snapshot.captured_at, "stale": stale, "age_seconds": round(age)}
 
 
@@ -106,6 +112,7 @@ def league(service: ServiceDep):
                 is_mine=t.team_id == snapshot.my_team_id,
                 faab_remaining=t.faab_remaining,
                 division_name=t.division_name,
+                team_abbrev=t.team_abbrev,
                 schedule=[asdict(row) for row in t.schedule],
             )
             for t in snapshot.teams
@@ -141,19 +148,39 @@ def _campaign_rankings(campaign: str, horizon: str):
 
 @router.get("/forecasts")
 def forecasts(service: ServiceDep, campaign: str, horizon: str = "remaining"):
-    """This week's lineup forecasts from one campaign's remaining-season per-game points."""
+    """This week's lineup forecasts from sealed weekly or horizon models."""
     from engine.espn.forecast_log import record_forecast
     from engine.metrics.weekly_lineup import weekly_forecast
 
     snapshot, stale, age = snapshot_observations(service)
-    ranks = _campaign_rankings(campaign, horizon)
+    ranks = _campaign_rankings(campaign, horizon) if horizon != "weekly" else None
     try:
         with connect() as db:
             ids = observations.espn_ids(db)
             schedule = observations.schedule(db, snapshot.season)
     except (OSError, ValueError, KeyError, TypeError, duckdb.Error) as exc:
         raise _tables(exc) from exc
-    result = weekly_forecast(snapshot, ranks, ids, schedule)
+    if horizon == "weekly":
+        from engine.api.chairstats_routes import store
+        from engine.chairstats.store import CampaignNotFound
+        from engine.chairstats.weekly import weekly_inputs
+        from engine.metrics.weekly_distribution import forecast_snapshot
+
+        try:
+            inputs = weekly_inputs(store(), campaign, snapshot.season, snapshot.week)
+            players = inputs.pop("players")
+            calibration = inputs.pop("calibration")
+            result = forecast_snapshot(snapshot, players, ids, schedule, calibration)
+            limitations = result.get("limitations", []) + inputs.pop("limitations", [])
+            result.update(inputs, limitations=list(dict.fromkeys(limitations)))
+        except CampaignNotFound as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(
+                409, "Weekly forecast artifacts are unavailable or invalid."
+            ) from exc
+    else:
+        result = weekly_forecast(snapshot, ranks, ids, schedule)
     record = record_forecast(get_settings().outputs_dir / "weekly_forecasts", snapshot, result)
     return dict(record, stale=stale, age_seconds=round(age))
 

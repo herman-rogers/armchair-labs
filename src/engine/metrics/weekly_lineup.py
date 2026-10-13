@@ -19,8 +19,8 @@ def weekly_forecast(snapshot, rankings, identities, schedule):
     """Assign each ESPN starter a per-game point estimate from campaign rankings.
 
     ``rankings`` is a ChairStats ranking response: rows with ``player_id``,
-    ``position``, ``team``, ``points_per_game`` and ``season``. K and D/ST use up to
-    four prior recorded ESPN scores because no campaign forecasts them.
+    ``position``, ``team``, ``points_per_game`` and ``season``. K and D/ST use the
+    captured ESPN projection for this week, falling back to up to four prior scores.
     """
     week = snapshot.week
     rows = rankings["rankings"]
@@ -36,7 +36,12 @@ def weekly_forecast(snapshot, rankings, identities, schedule):
             for team in (row["home_team"], row["away_team"]):
                 games[team_code(team)].add(row["week"])
     earlier = defaultdict(dict)
+    weekly_special_teams = {}
     for game in snapshot.week_lineups:
+        if game.week == week:
+            for player in game.home_lineup + game.away_lineup:
+                if player.position in ("K", "DST", "D/ST"):
+                    weekly_special_teams[player.espn_id] = player.projected_points
         if game.week < week:
             for player in game.home_lineup + game.away_lineup:
                 if player.position in ("K", "DST", "D/ST") and number(player.points):
@@ -49,14 +54,17 @@ def weekly_forecast(snapshot, rankings, identities, schedule):
         elif player["on_bye"]:
             value, source = 0.0, "Scheduled bye"
         elif player["position"] in ("K", "DST", "D/ST"):
+            projected = weekly_special_teams.get(player["espn_id"])
             scores = [score for _, score in sorted(earlier[player["espn_id"]].items())[-4:]]
-            if scores:
+            if number(projected):
+                value, source = projected, f"ESPN Week {week} projection · K/DST"
+            elif scores:
                 value, source = (
                     sum(scores) / len(scores),
-                    f"Prior {len(scores)} recorded games · K/DST reference",
+                    f"Prior {len(scores)} recorded games · K/DST fallback",
                 )
             else:
-                reason = "No earlier recorded K/DST scores."
+                reason = "No ESPN weekly projection or earlier recorded K/DST scores."
         else:
             row = ranks.get(identities.get(player["espn_id"]))
             if row is None:
@@ -121,6 +129,9 @@ def weekly_forecast(snapshot, rankings, identities, schedule):
         and r.get("gameday")
     ]
     origins = sorted({(r["season"], r["origin_week"]) for r in rows})
+    # Accuracy audits need the observation cutoff and when the forecast files were written.
+    current = [w for s, w in origins if s == snapshot.season]
+    written = [m.get("generated_at") for m in rankings.get("models", []) if m.get("generated_at")]
     return dict(
         **result,
         campaign_id=rankings["campaign_id"],
@@ -128,12 +139,14 @@ def weekly_forecast(snapshot, rankings, identities, schedule):
         manifest_sha256=rankings["manifest_sha256"],
         horizon=rankings["horizon"],
         forecast_origins=[{"season": s, "origin_week": w} for s, w in origins],
+        through_week=max(current) if current else None,
+        published_at=max(written) if written else None,
         pregame_deadline=f"{min(dates)}T00:00:00+00:00" if dates else None,
         limitations=[
             "Horizon points allocated evenly across scheduled games; "
             "no weekly opponent adjustment or calibrated win probability.",
-            "K/DST use up to four prior recorded scores; "
-            "no ESPN projections enter any point estimate.",
+            "K/DST use captured ESPN weekly projections, falling back to up to four "
+            "prior recorded scores when unavailable. Offensive players use campaign forecasts.",
             "Starting lineups are observed ESPN selections. "
             "Missing starter forecasts withhold team totals and winner picks.",
             *rankings.get("limitations", []),

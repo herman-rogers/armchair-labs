@@ -1,0 +1,24 @@
+{
+  "campaign_id": "opening_drive_v31",
+  "name": "Opening Drive v3.1 interval challenger",
+  "baseline_campaign": "opening_drive_v3",
+  "forecast_season": 2026,
+  "status": "research_challenger",
+  "point_models_refit": false,
+  "designated_policy": "position_workload",
+  "calibration_window_seasons": 5,
+  "minimum_player_calibration_rows": 200,
+  "minimum_lineup_calibration_rows": 100,
+  "player_interval_levels": [80, 90],
+  "lineup_interval_levels": [80],
+  "player_evaluation_years": [2021, 2022, 2023, 2024, 2025],
+  "lineup_evaluation_years": [2022, 2023, 2024, 2025],
+  "prospective_policy": "First complete paired capture before 00:00 UTC on the first game date; immutable; no backfill",
+  "promotion_policy": "No automatic promotion; review coverage, width and interval score together",
+  "limitations": [
+    "Historical evaluation years have been reused for development",
+    "Adjusted interval bounds are not replacement distribution quantiles",
+    "Synthetic-to-actual-lineup interval transfer is provisional",
+    "K/DST uncertainty, availability mixtures and shrinkage sensitivity are deferred"
+  ]
+}

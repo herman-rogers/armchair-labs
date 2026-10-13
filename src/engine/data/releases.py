@@ -23,6 +23,12 @@ from engine.data.frames import read_frame
 from engine.data.verification import observe, read_json, verified
 
 
+def now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
+
+
 def identifier(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", value):
         raise ValueError(f"Invalid release identifier: {value}")
@@ -61,6 +67,7 @@ def digest(path: Path) -> str:
 
 
 def write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, allow_nan=False, default=str) + "\n")
 
 
@@ -217,9 +224,3 @@ def load_tables(data_dir: Path, version: str | None = None) -> TableRelease:
     layer = "tables" if parent.parent.name == "batches" else "gold"
     root, manifest = load_manifest(data_dir, layer, ref)
     return TableRelease(root, manifest)
-
-
-# Historical research scripts and sealed product manifests retain their original
-# names. New builders use TableRelease/load_tables; never rewrite old artifacts.
-GoldRelease = TableRelease
-load_gold = load_tables

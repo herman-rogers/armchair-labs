@@ -946,8 +946,8 @@ tbody tr:hover { background: var(--row-hover); }
 .profile-expander { margin: .7rem 0 1rem; }
 .profile-expander > summary { cursor: pointer; font-weight: 600; }
 @media (max-width: 640px) { .profile-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .player-profile .detail-grid { grid-template-columns: 1fr; } .player-profile { padding: .8rem; } }
-/* NextGen keeps archived material visibly distinct from eligible analysis. */
-.nextgen-workspace .archive-banner {
+/* Archived material stays visibly distinct from eligible analysis. */
+.dashboard-workspace .archive-banner {
   border: 1px solid #b4843f;
   border-left: 4px solid #b4843f;
   background: color-mix(in srgb, #b4843f 10%, transparent);
@@ -955,10 +955,10 @@ tbody tr:hover { background: var(--row-hover); }
   margin: 1rem 0;
   line-height: 1.6;
 }
-.nextgen-workspace .archive-banner strong { display: block; letter-spacing: .02em; }
-.nextgen-workspace .table-wrap { max-width: 100%; overflow-x: auto; }
-.nextgen-workspace > .analysis-controls { flex-wrap: wrap; }
-.nextgen-workspace .reference-section { margin: 1.5rem 0; }
+.dashboard-workspace .archive-banner strong { display: block; letter-spacing: .02em; }
+.dashboard-workspace .table-wrap { max-width: 100%; overflow-x: auto; }
+.dashboard-workspace > .analysis-controls { flex-wrap: wrap; }
+.dashboard-workspace .reference-section { margin: 1.5rem 0; }
 
 .primary-navigation { border-bottom: 2px solid var(--border); }
 .consensus-rank { color: var(--text-dim); font-variant-numeric: tabular-nums; }
@@ -1159,6 +1159,42 @@ header.masthead h1 a { color: inherit; text-decoration: none; }
 /* League outlook: decisions first, methodology and roster coverage on expansion. */
 .league-outlook { display: flex; flex-direction: column; gap: 16px; }
 .league-outlook > h3, .league-outlook > .legend { margin: 0; }
+.overview-workspace { min-width: 0; }
+.overview-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.overview-header h2 { margin: 6px 0 0; }
+.overview-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.overview-actions label { display: flex; flex-direction: column; gap: 5px; color: var(--text-dim); font-size: 11px; }
+.overview-actions select { min-height: 36px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; }
+.overview-actions .button { min-height: 36px; font-size: 12px; }
+.overview-sources { margin: 14px 0 18px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+.overview-sources > summary { cursor: pointer; padding: 10px 0; }
+.overview-sources-label { margin-left: 14px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.overview-sources > div { padding: 4px 0 12px; max-width: 100%; }
+.overview-sources p { line-height: 1.6; }
+.overview-workspace .league-attention { margin: 0 0 16px; border-radius: 5px; align-items: baseline; }
+.overview-workspace .league-update-cards { margin: 0 0 12px; gap: 12px; }
+.overview-workspace .outlook-kpis > section { padding: 18px 20px; }
+.overview-workspace .outlook-kpis h3 { margin: 10px 0; font-size: 28px; letter-spacing: -.035em; }
+.overview-workspace .outlook-kpis p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
+.overview-workspace .outlook-kpis .eyebrow { letter-spacing: .07em; }
+.overview-workspace .outlook-section-head > a { font-size: 12px; white-space: nowrap; }
+.overview-workspace .outlook-section-head p { font-size: 12px; }
+.overview-workspace .outlook-standings > .table-wrap > table { min-width: 760px; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(1) { width: 7%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(2) { width: 27%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(3) { width: 17%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(4) { width: 14%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(5) { width: 10%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(6) { width: 16%; }
+.overview-workspace .outlook-standings > .table-wrap > table > thead th:nth-child(7) { width: 9%; }
+@media (max-width: 700px) {
+  .overview-header { align-items: start; flex-direction: column; gap: 14px; }
+  .overview-actions { width: 100%; }
+  .overview-actions label { flex: 1; }
+  .overview-sources > summary { line-height: 1.7; }
+  .overview-sources-label { display: block; margin-left: 0; }
+  .overview-workspace .outlook-section-head { align-items: start; }
+}
 .outlook-kpis h3 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; font-variant-numeric: tabular-nums; }
 .outlook-kpis h3 span { font-size: 14px; }
 .outlook-matchups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px; }
@@ -1261,6 +1297,10 @@ header.masthead h1 a { color: inherit; text-decoration: none; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 5px 0 10px; padding: 0; list-style: none; font-size: 11px; color: var(--text-dim); }
 .chart-legend li { display: flex; align-items: center; gap: 5px; }
 .chart-legend li > span { width: 13px; border-top-width: 3px; }
+.chart-legend li > span.legend-dot { width: 9px; height: 9px; border-width: 2px; border-radius: 50%; background: currentColor; }
+.chart-legend li > span.legend-ring { width: 9px; height: 9px; border-width: 2px; border-radius: 50%; }
+.chart-legend li > span.legend-diamond { width: 8px; height: 8px; border-width: 2px; transform: rotate(45deg); }
+.chart-legend li > span.legend-bracket { width: 14px; height: 6px; border-width: 0 2px 2px; }
 .chart-tooltip { max-width: 280px; padding: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; border-radius: 4px; }
 .chart-tooltip p { margin: 5px 0 0; }
 .sticky-footer { position: sticky; bottom: 0; z-index: 20; margin-top: 16px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); background: var(--surface); border: 1px solid var(--border); box-shadow: 0 -3px 12px #0000000a; }

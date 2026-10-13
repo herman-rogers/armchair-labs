@@ -229,6 +229,22 @@ class TestSnapshotFrame:
         assert restored.teams[0].division_id is None
         assert restored.teams[0].division_name is None
 
+    def test_team_abbreviation_round_trips_and_defaults_to_none(self, tmp_path: Path) -> None:
+        original = self._snapshot([])
+        original.teams = [
+            TeamState(3, "Mine", "me", 1, 0, 120, team_abbrev="JSN"),
+            TeamState(4, "Theirs", "them", 0, 1, 120),
+        ]
+        path = original.write(tmp_path / "snap.json")
+        restored = LeagueSnapshot.read(path)
+
+        assert restored.teams[0].team_abbrev == "JSN"
+        assert restored.teams[1].team_abbrev is None
+
+        raw = path.read_text().replace(',\n      "team_abbrev": "JSN"', "")
+        path.write_text(raw)
+        assert LeagueSnapshot.read(path).teams[0].team_abbrev is None
+
 
 class TestDraftMarket:
     def test_ppr_response_order_becomes_skill_and_position_rank(self) -> None:

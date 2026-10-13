@@ -18,6 +18,15 @@ def timestamp(value):
     return result if result.tzinfo else None
 
 
+# Campaign lineup forecasts, plus the pre-campaign records kept for 2026 weeks 1-4.
+FORECAST_SOURCES = (
+    "campaign_per_game",
+    "campaign_weekly_distribution",
+    "nextgen_weekly_reference",
+    "nextgen_weekly_model",
+)
+
+
 def record_forecast(directory: Path, snapshot, forecast):
     record = _record_forecast(directory, snapshot, forecast)
     from engine.tables.application import active
@@ -73,7 +82,7 @@ def accuracy(snapshot, directory: Path):
             if (
                 item.get("league_id") == snapshot.league_id
                 and item.get("season") == snapshot.season
-                and item.get("source") in ("nextgen_weekly_reference", "nextgen_weekly_model")
+                and item.get("source") in FORECAST_SOURCES
                 and deadline
                 and generated
                 and captured

@@ -44,19 +44,22 @@ Start at the [documentation index](docs/README.md).
 
 Armchair Labs separates observed production, opportunity, efficiency, and participation
 from forecasts and league decisions. nflverse supplies football observations; ESPN
-supplies league ownership, results, and recorded statuses. Forecasts come from
-**ChairStats** campaign bundles: sealed model outputs under `data/campaigns/`.
+supplies league ownership, results, and recorded statuses. **ChairStats** serves
+**Opening Drive v3** as the default dashboard campaign, including QB/RB/WR/TE
+weekly, season, and remaining-season forecasts. Opening Drive v2 remains available
+for comparison. Sealed outputs live under `data/campaigns/`; historical bundles
+are retained under `data/campaign_revisions/`.
 
 Three inputs, each with its own refresh, meet only in the API:
 
 | Input | Where it lives | How the API reads it |
 |---|---|---|
-| Observations | DuckDB table catalog (`data/tables/current.json`) | `/api/tables/*`, `/api/team-analysis`, league identity joins |
-| Models | Every campaign bundle under `data/campaigns/<id>/` | `/api/chairstats/*`; the request names the campaign |
+| Observations | DuckDB table catalog (`data/tables/current.json`), captured straight from nflverse | `/api/tables/*`, `/api/team-analysis`, league identity joins, market consensus |
+| Models | Opening Drive v3 (default) and v2 (comparison), re-scored weekly on `just start` | `/api/chairstats/*`; the request names the campaign |
 | League | ESPN captures in a local league catalog | `/api/league/*`, forecasts joined from the named campaign |
 
-There is no selected or promoted model. Every published bundle is queryable at all
-times; pages choose one in the URL. The frontend uses TanStack Query for server
+Opening Drive v3 is selected by default. Pages can choose the preserved v2
+comparison with `?campaign=opening_drive_v2`. The frontend uses TanStack Query for server
 state. See [architecture](docs/architecture/README.md) for the contracts and
 [plans](docs/plans/README.md) for further data/training work.
 

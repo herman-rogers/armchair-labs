@@ -89,6 +89,9 @@ class TeamState:
     division_id: int | None = None
     division_name: str | None = None
     schedule: list[ScheduleEntry] = field(default_factory=list)
+    #: The owner's chosen short code (ESPN `abbrev`). Older snapshots lack it, so
+    #: readers fall back to deriving one from the name.
+    team_abbrev: str | None = None
 
 
 @dataclass
@@ -619,6 +622,7 @@ def fetch_snapshot(
                 else None
             ),
             division_name=_text(_attribute(team, "division_name")),
+            team_abbrev=_text(_attribute(team, "team_abbrev")),
         )
         for team in league.teams
     ]

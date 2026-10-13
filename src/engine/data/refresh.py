@@ -1,14 +1,14 @@
-"""Weekly observation refresh: capture the completed week, build a table batch, publish tables.
+"""Weekly observation refresh: detect a completed week, capture, enrich, build, publish.
 
-Run daily: an unchanged week is a cheap no-op that still checks table recipes and
-retries an unfinished upload. Use --force for within-week source corrections.
-An interrupted run resumes completed stages with the same --version.
+Run daily: an unchanged week only checks table recipes and retries an unfinished
+upload. Use --force to rebuild the same week after provider corrections. An
+interrupted run resumes with the same --version. After the tables publish, the
+campaign scorers are asked to add rolling-origin forecasts for the new week.
 """
 
 from __future__ import annotations
 
 import fcntl
-import json
 import os
 import subprocess
 import sys
@@ -16,40 +16,47 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from engine.config.settings import REPO_ROOT, get_settings
-from engine.data.releases import atomic_json, digest, identifier, load_manifest, load_tables
-from engine.data.weekly import capture
+from engine.data.capture import capture_raw, completed_week, default_season, latest_snapshot
+from engine.data.enrich import enrich
+from engine.data.pipeline import build_tables
+from engine.data.releases import atomic_json, identifier, load_tables
 from engine.tables.registry import read_registry
 from engine.tables.transport import DEFAULT_STORE
 from engine.tables.workflow import refresh_and_publish as refresh_named_tables
 
 ROOT = REPO_ROOT
+RESCORE = ["-m", "experiments.future_player_lab.campaigns.rescore", "--due"]
 
 
-def needs_refresh(published: dict, captured: dict, *, force: bool = False) -> bool:
+def refresh_local(*, rescore: bool = True) -> None:
+    """Run the shared refresh outside API query scopes and model runtime state."""
+    command = [sys.executable, "-m", "engine.data.pipeline", "refresh"]
+    if not rescore:
+        command.append("--no-rescore")
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "OMP_NUM_THREADS": "4",
+            "OPENBLAS_NUM_THREADS": "4",
+            "POLARS_MAX_THREADS": "4",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = " | ".join((result.stderr or result.stdout).strip().splitlines()[-3:])
+        raise RuntimeError(f"NFL data and forecast refresh failed: {detail}")
+
+
+def needs_refresh(published: dict, season: int, cutoff: int, *, force: bool = False) -> bool:
     old = (published["season"], published["through_week"])
-    new = (captured["season"], captured["through_week"])
-    if new < old:
+    new = (season, cutoff)
+    if new[0] == old[0] and new[1] < old[1]:
         raise ValueError("Refusing to move the published observation cutoff backward")
-    if new[0] != old[0]:
-        raise ValueError("A new season requires updated historical evidence first")
     return force or new > old
-
-
-def build_command(version: str, history: str, college: str, report: Path) -> list[str]:
-    return [
-        sys.executable,
-        "-m",
-        "engine.data.pipeline",
-        "build",
-        "--version",
-        version,
-        "--history",
-        history,
-        "--college-source",
-        college,
-        "--current-report",
-        str(report),
-    ]
 
 
 def finish_tables(data: Path, args) -> dict:
@@ -63,6 +70,26 @@ def finish_tables(data: Path, args) -> dict:
     )
 
 
+def rescore_campaigns(log_path: Path) -> dict:
+    """Ask the campaign scorers for the new week; a failure never undoes the tables."""
+    with log_path.open("a") as log:
+        log.write("\nStage: rescore\n")
+        log.flush()
+        result = subprocess.run(
+            [sys.executable, *RESCORE], cwd=ROOT, stdout=log, stderr=log, check=False
+        )
+    return {"returncode": result.returncode, "log": str(log_path)}
+
+
+def finish_forecasts(state: dict, args, log_path: Path) -> None:
+    if not getattr(args, "no_rescore", False):
+        state["rescore"] = rescore_campaigns(log_path)
+        if state["rescore"]["returncode"]:
+            raise RuntimeError(
+                f"Observation tables are current, but forecast generation failed. See {log_path}"
+            )
+
+
 def run(args):
     data = get_settings().data_dir.resolve()
     runtime = data / ".runtime"
@@ -73,72 +100,49 @@ def run(args):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("An observation refresh is already running") from exc
+        previous = latest_snapshot(data)
         source = load_tables(data)
         published = source.manifest["current_observations"]
-        # Avoid a warm provider cache hiding Monday's final game. Only this process
-        # and its children change cache duration; preserved research inputs stay frozen.
-        os.environ["NFLVERSE_CACHE_DURATION"] = "0"
-        get_settings.cache_clear()
+        season = getattr(args, "season", None) or default_season()
+        college = getattr(args, "college_source", None) or (previous or {}).get("college_source")
+        if not college:
+            raise ValueError("A college source capture is required for the first build")
         version = identifier(args.version or datetime.now(UTC).strftime("weekly_%Y%m%d_%H%M%S"))
-        plan_path = runtime / f"{version}.json"
         state = dict(version=version, status="checking", started_at=datetime.now(UTC).isoformat())
         atomic_json(status_path, state)
+        log_path = runtime / f"{version}.log"
+        state["log"] = str(log_path)
         try:
-            if plan_path.exists():
-                plan = json.loads(plan_path.read_text())
-                report = Path(plan["report"])
-                if digest(report) != plan["report_sha256"]:
-                    raise ValueError("Captured input report changed during the run")
+            batch = data / "tables/batches" / version / "manifest.json"
+            if batch.exists():
+                cutoff = load_tables(data, version).manifest["current_observations"]["through_week"]
             else:
-                report = args.current_report or capture(
-                    published["season"], after_week=published["through_week"], force=args.force
-                )
-                if report is None or not needs_refresh(
-                    published, json.loads(report.read_text()), force=args.force
-                ):
+                cutoff = completed_week(season)
+                if not needs_refresh(published, season, cutoff, force=args.force):
                     state["tables"] = finish_tables(data, args)
-                    state.update(status="current", through_week=published["through_week"])
+                    state.update(status="current", season=season, through_week=cutoff)
+                    finish_forecasts(state, args, log_path)
+                    state.update(completed_at=datetime.now(UTC).isoformat())
                     atomic_json(status_path, state)
                     return state
-                _, enriched = load_manifest(data, "enriched", source.manifest["input"])
-                _, raw = load_manifest(data, "raw", enriched["input"])
-                plan = dict(
-                    report=str(report.resolve()),
-                    report_sha256=digest(report),
-                    history=source.manifest["history"]["version"],
-                    college=raw["college_source"],
-                    previous_batch=source.ref,
-                )
-                atomic_json(plan_path, plan)
-            captured = json.loads(report.read_text())
-            state.update(through_week=captured["through_week"], season=captured["season"])
-            log_path = runtime / f"{version}.log"
-            state["log"] = str(log_path)
-            manifest = data / "tables/batches" / version / "manifest.json"
-            if manifest.exists():
-                staged = load_tables(data, version)
-                if staged.manifest["current_observations"] != {
-                    k: captured[k] for k in ("season", "through_week", "saved_at")
-                }:
-                    raise ValueError("Staged table batch has different captured observations")
-            else:
-                state.update(status="running", stage="tables")
+                state.update(status="running", stage="capture", season=season, through_week=cutoff)
                 atomic_json(status_path, state)
-                print(f"tables: {version}; log: {log_path}", flush=True)
-                with log_path.open("a") as log:
-                    log.write("\nStage: tables\n")
-                    log.flush()
-                    subprocess.run(
-                        build_command(version, plan["history"], plan["college"], report),
-                        cwd=ROOT,
-                        stdout=log,
-                        stderr=log,
-                        check=True,
-                    )
+                if not (data / "raw/snapshots" / version / "manifest.json").exists():
+                    capture_raw(data, version, season, college, previous=previous)
+                state.update(stage="enrich")
+                atomic_json(status_path, state)
+                if not (data / "enriched/releases" / version / "manifest.json").exists():
+                    enrich(data, version)
+                state.update(stage="tables")
+                atomic_json(status_path, state)
+                build_tables(data, version)
             if load_tables(data).ref["version"] != version:
                 raise ValueError("The new batch is not the latest accepted batch; aborting")
             state["tables"] = finish_tables(data, args)
-            state.update(status="published", completed_at=datetime.now(UTC).isoformat())
+            state.update(status="published", through_week=cutoff)
+            atomic_json(status_path, state)
+            finish_forecasts(state, args, log_path)
+            state.update(completed_at=datetime.now(UTC).isoformat())
             atomic_json(status_path, state)
             return state
         except Exception as exc:

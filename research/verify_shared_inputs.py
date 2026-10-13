@@ -5,7 +5,7 @@ import json
 import socket
 from pathlib import Path
 
-from engine.data.releases import load_gold
+from engine.data.releases import load_tables
 
 
 def verify(root: Path) -> dict:
@@ -31,7 +31,7 @@ def verify(root: Path) -> dict:
             "DIAGNOSTICS": "deep_diagnostics_001",
         }.items():
             setattr(work, field, work.LAB / "runs" / name)
-        gold = load_gold(root / "data", "canonical_targets_20260923_r3")
+        gold = load_tables(root / "data", "canonical_targets_20260923_r3")
         panel, x = work.task_data("RB", "season")
         weeks = work.target_weeks()
         events, schedule, preseason, injuries = availability.load_inputs(root)
@@ -55,7 +55,7 @@ def verify(root: Path) -> dict:
             import pyarrow.parquet as pq
 
             for source_id, ref in json.loads(source_catalog.read_text())["sources"].items():
-                release = load_gold(root / "data", ref["version"])
+                release = load_tables(root / "data", ref["version"])
                 if release.ref != ref or release.manifest["source"]["id"] != source_id:
                     raise ValueError(f"Source catalog mismatch: {source_id}")
                 tables = release.manifest["tables"]

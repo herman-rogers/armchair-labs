@@ -1,0 +1,45 @@
+{
+  "campaign_id": "opening_drive_v3",
+  "name": "Opening Drive v3",
+  "baseline_campaign": "opening_drive_v2",
+  "positions": ["QB", "RB", "WR", "TE"],
+  "training_start_season": 2003,
+  "last_complete_training_season": 2025,
+  "forecast_season": 2026,
+  "unit": "eligible player and scheduled NFL week",
+  "horizon": "weekly",
+  "warmup_forecast_years": [2015, 2016, 2017],
+  "selection_years": [2018, 2019, 2020],
+  "evaluation_years": [2021, 2022, 2023, 2024, 2025],
+  "final_selection_years": [2018, 2019, 2020],
+  "evaluation_status": "Historical development evaluation; these years were used in earlier research. Policies fixed before the v3 evaluation period; annual fits use earlier seasons only.",
+  "research_questions": [
+    "Does a weekly conditional mean improve on v2 horizon points per scheduled game?",
+    "Does a correction to v2 improve on a direct weekly mean?",
+    "Does full history, a recent window, or recency weighting predict best?",
+    "Does personal scoring and residual history improve distribution forecasts beyond comparable-player pooling?",
+    "Does conditional scale or quantile boosting improve on pooled and shrunk personal residual distributions?",
+    "Are interval coverage, width, and tail probabilities useful across positions, workload, history length, and seasons?",
+    "Do regularized dependence estimates improve lineup distributions versus independent aggregation?",
+    "What evidence supports K/DST uncertainty, and how does mixed scoring differ from official league scoring?"
+  ],
+  "controls": {
+    "future_eligibility": "Never use future appearances to choose candidate players",
+    "features": "Only completed earlier weeks; current-week outcomes never enter predictors",
+    "historical_v2": "Frozen chronological v2 forecasts when available; earlier fallback explicitly identified",
+    "variance_targets": "Earlier out-of-time errors; in-sample residuals cannot supply evaluation calibration",
+    "selection": "Separate mean and distribution selection from evaluation",
+    "missing": "Missing observations remain distinct from verified zero outcomes",
+    "scoring": "Preserve v2 offensive scoring; identify ESPN K/DST and official league scoring gaps",
+    "original_artifacts": "Preserve original model bytes and forecasts; publish v3 separately",
+    "current_forecast": "Reconstructed 2026 cutoffs from later captures, with publication time retained"
+  },
+  "primary_metrics": ["rmse", "mae", "crps", "pinball", "coverage_80", "width_80"],
+  "secondary_metrics": ["bias", "coverage_90", "width_90", "brier_zero", "brier_above_20", "lineup_rmse", "lineup_crps"],
+  "research_sources": [
+    {"title": "NGBoost", "url": "https://proceedings.mlr.press/v119/duan20a.html", "use": "Distribution parameters can be learned with boosting; not an NFL performance claim"},
+    {"title": "Quantile Regression Forests", "url": "https://jmlr.org/papers/v7/meinshausen06a.html", "use": "Conditional distributions and quantiles with trees"},
+    {"title": "Gaussian Process Boosting", "url": "https://jmlr.org/papers/v23/20-322.html", "use": "Grouped dependence can be combined with boosting; no requirement to fit this particular method"},
+    {"title": "Hierarchical Partial Pooling", "url": "https://mc-stan.org/learn-stan/case-studies/pool-binary-trials-rstanarm.html", "use": "Share evidence across entities while retaining individual estimates"}
+  ]
+}

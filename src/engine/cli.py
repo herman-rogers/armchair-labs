@@ -17,7 +17,7 @@ from engine.cli_auth import app as auth_app
 from engine.cli_campaigns import app as campaigns_app
 from engine.cli_models import app as models_app
 from engine.cli_tables import app as tables_app
-from engine.config.settings import PACKAGE_ROOT
+from engine.config.settings import PACKAGE_ROOT, get_settings
 
 app = typer.Typer(
     add_completion=False,
@@ -80,8 +80,11 @@ def dev(
     auth: bool = typer.Option(
         True, "--auth/--no-auth", help="Verify ESPN login and load league data."
     ),
+    rescore: bool = typer.Option(
+        True, "--rescore/--no-rescore", help="Add this week's campaign forecasts first."
+    ),
 ) -> None:
-    """Prepare data, tables, and ESPN, then start the API and frontend."""
+    """Prepare data, tables, campaign forecasts and ESPN, then start the API and frontend."""
     from engine.dev import DevAlreadyRunningError, run
 
     try:
@@ -92,6 +95,7 @@ def dev(
             reload=reload,
             prepare=setup,
             auth=auth,
+            rescore=rescore,
         )
     except (DevAlreadyRunningError, RuntimeError, OSError, ValueError) as error:
         typer.echo(str(error), err=True)
@@ -102,14 +106,17 @@ def dev(
 @app.command()
 def setup(
     auth: bool = typer.Option(True, "--auth/--no-auth", help="Verify ESPN and load league data."),
+    rescore: bool = typer.Option(
+        True, "--rescore/--no-rescore", help="Add this week's campaign forecasts."
+    ),
 ) -> None:
-    """Prepare dependencies, application data, query tables, and ESPN without starting servers."""
+    """Prepare dependencies, tables, campaign forecasts, and ESPN without starting servers."""
     import subprocess
 
     from engine.startup import prepare
 
     try:
-        prepare(auth=auth)
+        prepare(auth=auth, rescore=rescore)
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         typer.echo(f"Setup failed: {error}", err=True)
         raise typer.Exit(1) from error
@@ -147,11 +154,11 @@ def refresh(
 ) -> None:
     """Drop cached nflverse downloads so the next capture pulls fresh."""
     _configure_logging(verbose)
-    from engine.data.nflverse import clear_cache
+    import shutil
 
-    clear_cache()
-
-    typer.echo("Cleared the nflverse download cache. The next capture will pull fresh.")
+    cache = get_settings().nflverse_cache_dir
+    shutil.rmtree(cache, ignore_errors=True)
+    typer.echo("Cleared the nflverse research cache. Observation captures download fresh anyway.")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import { DataTable, type Column } from './DataTable'
 import { CampaignSelect } from './CampaignSelect'
 import { Pager, QueryError } from './Controls'
 import { fixed, grouped } from '../format'
+import { forecastPeriod, forecastPositionRank } from '../forecastDisplay'
 
 /** `/intelligence/qb-passing`: every target of the chosen campaign's QB model. */
 export function QBPassing() {
@@ -20,7 +21,7 @@ export function QBPassing() {
   const rows = (query.data?.rows ?? []).filter(r => (r.player_display_name ?? '').toLowerCase().includes(search.toLowerCase()))
   const targets = query.data?.model.targets ?? []
   const columns: Column<Ranking>[] = [
-    { key: 'position_rank', label: 'Rank', title: 'Rank by predicted points within the QB model.', initial: 'asc' },
+    { key: 'position_rank', label: `${query.data ? forecastPeriod({ horizon, origin_week: query.data.origin_week }) : describeHorizon(horizon)} · QB rank`, title: 'Rank by predicted points within the QB model for this forecast period.', initial: 'asc', render: forecastPositionRank },
     { key: 'player_display_name', label: 'Quarterback', title: 'Open the player profile.', align: 'left' },
     { key: 'team', label: 'Team', title: 'Team at the forecast cutoff.', align: 'left', render: r => r.team ?? '—' },
     ...targets.map((t): Column<Ranking> => ({ key: `target_${t}`, label: t.replaceAll('_', ' '), title: `Predicted ${t.replaceAll('_', ' ')} over the horizon.`, value: r => r.predictions[t], render: r => t.endsWith('yards') ? grouped(r.predictions[t]) : fixed(r.predictions[t]) })),

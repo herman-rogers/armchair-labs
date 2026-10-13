@@ -1,8 +1,7 @@
 """Armchair Labs API: observation tables, ChairStats campaign models, and ESPN league state.
 
-Every model is available at all times; a request names the campaign it wants.
-Observations come from the pinned DuckDB table catalog. There is no selected or
-promoted product anywhere in this service.
+The campaign list declares the dashboard default; requests can name a comparison
+campaign explicitly. Observations come from the pinned DuckDB table catalog.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from engine.api.chairstats_routes import router as chairstats_router
 from engine.api.league_routes import router as league_router
+from engine.api.scoring_routes import router as scoring_router
 from engine.api.tables_routes import router as tables_router
 from engine.api.team_analysis_routes import router as team_analysis_router
 from engine.config.league import get_league
@@ -34,7 +34,14 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 # Routes that read the DuckDB catalog run inside one pinned query scope.
-TABLE_ROUTES = ("/api/tables", "/api/team-analysis", "/api/league", "/api/status")
+TABLE_ROUTES = (
+    "/api/tables",
+    "/api/team-analysis",
+    "/api/league",
+    "/api/status",
+    "/api/chairstats/rankings",
+    "/api/scoring",
+)
 
 
 def catalog_token(data_dir) -> str | None:
@@ -78,11 +85,14 @@ app.include_router(chairstats_router)
 app.include_router(tables_router)
 app.include_router(team_analysis_router)
 app.include_router(league_router)
+app.include_router(scoring_router)
 
 
 @app.middleware("http")
 async def pin_table_catalog(request, call_next):
     """Do not put a new catalog's response into an old frontend query cache."""
+    if request.method != "GET":
+        return await call_next(request)
     requested = request.headers.get("X-Data-Catalog")
     if requested is None:
         return await call_next(request)
@@ -121,7 +131,7 @@ async def table_queries(request, call_next):
     """Observation reads come from one pinned DuckDB catalog per request."""
     from engine.tables.application import query_scope
 
-    if not request.url.path.startswith(TABLE_ROUTES):
+    if request.method != "GET" or not request.url.path.startswith(TABLE_ROUTES):
         return await call_next(request)
     try:
         with query_scope(get_settings().data_dir):

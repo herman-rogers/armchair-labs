@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -17,6 +16,8 @@ from pathlib import Path
 
 import polars as pl
 import requests
+
+from engine.data.shared import sha256
 
 REPOSITORY = "sportsdataverse/cfbfastR-cfb-data"
 DATASETS = {
@@ -43,11 +44,6 @@ STATS = {
 }
 STAT_COLUMNS = [v for values in STATS.values() for v in values.values()]
 KEY = ["season", "game_id", "team_id", "college_id"]
-
-
-def sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def unique(frame: pl.DataFrame, keys: list[str]) -> None:
@@ -328,7 +324,3 @@ def normalize_season(
         ).to_dicts(),
     }
     return seasons, player_games, audit
-
-
-def write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")

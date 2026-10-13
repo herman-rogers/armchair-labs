@@ -71,6 +71,10 @@ web:
 dev:
     uv run engine dev
 
+# Alias for dev: prepare tables, re-score campaigns for the latest week, and start services.
+start:
+    uv run engine dev
+
 # Stop supervised services and reclaim project-owned orphans from the old shell recipe.
 stop:
     uv run engine dev-stop
@@ -134,9 +138,17 @@ campaign-train *ARGS:
 campaign-score *ARGS:
     OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.forecast {{ARGS}}
 
+# Add rolling-origin forecasts for the latest completed week to every campaign that can be scored.
+campaign-rescore *ARGS:
+    OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.rescore {{ARGS}}
+
 # Reproduce predictions directly from a published campaign bundle, offline.
 campaign-replay *ARGS:
     OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 POLARS_MAX_THREADS=4 uv run --no-sync python -m experiments.future_player_lab.campaigns.replay {{ARGS}}
+
+# Compare frozen campaigns with external forecasts; separate from fitting/selection.
+campaign-benchmark *ARGS:
+    uv run --no-sync engine campaigns benchmark {{ARGS}}
 
 # Preserve pre-Opening-Drive QB/RB research in the shared campaign store; no fitting.
 campaign-import-scout *ARGS:

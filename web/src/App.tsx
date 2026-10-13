@@ -1,16 +1,28 @@
 import { isRouteErrorResponse, Link, Outlet, ScrollRestoration, useRouteError, useLocation } from 'react-router'
 import { DataReleaseProvider } from './components/DataRelease'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { statusQuery } from './api/queries'
 import { useEffect, type ReactNode } from 'react'
 import { PageNavigation } from './components/PageNavigation'
 import { useCurrentPage } from './pageNavigation'
 import { Breadcrumbs } from './components/Breadcrumbs'
 import { ThemeToggle } from './components/ThemeToggle'
+import { refreshObservations } from './api/league'
+import { QueryError } from './components/Controls'
 
 /** Root layout for every route in `routes.tsx`. */
 export default function App() {
   const status = useQuery(statusQuery())
+  const client = useQueryClient()
+  const refresh = useMutation({
+    mutationFn: refreshObservations,
+    // A failed forecast stage can still have published newer observations.
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: ['data-catalog'] })
+      await Promise.all(['league-observations', 'chairstats', 'scoring', 'status'].map(key =>
+        client.invalidateQueries({ queryKey: [key] })))
+    },
+  })
   const { pathname } = useLocation()
   const page = useCurrentPage()
   // Team routes supply the selected team's name for meaningful browser history.
@@ -33,10 +45,12 @@ export default function App() {
             <span>{status.data?.league.team_count ?? '—'} teams</span>
             <span>Full PPR · league scoring</span>
           </div>
+          <button type="button" className="button" disabled={refresh.isPending} onClick={() => refresh.mutate()} title="Update ESPN, NFL observations and model forecasts">{refresh.isPending ? 'Refreshing…' : 'Refresh data'}</button>
           <ThemeToggle />
         </div>
       </div>
     </header>
+    <QueryError query={refresh} label="Data refresh incomplete" />
     {status.isError && <div className="notice"><h2>Release status unavailable</h2><p>{status.error.message}</p></div>}
     <DataReleaseProvider fallback={message => shell(message, false)}>{shell(<Outlet />)}</DataReleaseProvider>
     <ScrollRestoration />

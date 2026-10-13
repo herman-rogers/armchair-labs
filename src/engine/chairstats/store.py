@@ -105,8 +105,10 @@ def _validate(root: Path, manifest: dict, campaign_id: str) -> None:
                 raise ValueError("Invalid forecast season/origin")
             if key[0] <= model["training_through_season"]:
                 raise ValueError("Forecast must follow the final model training cutoff")
-            if key[1] != model.get("origin_week"):
+            if key[1] != model.get("origin_week") and not forecast.get("rolling_origin"):
                 raise ValueError("Forecast origin differs from model contract")
+            if forecast.get("rolling_origin") and key[1] < model.get("origin_week", 0):
+                raise ValueError("Rolling forecasts can only move the origin later")
             _reference(root, forecast)
 
 
@@ -299,6 +301,7 @@ def publish_campaign(root: Path, metadata: dict, models: list[dict]) -> Path:
                 {
                     "season": f["season"],
                     "origin_week": f["origin_week"],
+                    **({"rolling_origin": True} if f.get("rolling_origin") else {}),
                     **copy(
                         Path(f["path"]),
                         f"{model_id}/forecasts/{f['season']}_{f['origin_week']}.json",

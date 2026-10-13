@@ -16,6 +16,7 @@ import { CompositionChart, ContributionChart, PositionChart, ReplacementChart, R
 import { Link } from 'react-router'
 import { teamPath } from '../navigation'
 import { TeamCorrelationRisk } from './TeamCorrelationRisk'
+import { rankingsPeriod } from '../forecastDisplay'
 
 const pct = (v: number | null | undefined) => v == null ? '—' : `${fixed(v * 100)}%`
 const signed = (v: number | null | undefined) => v == null ? '—' : `${v > 0 ? '+' : ''}${fixed(v)}`
@@ -38,7 +39,7 @@ export function TeamStrength({ data, rankings, teamId, campaignId, horizon, chil
   return <section className="team-strength" aria-label="Team strength breakdown">
     <QueryError query={query} label="Team strength unavailable" />
     {query.isPending && <p role="status">Loading team strength…</p>}
-    {query.data && !matching && <p className="notice">Team strength is waiting for a matching league snapshot. Refresh league to align the data.</p>}
+    {query.data && !matching && <p className="notice">Team strength is waiting for a matching league snapshot. Refresh data to align the data.</p>}
     {team && results && current && <>
       <nav className="page-links strength-sections" aria-label="Team strength sections">
         <a href="#strength-lineup">Starting lineup</a><a href="#strength-balance">Scoring balance</a><a href="#strength-depth">Usable depth</a><a href="#strength-positions">Positions</a><a href="#strength-results">Results</a><a href="#strength-correlation">Correlation risk</a><a href="#strength-roster">Players</a>
@@ -47,7 +48,7 @@ export function TeamStrength({ data, rankings, teamId, campaignId, horizon, chil
         <Stat label="Actual scoring" value={<>{fixed(results.ppg)} <small>pts / week</small></>}><p>{rank(results.ppg_rank)} · {results.record} · {signed(results.ppg_change)} vs last week</p></Stat>
         <Stat label={`Week ${data.week} · ${query.data?.campaign_name ?? 'campaign'}`} value={<>{fixed(current.weekly_total)} <small>points</small></>}><p>Includes K/DST · {current.covered}/{current.required} offensive starters covered</p></Stat>
         <Stat label="Against every team" value={pct(results.all_play)}><p>{rank(results.all_play_rank)} · opponents beaten; ties count half</p></Stat>
-        <Stat label="Roster forecast" value={rank(roster?.team_rank)}><p>{fixed(roster?.forecast_points)} horizon points · includes bench/IR</p></Stat>
+        <Stat label={`${rankingsPeriod(rankings)} roster rank`} value={rank(roster?.team_rank)}><p>{fixed(roster?.forecast_points)} points · includes bench/IR</p></Stat>
       </StatCards>
       {(current.adjustments.length > 0 || current.omitted.length > 0) && <p className="notice" aria-label="Assumed lineup adjustments">Estimates use roster backups for unavailable starters. {current.omitted.map(p => `${p.name} (${p.reason ?? 'unavailable'})`).join('; ')}{current.omitted.length > 0 && '. '}{current.adjustments.join(' · ')}. {current.covered < current.required && 'Some offensive slots still lack an eligible player with a forecast. '}These are assumed substitutions for analysis.</p>}
       {!query.data?.forecast_available && <p className="notice">Weekly forecasts unavailable. Actual results remain available.{query.data?.forecast_issue && ` ${query.data.forecast_issue}`}</p>}
@@ -136,7 +137,7 @@ export function TeamStrength({ data, rankings, teamId, campaignId, horizon, chil
       <TeamCorrelationRisk team={team} />
       {unavailable.length > 0 && <details className="outlook-method"><summary>Availability & forecast gaps · {unavailable.length} players</summary><ul>{unavailable.map(p=><li key={p.espn_id}><strong>{p.name}</strong> · {p.slot} · {p.reason}</li>)}</ul></details>}
     </>}
-    <AnalysisPanel compact id="strength-roster" aria-label="Team roster" heading="Players & roster forecasts" meta="Current roster · Campaign horizon">{children}</AnalysisPanel>
-    <details className="outlook-method"><summary>How these team statistics work</summary><p>Current strength and replacement estimates use the chosen campaign's horizon points per scheduled game. Historical results use ESPN actual scores and recorded starters. Neither ESPN predictions nor rest-of-season ranks enter weekly estimates.</p><p>Unavailable starters (OUT, IR, suspended, doubtful or on bye) and empty slots are filled using the highest projected eligible roster backups, allowing FLEX moves while retaining available selected starters. The same assumed lineup drives totals, player contributions and depth; backups already used cannot be reused as depth. Questionable players remain eligible; the depth table also shows losses when they are excluded. Assumed substitutions do not change the ESPN roster. Game locks are not modeled. Missing forecasts stay unknown; the best legal lineup is limited to covered players.</p><p>Middle four means ranks 3–6 among offensive starters; weakest three means the bottom three. Concentration uses positive offensive points. Effective contributors is one divided by the sum of squared scoring shares. These describe balance, not independence between players or a calibrated win probability.</p></details>
+    <AnalysisPanel compact id="strength-roster" aria-label="Team roster" heading="Players & roster forecasts" meta={`Current roster · ${rankingsPeriod(rankings)}`}>{children}</AnalysisPanel>
+    <details className="outlook-method"><summary>How these team statistics work</summary><p>Current strength and replacement estimates use weekly forecasts when the campaign supports them, otherwise remaining-season points per scheduled game. The roster table and roster rank use their separately selected forecast period. Historical results use ESPN actual scores and recorded starters. K/DST estimates use ESPN weekly projections, with prior recorded scores as fallback.</p><p>Unavailable starters (OUT, IR, suspended, doubtful or on bye) and empty slots are filled using the highest projected eligible roster backups, allowing FLEX moves while retaining available selected starters. The same assumed lineup drives totals, player contributions and depth; backups already used cannot be reused as depth. Questionable players remain eligible; the depth table also shows losses when they are excluded. Assumed substitutions do not change the ESPN roster. Game locks are not modeled. Missing forecasts stay unknown; the best legal lineup is limited to covered players.</p><p>Middle four means ranks 3–6 among offensive starters; weakest three means the bottom three. Concentration uses positive offensive points. Effective contributors is one divided by the sum of squared scoring shares. These describe balance, not independence between players or a calibrated win probability.</p></details>
   </section>
 }

@@ -1,0 +1,24 @@
+.scoring-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.scoring-heading p { margin: 12px 0; color: var(--text-dim); font-size: 13px; }
+.scoring-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.scoring-card { min-width: 0; padding: 18px 16px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.scoring-card .chart-frame figcaption { gap: 6px; padding-bottom: 14px; }
+.scoring-card .chart-frame figcaption strong { font-size: 16px; font-weight: 600; }
+.scoring-card .chart-frame figcaption span { font-size: 12px; }
+.scoring-card-link { display: block; color: var(--text); text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+.scoring-card-link:hover { color: var(--text); border-color: var(--accent); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent); }
+.scoring-card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.scoring-card-link .chart-frame figcaption { position: relative; padding-right: 24px; }
+.scoring-card-link .chart-frame figcaption::after { content: '↗'; position: absolute; top: 3px; right: 0; color: var(--text-dim); font-size: 17px; }
+.scoring-card-link:hover .chart-frame figcaption::after { color: var(--accent); }
+.scoring-position { margin: 24px 0; }
+.scoring-position > h3 { color: var(--text-dim); font-size: 13px; letter-spacing: .08em; }
+.scoring-values { margin-top: 10px; font-size: 12px; }
+.scoring-values summary { cursor: pointer; color: var(--text-dim); }
+.scoring-values td { white-space: normal; }
+.scoring-values ul { padding-left: 16px; min-width: 180px; }
+.scoring-profile-link { display: inline-block; margin-top: 12px; font-size: 12px; }
+.scoring-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0; font-size: 12px; }
+.league-scoring-trends { margin: 28px 0; scroll-margin-top: 20px; }
+@media (max-width: 900px) { .scoring-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 500px) { .scoring-card { padding: 12px 8px; } .scoring-pagination { flex-wrap: wrap; } }

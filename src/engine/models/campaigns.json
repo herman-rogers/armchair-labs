@@ -1,7 +1,49 @@
 {
   "schema_version": 1,
-  "purpose": "Campaign provenance and display labels; not a model-serving or promotion registry",
+  "purpose": "Current Opening Drive provenance; retired campaign and source-study records are retained in archived_campaigns",
   "campaigns": [
+    {
+      "campaign_id": "opening_drive_v2",
+      "campaign_name": "Opening Drive v2",
+      "entity_kind": "campaign",
+      "role": "Current Opening Drive QB/RB/WR/TE forecasts, including dated availability, corrected rookie admission and QB opportunity/efficiency policies",
+      "positions": [
+        "QB",
+        "RB",
+        "WR",
+        "TE"
+      ],
+      "family_ids": [
+        "campaign-trees"
+      ],
+      "run_patterns": [
+        "experiments/future_player_lab/runs/opening_drive_v2_[0-9]*",
+        "experiments/future_player_lab/runs/opening_drive_v2_review_*",
+        "data/campaigns/opening_drive_v2",
+        "experiments/future_player_lab/runs/opening_drive_v2_update_*",
+        "experiments/future_player_lab/runs/opening_drive_v2_te_*"
+      ],
+      "config_paths": [
+        "experiments/future_player_lab/campaigns/configs/opening_drive_v2.json",
+        "experiments/future_player_lab/campaigns/configs/opening_drive_v2_te.json"
+      ],
+      "saved_model_manifest": "data/campaigns/opening_drive_v2/manifest.json",
+      "api_bundle": "data/campaigns/opening_drive_v2",
+      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists",
+      "sources": [
+        "docs/research/opening_drive_v2_2026-10-10.md",
+        "experiments/future_player_lab/campaigns/README.md",
+        "docs/research/opening_drive_v2_te_2026-10-10.md"
+      ],
+      "comparison_directory": "experiments/future_player_lab/runs/opening_drive_v2_update_20261010_001/export",
+      "limitations": [
+        "Historical development comparison; gains are modest and mixed, with no pristine holdout.",
+        "Current draft-fact repair recovers omitted rookies; current source coverage remains incomplete.",
+        "QB revision changes attempts and passing yards only; seven other target weights are retained."
+      ]
+    }
+  ],
+  "archived_campaigns": [
     {
       "campaign_id": "scout_team_v1",
       "campaign_name": "Scout Team v1",
@@ -27,9 +69,9 @@
         "experiments/future_player_lab/runs/scout_team_import_20261010_001"
       ],
       "config_paths": [],
-      "saved_model_manifest": "data/campaigns/scout_team_v1/manifest.json",
-      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists; RB saved estimators retained, QB exports saved forecasts only",
-      "api_bundle": "data/campaigns/scout_team_v1",
+      "saved_model_manifest": "data/campaign_revisions/scout_team_v1/dd762aa30d44b3977357437a6646947afbe4126facc37af4cbe444f02d5899c4/manifest.json",
+      "access": "Archived research provenance; not exposed by the application API",
+      "api_bundle": null,
       "sources": [
         "docs/operations/model-campaigns.md",
         "docs/research/rb_gpu_campaign_2026-10-03.md",
@@ -104,52 +146,16 @@
       "config_paths": [
         "experiments/future_player_lab/campaigns/configs/opening_drive_v1.json"
       ],
-      "saved_model_manifest": "data/campaigns/opening_drive_v1/manifest.json",
-      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists",
-      "api_bundle": "data/campaigns/opening_drive_v1",
+      "saved_model_manifest": "data/campaign_revisions/opening_drive_v1/aed0f4946a2133937652275e78e468486fc60713f1d0f70ed4094d4bfabd48c4/manifest.json",
+      "access": "Archived research provenance; not exposed by the application API",
+      "api_bundle": null,
       "sources": [
         "docs/operations/model-campaigns.md",
         "experiments/future_player_lab/campaigns/README.md"
       ],
       "comparison_directory": "experiments/future_player_lab/runs/rb_campaign_comparison_20261010_001",
-      "entity_kind": "campaign"
-    },
-    {
-      "campaign_id": "opening_drive_v2",
-      "campaign_name": "Opening Drive v2",
       "entity_kind": "campaign",
-      "role": "Dated availability and corrected rookie admission, with prior-year-selected QB opportunity and efficiency policies",
-      "positions": [
-        "RB",
-        "QB",
-        "WR"
-      ],
-      "family_ids": [
-        "campaign-trees"
-      ],
-      "run_patterns": [
-        "experiments/future_player_lab/runs/opening_drive_v2_[0-9]*",
-        "experiments/future_player_lab/runs/opening_drive_v2_review_*",
-        "data/campaigns/opening_drive_v2",
-        "experiments/future_player_lab/runs/opening_drive_v2_update_*"
-      ],
-      "config_paths": [
-        "experiments/future_player_lab/campaigns/configs/opening_drive_v2.json"
-      ],
-      "saved_model_manifest": "data/campaigns/opening_drive_v2/manifest.json",
-      "api_bundle": "data/campaigns/opening_drive_v2",
-      "access": "Verified saved forecasts through the explicit campaign API when the local bundle exists",
-      "sources": [
-        "docs/research/opening_drive_v2_2026-10-10.md",
-        "experiments/future_player_lab/campaigns/README.md"
-      ],
-      "comparison_directory": "experiments/future_player_lab/runs/opening_drive_v2_update_20261010_001/export",
-      "limitations": [
-        "Historical development comparison; gains are modest and mixed, with no pristine holdout.",
-        "Current draft-fact repair recovers omitted rookies; current source coverage remains incomplete.",
-        "QB revision changes attempts and passing yards only; seven other target weights are retained."
-      ],
-      "saved_model_manifest_sha256": "ce90935b2f03d84f593955cb14a30e1813b2ca3cd29a9cb61ffefb46adfe5fa7"
+      "saved_model_manifest_sha256": "aed0f4946a2133937652275e78e468486fc60713f1d0f70ed4094d4bfabd48c4"
     },
     {
       "campaign_id": "opening_drive_v2_te",
@@ -169,9 +175,9 @@
       "config_paths": [
         "experiments/future_player_lab/campaigns/configs/opening_drive_v2_te.json"
       ],
-      "saved_model_manifest": "data/campaigns/opening_drive_v2_te/manifest.json",
-      "api_bundle": "data/campaigns/opening_drive_v2_te",
-      "access": "Verified TE preseason and after-Week-2 forecasts through the campaign API when the local bundle exists",
+      "saved_model_manifest": "data/campaign_revisions/opening_drive_v2_te/9db9c8ab2e5871c9cea61406243edd87a3a226e225ec926bbc1bd12e4fc633f2/manifest.json",
+      "api_bundle": null,
+      "access": "Archived research provenance; not exposed by the application API",
       "sources": [
         "docs/research/opening_drive_v2_te_2026-10-10.md",
         "experiments/future_player_lab/campaigns/README.md"
@@ -182,7 +188,7 @@
         "New TE population; no matched TE v1 comparison exists.",
         "No blocking-quality or individual matchup prediction; source coverage is incomplete."
       ],
-      "saved_model_manifest_sha256": "9d0c07931f073f3a289df445a1778df3822176258175499cd6875bfd0866f7cd"
+      "saved_model_manifest_sha256": "9db9c8ab2e5871c9cea61406243edd87a3a226e225ec926bbc1bd12e4fc633f2"
     }
   ]
 }

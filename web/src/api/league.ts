@@ -9,7 +9,8 @@ export interface LeaguePlayer {
 }
 export interface LeagueTeam {
   team_id: number; team_name: string; wins: number; losses: number; is_mine: boolean; faab_remaining: number | null
-  division_name: string | null; schedule?: { week: number; opponent_team_id: number; score: number; outcome: string }[]
+  division_name: string | null; team_abbrev?: string | null
+  schedule?: { week: number; opponent_team_id: number; score: number; outcome: string }[]
 }
 export interface LeagueObservations {
   attention_notices?: AttentionFlag[]; injury_news_warning?: string | null
@@ -32,13 +33,16 @@ export interface ObservedMatchups {
 export interface WeeklyForecastSide {
   team_id: number; team_name: string; score: number | null; model_projection: number | null
   covered_starters: number; starter_count: number
-  forecasts: { espn_id: number; player_display_name: string; position: string | null; slot: string; started: boolean; prediction: number | null; basis: string | null; unavailable_reason: string | null }[]
+  prediction_interval_80?: number[] | null; prediction_std?: number | null
+  offense_only_interval_80?: number[] | null; uncertainty_status?: string
+  forecasts: { espn_id: number; player_display_name: string; position: string | null; slot: string; started: boolean; prediction: number | null; basis: string | null; unavailable_reason: string | null; prediction_interval_80?: number[] | null; prediction_std?: number | null }[]
 }
 export interface WeeklyForecasts {
   source: string; campaign_id: string; campaign_name: string; manifest_sha256: string; horizon: string
   forecast_origins: { season: number; origin_week: number }[]
   season: number; current_week: number; requested_week: number; captured_at: string; stale: boolean
   pregame_deadline: string | null; limitations: string[]
+  range_reliability_note?: string
   matchups: { home: WeeklyForecastSide; away: WeeklyForecastSide; involves_me: boolean; margin: number | null; favorite_team_id: number | null }[]
 }
 export interface ForecastAccuracy {
@@ -48,7 +52,7 @@ export interface ForecastAccuracy {
 }
 
 export const fetchLeague = (token?: string, signal?: AbortSignal) => get<LeagueObservations>('/api/league', token, signal)
-export const refreshObservations = (token?: string) => post<{ captured_at: string; stale: boolean; age_seconds: number }>('/api/league/refresh', { dataCatalog: token })
+export const refreshObservations = () => post<{ captured_at: string; stale: boolean; age_seconds: number }>('/api/league/refresh')
 export const fetchMatchups = (week: number | null, token?: string, signal?: AbortSignal) =>
   get<ObservedMatchups>(`/api/league/matchups${week == null ? '' : `?week=${week}`}`, token, signal)
 export const fetchWeeklyForecasts = (campaign: string, horizon: string, token?: string, signal?: AbortSignal) =>

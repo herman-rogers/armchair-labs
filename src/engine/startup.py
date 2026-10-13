@@ -69,12 +69,31 @@ def prepare_data(data: Path) -> None:
         f"observations through {season} week {week}."
     )
     from engine.chairstats import CampaignStore
+    from engine.chairstats.consolidate import consolidate_opening_drive
 
+    consolidate_opening_drive(data / "campaigns", data / "campaign_revisions")
     campaigns = CampaignStore(data / "campaigns").campaigns()
     if campaigns:
         say("Campaigns: " + ", ".join(c["campaign_id"] for c in campaigns))
     else:
         say("No campaign bundles under data/campaigns; model views will be empty.")
+
+
+def refresh_data(*, rescore: bool = True) -> None:
+    """Check providers before scoring; keep cached data usable during an outage."""
+    from engine.data.refresh import refresh_local
+
+    say("Refreshing NFL observations and campaign forecasts…")
+    try:
+        refresh_local(rescore=rescore)
+    except (OSError, RuntimeError) as exc:
+        say(f"Data refresh incomplete; using saved data: {exc}")
+    else:
+        say(
+            "NFL observations and campaign forecasts are current."
+            if rescore
+            else "NFL observations are current; forecast generation skipped."
+        )
 
 
 def prepare_frontend(root: Path) -> None:
@@ -129,7 +148,7 @@ def prepare_auth() -> None:
     )
 
 
-def prepare(*, auth: bool = True) -> None:
+def prepare(*, auth: bool = True, rescore: bool = True) -> None:
     """One repeatable preparation path for setup, dev, and restart."""
     uv = shutil.which("uv")
     if not uv:
@@ -143,6 +162,7 @@ def prepare(*, auth: bool = True) -> None:
             cwd=REPO_ROOT,
             check=True,
         )
+        refresh_data(rescore=rescore)
         if auth:
             prepare_auth()
         else:

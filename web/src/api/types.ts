@@ -1,6 +1,6 @@
 export type Position = 'QB' | 'RB' | 'WR' | 'TE'
 
-/** `/api/status`: what is published, with no selected or promoted product anywhere. */
+/** `/api/status`: published tables, available campaigns, and league settings. */
 export interface Status {
   tables: {
     available: boolean; catalog_sha256?: string | null; published_at?: string | null

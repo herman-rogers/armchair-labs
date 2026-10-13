@@ -21,7 +21,7 @@ const legacyRankingParams: Record<string, string> = { rank_horizon: 'horizon', r
 function dashboardIndex({ request }: LoaderFunctionArgs) {
   const old = new URL(request.url).searchParams
   const section = old.get('section')
-  if (section === 'league') return redirect('/league/overview')
+  if (section === 'league') return redirect(`/league/predictions${new URL(request.url).search}`)
   if (section === 'research') return redirect('/research/models')
   const view = old.get('intelligence')
   if (view === 'qb-passing' || view === 'rookies') return redirect(`/intelligence/${view}`)
@@ -48,6 +48,7 @@ export const router = createBrowserRouter([{
           children: [
             { index: true, loader: go('/intelligence/rankings') },
             { path: 'rankings', lazy: () => import('./components/ChairStatsRankings').then(m => ({ Component: m.ChairStatsRankings })) },
+            { path: 'scoring', lazy: () => import('./components/PlayerScoringTrends').then(m => ({ Component: m.PlayerScoringTrends })) },
             { path: 'teams', lazy: () => import('./components/TeamAnalysis').then(m => ({ Component: m.TeamAnalysis })) },
             { path: 'qb-passing', lazy: () => import('./components/QBPassing').then(m => ({ Component: m.QBPassing })) },
             { path: 'rookies', lazy: () => workspace().then(m => ({ Component: m.IntelligenceRookies })) },
@@ -57,10 +58,11 @@ export const router = createBrowserRouter([{
           path: 'league',
           lazy: () => league().then(m => ({ Component: m.LeagueWorkspace })),
           children: [
-            { index: true, loader: go('/league/overview') },
-            { path: 'overview', lazy: () => league().then(m => ({ Component: m.LeagueOverviewPage })) },
+            { index: true, loader: go('/league/predictions') },
+            { path: 'overview', loader: ({ request }) => redirect(`/league/predictions${new URL(request.url).search}`) },
+            { path: 'predictions', lazy: () => league().then(m => ({ Component: m.LeaguePredictionsPage })) },
             { path: 'matchups/:matchupWeek/:homeId/:awayId', lazy: () => league().then(m => ({ Component: m.LeagueMatchups })) },
-            { path: 'matchups', loader: ({ request }) => redirect(`/league/overview${new URL(request.url).search}#matchups`) },
+            { path: 'matchups', loader: ({ request }) => redirect(`/league/predictions${new URL(request.url).search}`) },
             { path: 'teams', lazy: () => league().then(m => ({ Component: m.LeagueTeams })) },
             { path: 'teams/:teamId/:teamSlug?', lazy: () => league().then(m => ({ Component: m.LeagueTeams })) },
             { path: 'rosters', loader: ({ request }) => redirect(`/league/teams${new URL(request.url).search}`) },

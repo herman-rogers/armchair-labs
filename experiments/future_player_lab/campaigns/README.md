@@ -1,5 +1,17 @@
 # Opening Drive
 
+The application serves `opening_drive_v3` and the preserved `opening_drive_v2`
+comparison. V3 retains the eight original models and adds four weekly mean and
+distribution models; see [v3 research, results, and reproduction](weekly_v3/README.md).
+The separate [v3.1 interval challenger](weekly_v31/README.md) adds chronological
+recalibration and immutable pregame comparisons. Once its run is sealed, the normal
+refresh driver also captures and scores it; it does not replace the served v3 models.
+V2 has `te_season` and `te_remaining` integrated into its bundle. `just campaigns consolidate` performs
+the verified migration and archives v1, Scout Team and the separate TE bundle.
+The commands below document historical training runs; their original campaign IDs
+remain research provenance, not additional application choices. See the
+[current application workflow](../../../docs/operations/model-campaigns.md).
+
 `opening_drive_v1` is Armchair Labs' first shared production-forecast campaign for
 RB, QB and WR. It extends the RB GPU tree research with a common reusable training
 and inference contract. It is a **research preview**; publishing its independent
@@ -7,6 +19,10 @@ local API bundle does not promote it into the existing analysis release.
 
 [Initial results and limitations](../../../docs/research/opening_drive_2026-10-09.md) ·
 [Full evaluation tables](../runs/opening_drive_review_20261009_001/report.md)
+
+For recurring comparisons against external projections and expert rankings, use
+the [external campaign evaluation workflow](../../../docs/operations/model-campaigns.md#external-campaign-evaluation).
+It evaluates frozen predictions after publication and never participates in model selection.
 
 ## Version 2 availability experiment
 
@@ -340,3 +356,13 @@ For the accepted TE run, `opening_drive_v2_te_003/source_snapshot/` preserves th
 training code independently of later workspace changes. Saved-bundle replay uses
 the sealed matrix and weights; rebuilding raw features under changed code must
 use a fresh run. Do not rewrite source receipts to bypass that check.
+
+## Opening Drive v3.1 point-forecast extension
+
+[V3.1 uncertainty feedback research](weekly_v31_points/README.md) tests whether
+past forecast errors and uncertainty improve the expected points themselves.
+It compares bias corrections, uncertainty feature ablations, model blends and
+an appearance/conditional-points mixture using chronological fits and selection.
+The interactive report is `data/outputs/opening_drive_v31_points_2026/index.html`.
+This extends v3.1 research while preserving the earlier interval-only run and
+its captured prospective forecasts. Research results do not change API serving.

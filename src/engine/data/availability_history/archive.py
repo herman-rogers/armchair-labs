@@ -12,15 +12,7 @@ from pathlib import Path
 import requests
 
 from engine.data.nfl_transactions import _team
-
-
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def write_json(path: Path, value) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, default=str) + "\n")
+from engine.data.releases import digest, write_json
 
 
 def capture(root: Path, key: str, url: str) -> dict:

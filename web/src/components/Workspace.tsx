@@ -13,7 +13,7 @@ import { PositionOptions, QueryError } from './Controls'
 /** Page heading and observation status shared by analysis, league and model pages. */
 export function DashboardLayout() {
   const page = useCurrentPage()
-  return <main className="nextgen-workspace">
+  return <main className="dashboard-workspace">
     <div className="section-heading"><div><span className="eyebrow">{page?.group}</span><h2>{page?.title}</h2>
       <p>{page?.description}</p></div></div>
     <DataReleaseStatus />
@@ -76,7 +76,7 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
 export function ResearchModels() {
   const campaigns = useCampaigns()
   return <>
-    <p className="legend">Campaign bundles are sealed research outputs under <code>data/campaigns</code>. Nothing here is selected or promoted: rankings, league forecasts and profiles read whichever campaign the page names.</p>
+    <p className="legend">Opening Drive v3 is the default dashboard model. Choose Opening Drive v2 to compare forecasts with the preserved baseline.</p>
     <QueryError query={campaigns} label="Campaign bundles unavailable" />
     {campaigns.isPending && <p role="status">Loading campaign bundles…</p>}
     {campaigns.data && !campaigns.data.campaigns.length && <p className="notice">No campaign bundles are published. Train and score a campaign, then publish its bundle.</p>}

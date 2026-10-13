@@ -1,0 +1,81 @@
+.league-predictions { display: flex; flex-direction: column; gap: 20px; }
+.league-predictions .scoring-card { padding: 20px; }
+.prediction-season-summary { display: flex; flex-wrap: wrap; gap: 18px 40px; padding: 16px 0 20px; margin: 0; border-bottom: 1px solid var(--border); }
+.prediction-season-summary > div { display: flex; flex-direction: column; gap: 4px; }
+.prediction-season-summary dt { color: var(--text-dim); font-size: 12px; }
+.prediction-season-summary dd { margin: 0; font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.prediction-season-summary dd small { color: var(--text-dim); font-size: 13px; font-weight: 400; }
+.prediction-matchups { min-width: 0; }
+.prediction-weeks { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin: 20px 0 24px; }
+.prediction-weeks button { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; padding: 12px; text-align: left; font: inherit; font-size: 12px; color: var(--text-dim); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.prediction-weeks button:hover { background: var(--surface-raised); }
+.prediction-weeks button[aria-pressed='true'] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.prediction-weeks strong { color: var(--text); font-size: 14px; }
+.prediction-weeks small { font-size: 11px; }
+.prediction-week-track { display: flex; gap: 3px; margin-top: 2px; }
+.prediction-week-track i { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
+.prediction-week-track .correct { background: var(--buy); }
+.prediction-week-track .wrong { background: var(--sell); }
+.prediction-week-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; margin-bottom: 16px; }
+.prediction-week-heading h3 { margin: 0; font-size: 18px; }
+.prediction-week-heading h3 span { color: var(--text-dim); font-weight: 400; }
+.prediction-week-heading p { margin: 6px 0 0; color: var(--text-dim); font-size: 12px; }
+.prediction-week-error strong { margin-left: 6px; color: var(--text); }
+.prediction-matchup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.prediction-matchup { min-width: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.prediction-matchup header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; background: color-mix(in srgb, var(--surface-raised) 45%, var(--surface)); border-bottom: 1px solid var(--border); }
+.prediction-matchup h4 { margin: 0; font-size: 12px; font-weight: 600; }
+.prediction-matchup h4 span { color: var(--text-dim); font-weight: 400; }
+.prediction-verdict { padding: 3px 7px; border-radius: 4px; color: var(--text-dim); font-size: 11px; font-weight: 600; background: var(--surface-raised); }
+.prediction-verdict.correct { color: var(--buy); background: color-mix(in srgb, var(--buy) 10%, var(--surface)); }
+.prediction-verdict.wrong { color: var(--sell); background: color-mix(in srgb, var(--sell) 10%, var(--surface)); }
+.prediction-matchup table { width: 100%; table-layout: fixed; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.prediction-matchup thead th { position: static; padding: 10px 10px 4px; background: none; border: 0; font-size: 10px; text-transform: none; letter-spacing: 0; cursor: default; width: 19%; }
+.prediction-matchup thead th:first-child { width: 43%; text-align: left; padding-left: 14px; }
+.prediction-matchup tbody th { padding: 12px 10px 12px 14px; text-align: left; font-weight: 400; border-bottom: 1px solid var(--border); }
+.prediction-matchup tbody td { padding: 12px 10px; font-size: 14px; border-bottom: 1px solid var(--border); }
+.prediction-matchup tbody tr:last-child th, .prediction-matchup tbody tr:last-child td { border: 0; }
+.prediction-team-name { display: block; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.prediction-team-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; font-size: 10px; color: var(--text-dim); align-items: center; }
+.prediction-outcome { font-weight: 600; }
+.prediction-outcome.won { color: var(--buy); }
+.prediction-model-pick { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 3px; padding: 0 4px; }
+.prediction-matchup .prediction-actual { font-weight: 650; background: color-mix(in srgb, var(--text) 3%, transparent); }
+.prediction-matchup .prediction-actual.won { color: var(--buy); }
+.prediction-matchup .prediction-error { color: var(--text-dim); font-size: 12px; }
+.prediction-help { color: var(--text-dim); font-size: 11px; line-height: 1.6; margin: 14px 0 0; }
+.prediction-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; color: var(--text-dim); font-size: 11px; }
+.prediction-trends > summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 4px 0; }
+.prediction-trends[open] > summary { margin-bottom: 20px; }
+.prediction-controls .overview-disclosures { margin-top: 0; }
+.prediction-rankings { margin: 0 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); min-width: 0; }
+.rank-snapshot-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 10px; }
+.rank-snapshot-heading h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.rank-snapshot-heading > span { font-size: 10px; color: var(--text-dim); }
+.rank-snapshot-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 0; padding: 0; }
+.rank-snapshot-list li { min-width: 0; border: 1px solid var(--border); border-radius: 5px; }
+.rank-snapshot-list li.is-mine { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); border-color: var(--accent); }
+.rank-snapshot-list a { display: flex; align-items: center; gap: 8px; padding: 9px 8px; color: var(--text); text-decoration: none; }
+.rank-snapshot-list a:hover { background: var(--surface-raised); }
+.rank-snapshot-number { flex-shrink: 0; font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.rank-snapshot-team { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; font-size: 11px; }
+.rank-snapshot-team > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-snapshot-team small { font-size: 9px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rank-snapshot-change { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+@media (max-width: 1200px) {
+  .rank-snapshot-list { grid-template-columns: none; grid-auto-flow: column; grid-template-rows: repeat(2, auto); grid-auto-columns: 190px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; }
+  .rank-snapshot-list li { scroll-snap-align: start; }
+  .prediction-rankings { margin-bottom: 18px; padding-bottom: 14px; }
+}
+@media (max-width: 1000px) { .prediction-matchup-grid { grid-template-columns: 1fr; } }
+@media (max-width: 500px) {
+  .league-predictions .scoring-card { padding: 14px 10px; }
+  .prediction-season-summary { gap: 16px 24px; }
+  .prediction-season-summary dd { font-size: 19px; }
+  .prediction-weeks { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .prediction-weeks button { padding: 10px 8px; font-size: 11px; }
+  .prediction-matchup header { padding: 10px; }
+  .prediction-matchup thead th, .prediction-matchup tbody td { padding-right: 6px; padding-left: 6px; }
+  .prediction-matchup thead th:first-child, .prediction-matchup tbody th { padding-left: 10px; }
+  .prediction-matchup tbody td { font-size: 13px; }
+}

@@ -38,12 +38,33 @@ Node 22 (`nvm install && nvm use` from the repository root). The frontend curren
 uses Vite 7. Node 21 is outside Vite 7's supported range even if a local build succeeds.
 
 Observation queries are keyed by the published table catalog checksum; campaign
-queries are keyed by campaign id and horizon. No page depends on a selected model:
-`useCampaignChoice` reads `?campaign=` and `?horizon=` from the URL and defaults to
-the newest bundle.
+queries are keyed by campaign id and horizon. `useCampaignChoice` reads
+`?campaign=` and `?horizon=` from the URL and otherwise uses the API-declared
+`default_campaign_id` (Opening Drive v3). V2 remains available for comparison and
+as a fallback when the default bundle has not been published locally. Refresh data
+updates ESPN, checks NFL observations, and generates missing campaign forecasts.
+The mutation does not pin the old data catalog; when it settles, it reloads the
+catalog and invalidates league, campaign, scoring, and status queries.
+
+Forecast periods follow each page's purpose:
+
+- Draft Recap pins full-season forecasts to the league season and preseason
+  cutoff (`origin_week=0`), even if a URL contains another horizon. Missing
+  preseason forecasts stay unranked. These are reconstructed preseason inputs,
+  not evidence of forecasts actually published before the draft.
+- Player Rankings, Free Agents, QB Production and roster comparisons default to
+  remaining season; Rookies defaults to full season. Their horizon selector can
+  still request a weekly view.
+- Predictions, matchup player ranks and Team Strength's lineup/depth analysis
+  use weekly forecasts. V2 lineup estimates retain the remaining-season per-game
+  fallback. Matchup player ranks require the selected season/week's weekly
+  forecast; unavailable weekly ranks stay blank.
+- Rank columns identify their forecast period. Weekly zero-game forecasts show
+  `BYE`, including in player profiles, instead of a misleading bottom-of-list rank.
+  The CSV export leaves bye ranks blank and includes a `forecast_status` column.
 
 Navigation is organized into persistent page groups: **Analysis** (ChairStats
-rankings, team analysis, QB production, rookies), **League** (overview, matchups,
+rankings, team analysis, QB production, rookies), **League** (predictions, matchups,
 team strength, free agents, transactions, draft recap), and **Models** (campaign
 inventory with saved metrics). On small screens, Browse pages opens the same
 navigation. It stays available on player profiles. Browser smoke scripts for the
@@ -69,7 +90,7 @@ pattern to follow:
 | Path | Page |
 |---|---|
 | `/intelligence/rankings` · `/teams` · `/qb-passing` · `/rookies` | Current analysis |
-| `/league/overview?week=` · `/matchups/:week/:homeId/:awayId` · `/teams/:teamId/:teamSlug?` · `/free-agents` · `/transactions` · `/draft` | League |
+| `/league/predictions?week=` · `/matchups/:week/:homeId/:awayId` · `/teams/:teamId/:teamSlug?` · `/free-agents` · `/transactions` · `/draft` | League |
 | `/research/evidence` · `/qb-experiments` · `/forecasts` · `/archive` | Research |
 | `/research/archive/intelligence/:view` · `/research/archive/league/:view` | Archived workspaces |
 | `/players/:playerId/:section?` · `/college/:collegeId/:section?` | Profiles |
@@ -83,17 +104,19 @@ production host, serve `web/dist/index.html` for non-file frontend paths (for ex
 `try_files $uri $uri/ /index.html` in nginx), while proxying `/api/` to FastAPI.
 This is required for direct links and refreshing any page.
 
-League overview summarizes the same `/api/league/team-strength?campaign=…` response
-as each team’s detail page: assumed weekly offensive lineup points, actual scoring, all-play,
-backup coverage, scoring concentration and remaining-season roster rank. The shared
-`teamStrengthSummary` selector checks snapshot alignment and supplies weekly offensive lineup
-ranks and positional strengths to both pages. Weekly ranks require complete forecasts
-for every team; ties share rank. Row details link to the full team analysis.
-Matchup cards retain current selected-starter projections, explicitly distinguished
-from the assumed substitutions used for team strength. Weekly scores and lineups live
-on the Matchups schedule; the selected week remains in its URL. Each game opens
-`/league/matchups/:week/:homeId/:awayId` with scores and complete lineups. Game
-pages link back to their week, to adjacent matchups, and to current team rosters. See [league overview behavior](../docs/history/league_overview_2026-09-24.md).
+Predictions is the main league page. Its existing week buttons also select a compact
+rank snapshot above the stats: projected rank, change from the previous week,
+projected points, and final actual points. Desktop shows two rows of team tiles;
+small screens scroll the snapshot horizontally. It uses the same
+team-week values as the matchup cards. A league rank requires complete coverage;
+ties share rank. Historical model outputs are identified as reconstructions.
+
+Needs attention and the forecast-model selector are compact disclosures above the
+Predictions content. Attention reflects the latest roster. The global **Refresh data**
+button sits beside the theme control and updates ESPN, NFL observations, forecasts,
+and the dashboard caches. Former `/league/overview` links redirect to Predictions
+and retain their query parameters. Matchup detail pages remain available at
+`/league/matchups/:week/:homeId/:awayId` and link back to Predictions for that week.
 
 ## Data access and caching
 
@@ -168,7 +191,7 @@ Checks: `pytest tests/test_weekly_lineup.py tests/test_league_observations.py te
 
 ## Weekly per-game points and accuracy
 
-League overview and matchup detail pages use `/api/league/forecasts?campaign=…`
+Matchup detail and Team Strength pages use `/api/league/forecasts?campaign=…`
 for point estimates. The `campaign_per_game` source allocates each skill player's
 horizon forecast evenly across scheduled NFL games. K/DST estimates average up to
 four earlier recorded scores. No ESPN projections enter this recipe. ESPN remains the
@@ -181,6 +204,37 @@ Forecast requests preserve immutable captures under
 forecasts generated, published and lineup-captured before 00:00 UTC on the week's
 earliest NFL game date. Missing captures, incomplete forecasts and actual ties do not
 inflate the winner accuracy denominator.
+
+## Actual versus predicted scoring
+
+`/intelligence/scoring` is the **Scoring Trends** analysis page. Search and position
+filters, pagination, and the actual-scoring selector live in the URL. Cards are
+grouped by position and share axes; they show the full NFL season, actual weekly
+production, saved Opening Drive pace, and the actual season-to-date average.
+The default actuals reproduce the model's scoring contract; league scoring is an
+explicit alternative. Player averages include zero production in completed
+scheduled games and exclude byes. Unknown coverage stays blank.
+
+Predictions offers the Recharts card grid under “Explore scoring trends by team,”
+for all fantasy teams. Historical weeks use their recorded starters. Full-team predictions
+include captured ESPN K/DST estimates, with prior-score fallback, matching the
+current matchup recipe. Future weeks hold the current selected lineup, apply known
+byes, and use recent K/DST averages; no automatic substitutions are implied. Weeks
+after the fantasy regular season are lineup scenarios, not scheduled playoff picks.
+Only completed results enter averages and errors.
+
+`/api/scoring/players` and `/api/scoring/league` join saved campaign origins with
+the existing DuckDB observation catalog at request time. `scoring_weeks` in
+`tables/observations.py` provides the deduplicated scoring transform; current
+captures take priority over historical overlap. No extra table publication or
+manual research export is required. The normal weekly data refresh and campaign
+rescore make the new week available, and the UI polls once per minute. League
+refresh also invalidates the team series. Historical weeks select only an earlier
+observation cutoff, so a new rescore does not overwrite their origin with current
+knowledge. These are explicitly reconstructed curves, not verified pregame captures.
+
+Checks: `pytest tests/test_scoring_trends.py tests/test_weekly_lineup.py`,
+`npm run build`, and `npm run lint`.
 
 ## Shared presentation components and Team Strength
 

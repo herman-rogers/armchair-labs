@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
-from engine.data import nflverse
 from engine.espn import teams
 from engine.names import normalize
 
@@ -103,34 +102,11 @@ class JoinReport:
         )
 
 
-def build_espn_to_gsis() -> dict[int, str]:
-    """Map ESPN player id to nflverse `gsis_id`.
-
-    The crosswalk stores ids as strings, and some arrive as floats ("3117251.0"), so
-    they are normalised through float before int rather than parsed strictly.
-    """
-    crosswalk = nflverse.load_id_crosswalk()
-    if ESPN_ID not in crosswalk.columns or "gsis_id" not in crosswalk.columns:
-        logger.error("crosswalk is missing espn_id or gsis_id; falling back to names only")
-        return {}
-
-    usable = crosswalk.filter(pl.col(ESPN_ID).is_not_null() & pl.col("gsis_id").is_not_null())
-    mapping: dict[int, str] = {}
-    for espn_id, gsis_id in usable.select(ESPN_ID, "gsis_id").iter_rows():
-        try:
-            mapping[int(float(espn_id))] = str(gsis_id)
-        except (TypeError, ValueError):
-            continue
-
-    logger.info("crosswalk: %s usable espn_id -> gsis_id mappings", len(mapping))
-    return mapping
-
-
 def resolve_player_ids(
     espn_players: pl.DataFrame,
     board_player_ids: set[str],
     board_name_keys: dict[tuple[str, str], str],
-    espn_to_gsis: dict[int, str] | None = None,
+    espn_to_gsis: dict[int, str],
 ) -> tuple[pl.DataFrame, JoinReport]:
     """Attach a `player_id` (gsis) to each ESPN player row.
 
@@ -138,12 +114,11 @@ def resolve_player_ids(
         espn_players: Rows with `espn_id`, `player_display_name`, `position`.
         board_player_ids: gsis ids present on the board, used to confirm a hit.
         board_name_keys: `(normalized name, position)` to gsis id, for the fallback.
-        espn_to_gsis: Crosswalk; loaded when omitted.
+        espn_to_gsis: ESPN id to gsis id, from the published identity tables.
 
     Returns:
         The frame with a `player_id` column (null when unresolved), and a report.
     """
-    espn_to_gsis = espn_to_gsis if espn_to_gsis is not None else build_espn_to_gsis()
     report = JoinReport()
     resolved: list[str | None] = []
 

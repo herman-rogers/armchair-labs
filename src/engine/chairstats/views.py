@@ -79,6 +79,7 @@ def _row(model: dict, forecast: dict, row: dict, manifest: dict) -> dict:
         per_game = points / games
     raw_availability = row.get("availability")
     availability: dict = raw_availability if isinstance(raw_availability, dict) else {}
+    distribution = row.get("distribution", {})
     return {
         "campaign_id": manifest["campaign_id"],
         "model_id": model["model_id"],
@@ -86,8 +87,10 @@ def _row(model: dict, forecast: dict, row: dict, manifest: dict) -> dict:
         "player_display_name": row.get("player_name") or row.get("player_display_name"),
         "position": row.get("position") or model.get("position"),
         "team": row.get("team"),
+        "campaign_name": manifest["name"],
         "season": forecast["season"],
         "origin_week": forecast["origin_week"],
+        "rolling_origin": forecast["origin_week"] != model["origin_week"],
         "horizon": model["horizon"],
         "scheduled_games": games,
         "calendar_weeks": row.get("calendar_weeks"),
@@ -99,12 +102,32 @@ def _row(model: dict, forecast: dict, row: dict, manifest: dict) -> dict:
         "candidate_basis": row.get("candidate_basis"),
         "availability_status": availability.get("status"),
         "availability_as_of": availability.get("as_of"),
+        "prediction_std": _number(distribution.get("std")),
+        "prediction_interval_80": (
+            [distribution["q10"], distribution["q90"]]
+            if _number(distribution.get("q10")) is not None
+            and _number(distribution.get("q90")) is not None
+            else None
+        ),
     }
+
+
+def _model_forecast(model: dict, season: int | None, origin_week: int | None) -> dict | None:
+    if season is None or origin_week is None:
+        return latest_forecast(model)
+    return next(
+        (
+            f
+            for f in model.get("forecasts", [])
+            if (f["season"], f["origin_week"]) == (season, origin_week)
+        ),
+        None,
+    )
 
 
 def rankings(
     store: CampaignStore,
-    campaign_id: str,
+    campaign_ids: list[str] | str,
     *,
     horizon: str,
     season: int | None = None,
@@ -113,69 +136,80 @@ def rankings(
     search: str = "",
     player_id: str | None = None,
 ) -> dict:
-    """Every model of one campaign at one horizon, ranked together by predicted points.
+    """Models from one or more campaigns at one horizon, ranked together by points.
 
-    Without an explicit season/cutoff each model contributes its latest saved
-    forecast; the response lists each model's vintage so mixed cutoffs are visible.
+    The first campaign that covers a position at the horizon supplies it; later ones
+    only fill positions the earlier ones lack. Campaigns are never added implicitly.
+    Without an explicit season/cutoff each model
+    contributes its latest saved forecast; the response lists every vintage.
     """
-    manifest = store.campaign(campaign_id)
-    models = [m for m in manifest["models"] if m["horizon"] == horizon]
-    if not models:
-        raise CampaignNotFound(f"Campaign {campaign_id} has no {horizon!r} horizon")
-    if position != "ALL":
-        models = [m for m in models if m.get("position") == position]
+    ids = [campaign_ids] if isinstance(campaign_ids, str) else list(campaign_ids)
+    manifests = [store.campaign(c) for c in ids]
+    if not any(m["horizon"] == horizon for m in manifests[0]["models"]):
+        raise CampaignNotFound(f"Campaign {ids[0]} has no {horizon!r} horizon")
     rows: list[dict] = []
     vintages = []
-    for model in models:
-        if season is None or origin_week is None:
-            forecast = latest_forecast(model)
-        else:
-            forecast = next(
-                (
-                    f
-                    for f in model.get("forecasts", [])
-                    if (f["season"], f["origin_week"]) == (season, origin_week)
-                ),
-                None,
+    covered: set[str | None] = set()
+    for manifest in manifests:
+        for model in manifest["models"]:
+            if model["horizon"] != horizon:
+                continue
+            slot = model.get("position")
+            if slot in covered or (position != "ALL" and slot != position):
+                continue
+            forecast = _model_forecast(model, season, origin_week)
+            if forecast is None:
+                continue
+            result = store.forecast(
+                manifest["campaign_id"],
+                model["model_id"],
+                forecast["season"],
+                forecast["origin_week"],
             )
-        if forecast is None:
-            continue
-        result = store.forecast(
-            campaign_id, model["model_id"], forecast["season"], forecast["origin_week"]
-        )
-        vintages.append(
-            {
-                "model_id": model["model_id"],
-                "position": model.get("position"),
-                "season": forecast["season"],
-                "origin_week": forecast["origin_week"],
-                "generated_at": result["metadata"].get("generated_at"),
-                "artifact_sha256": result["artifact_sha256"],
-                "rows": len(result["rows"]),
-            }
-        )
-        rows.extend(_row(model, forecast, row, manifest) for row in result["rows"])
+            covered.add(slot)
+            vintages.append(
+                {
+                    "campaign_id": manifest["campaign_id"],
+                    "campaign_name": manifest["name"],
+                    "model_id": model["model_id"],
+                    "position": slot,
+                    "season": forecast["season"],
+                    "origin_week": forecast["origin_week"],
+                    "training_origin_week": model["origin_week"],
+                    "rolling_origin": forecast["origin_week"] != model["origin_week"],
+                    "generated_at": result["metadata"].get("generated_at"),
+                    "artifact_sha256": result["artifact_sha256"],
+                    "rows": len(result["rows"]),
+                }
+            )
+            rows.extend(_row(model, forecast, row, manifest) for row in result["rows"])
     ranked = sorted(
         (r for r in rows if r["prediction"] is not None),
         key=lambda r: (-r["prediction"], r["player_id"]),
     )
     for index, row in enumerate(ranked, start=1):
         row["overall_rank"] = index
-    unranked = [r for r in rows if r["prediction"] is None]
-    rows = ranked + unranked
+    rows = ranked + [r for r in rows if r["prediction"] is None]
     if player_id is not None:
         rows = [r for r in rows if r["player_id"] == player_id]
     if search:
         needle = search.lower()
         rows = [r for r in rows if needle in (r["player_display_name"] or "").lower()]
+    primary = manifests[0]
+    used = {v["campaign_id"]: v["campaign_name"] for v in vintages}
+    limitations: list[str] = []
+    for manifest in manifests:
+        if manifest["campaign_id"] in used:
+            limitations += [x for x in manifest.get("limitations", []) if x not in limitations]
     return {
-        "campaign_id": campaign_id,
-        "campaign_name": manifest["name"],
-        "manifest_sha256": manifest["manifest_sha256"],
-        "disposition": manifest.get("disposition"),
+        "campaign_id": primary["campaign_id"],
+        "campaign_name": primary["name"],
+        "campaigns": [{"campaign_id": c, "name": n} for c, n in used.items()],
+        "manifest_sha256": primary["manifest_sha256"],
+        "disposition": primary.get("disposition"),
         "horizon": horizon,
         "models": vintages,
-        "limitations": manifest.get("limitations", []),
+        "limitations": limitations,
         "rankings": rows,
     }
 
@@ -195,7 +229,6 @@ def player(store: CampaignStore, player_id: str) -> dict:
             if match is None:
                 continue
             row = _row(model, latest, match, manifest)
-            row["campaign_name"] = manifest["name"]
             row["candidates"] = len(result["rows"])
             forecasts.append(row)
     return {"player_id": player_id, "forecasts": forecasts}

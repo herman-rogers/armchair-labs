@@ -6,11 +6,12 @@ the API, and research-run completion is never a selection.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
+
+from engine.data.shared import sha256 as digest
 
 FAMILIES = Path(__file__).with_name("families.json")
 CAMPAIGNS = Path(__file__).with_name("campaigns.json")
@@ -31,10 +32,6 @@ LAYERS = {
 
 def read_json(path: Path):
     return json.loads(path.read_text())
-
-
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def within(root: Path, value: str) -> Path:
@@ -358,7 +355,6 @@ def build_catalog(
     sources = set()
     for pattern in (
         "src/engine/metrics/*.py",
-        "src/engine/board/*.py",
         "research/*.py",
         "experiments/*_lab/*.py",
         "experiments/*_lab/deep/*.py",

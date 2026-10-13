@@ -2,7 +2,7 @@ import { NavLink, useLocation, useNavigationType } from 'react-router'
 import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { collegeQuery, leagueQuery, playerForecastsQuery, playerQuery } from '../api/queries'
-import { describeHorizon, type PlayerForecast } from '../api/chairstats'
+import { type PlayerForecast } from '../api/chairstats'
 import type { CollegeSeasonRow, SeasonRow, WeekRow } from '../api/tables'
 import { InjuryNotes } from './LeagueAttention'
 import { PROFILE_SECTIONS, collegePath, playerPath, useUrlState, type ProfileSection } from '../navigation'
@@ -12,6 +12,7 @@ import { PlayerPassing } from './QBPassing'
 import { useDataRelease } from '../dataRelease'
 import { QueryError } from './Controls'
 import { fixed, grouped } from '../format'
+import { forecastPeriod, forecastRank, forecastPositionRank } from '../forecastDisplay'
 
 /**
  * The profile is one long page; a section path scrolls to that section. Following a
@@ -66,10 +67,10 @@ const weekColumns: Column<WeekRow>[] = [
 const forecastColumns: Column<PlayerForecast>[] = [
   { key: 'campaign_name', label: 'Campaign', title: 'Campaign bundle that produced the forecast.', align: 'left', initial: 'asc' },
   { key: 'model_id', label: 'Model', title: 'Model inside the campaign.', align: 'left' },
-  { key: 'horizon', label: 'Horizon', title: 'Forecast horizon.', align: 'left', render: r => describeHorizon(r.horizon) },
+  { key: 'horizon', label: 'Forecast period', title: 'Forecast period; weekly rows name the projected week.', align: 'left', render: forecastPeriod },
   { key: 'vintage', label: 'As of', title: 'Season and observation cutoff week of the saved forecast.', align: 'left', value: r => r.season * 100 + r.origin_week, render: r => `${r.season} · week ${r.origin_week}` },
-  { key: 'overall_rank', label: 'Overall rank', title: 'Rank across every position in that campaign and horizon.', initial: 'asc' },
-  { key: 'position_rank', label: 'Position rank', title: 'Rank within the model.', initial: 'asc', render: r => r.position_rank == null ? '—' : `${r.position}${r.position_rank}` },
+  { key: 'overall_rank', label: 'Overall rank', title: 'Rank across every position for the period in this row.', initial: 'asc', render: forecastRank },
+  { key: 'position_rank', label: 'Position rank', title: 'Rank within the position for the period in this row.', initial: 'asc', render: forecastPositionRank },
   { key: 'prediction', label: 'Points', title: 'Predicted fantasy points over the horizon.', render: r => fixed(r.prediction) },
   { key: 'points_per_game', label: 'Per game', title: 'Horizon points divided by scheduled games.', render: r => fixed(r.points_per_game) },
   { key: 'candidates', label: 'Candidates', title: 'Players the model forecast in that vintage.' },

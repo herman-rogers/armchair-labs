@@ -5,6 +5,7 @@ import { fetchForecastAccuracy, fetchLeague, fetchMatchups, fetchWeeklyForecasts
 import { fetchCollege, fetchPlayer, fetchPlayers, fetchRookies } from '../tables'
 import { fetchTeamStrength } from '../teamStrength'
 import { fetchTeamAnalysis } from '../teamAnalysis'
+import { fetchLeagueScoring, fetchPlayerScoring } from '../scoring'
 
 // The catalog provider polls and verifies the published table catalog; changing its
 // token selects new cache entries. Campaign responses carry their manifest checksum
@@ -15,15 +16,25 @@ const canonicalParams = (params: URLSearchParams) => {
 }
 
 export const statusQuery = () => queryOptions({ queryKey: ['status'], queryFn: fetchStatus })
+// Observe campaign-only rescores as well as new data catalogs; never freeze these
+// responses indefinitely under the observation release's cache key.
+export const playerScoringQuery = (params: URLSearchParams, token?: string, manifest?: string) =>
+  queryOptions({ queryKey: ['scoring', 'players', token, manifest, canonicalParams(params)],
+    queryFn: ({ signal }) => fetchPlayerScoring(params, token, signal), enabled: !!params.get('campaign'),
+    staleTime: 30_000, refetchInterval: 60_000, retry: false })
+export const leagueScoringQuery = (campaign: string, token?: string) =>
+  queryOptions({ queryKey: ['league-observations', token, 'scoring', campaign],
+    queryFn: ({ signal }) => fetchLeagueScoring(campaign, token, signal), enabled: !!campaign,
+    staleTime: 30_000, refetchInterval: 60_000, retry: false })
 /** The published table catalog; polled so a newly published catalog replaces cached observations. */
 export const dataCatalogQuery = () => queryOptions({ queryKey: ['data-catalog'], queryFn: fetchDataCatalog, retry: false, refetchInterval: 60_000, staleTime: 30_000 })
 
 // ChairStats: every campaign bundle is available; the request names the campaign.
 export const campaignsQuery = () => queryOptions({ queryKey: ['chairstats', 'campaigns'], queryFn: ({ signal }) => fetchCampaigns(signal), staleTime: 60_000, refetchInterval: 120_000, retry: false })
-export const rankingsQuery = (campaign: string, horizon: string, extra: Record<string, string> = {}) => {
+export const rankingsQuery = (campaign: string, horizon: string, extra: Record<string, string> = {}, token?: string) => {
   const params = new URLSearchParams({ campaign, horizon, limit: '2000', ...extra })
   const key = canonicalParams(params)
-  return queryOptions({ ...published, queryKey: ['chairstats', 'rankings', key], queryFn: ({ signal }) => fetchRankings(new URLSearchParams(key), signal), enabled: !!campaign && !!horizon })
+  return queryOptions({ ...published, queryKey: ['chairstats', 'rankings', token, key], queryFn: ({ signal }) => fetchRankings(new URLSearchParams(key), token, signal), enabled: !!campaign && !!horizon })
 }
 export const playerForecastsQuery = (playerId: string) =>
   queryOptions({ ...published, staleTime: 60_000, queryKey: ['chairstats', 'player', playerId], queryFn: ({ signal }) => fetchPlayerForecasts(playerId, signal) })

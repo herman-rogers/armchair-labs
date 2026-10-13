@@ -158,3 +158,70 @@ def test_targets_view_keeps_declared_target_columns(store):
     pace = views.targets(store, "fixture_v1", "team_pace")
     assert pace["rows"][0]["position"] is None
     assert pace["rows"][0]["prediction"] is None
+
+
+def test_rankings_span_campaigns_and_fill_missing_positions(store, tmp_path):
+    """Other campaigns contribute only when explicitly requested."""
+    work = tmp_path / "te"
+    metrics = write(work / "metrics.json", {"rmse": 2.0})
+    te_rows = forecast_rows("TE", 2026, 5, ["Tight One"])
+    rb_rows = forecast_rows("RB", 2026, 5, ["Other Back"])
+    publish_campaign(
+        store.root,
+        {
+            "campaign_id": "fixture_te",
+            "name": "TE fixture",
+            "generated_at": "2026-10-11T00:00:00+00:00",
+        },
+        [
+            {
+                "model_id": "te_remaining",
+                "position": "TE",
+                "horizon": "remaining",
+                "origin_week": 2,
+                "targets": ["yards", "points"],
+                "training_through_season": 2025,
+                "metrics": metrics,
+                "forecasts": [
+                    {
+                        "season": 2026,
+                        "origin_week": 5,
+                        "rolling_origin": True,
+                        "path": write(work / "te.json", {"rows": te_rows}),
+                    }
+                ],
+            },
+            {
+                "model_id": "rb_remaining",
+                "position": "RB",
+                "horizon": "remaining",
+                "origin_week": 2,
+                "targets": ["yards", "points"],
+                "training_through_season": 2025,
+                "metrics": metrics,
+                "forecasts": [
+                    {
+                        "season": 2026,
+                        "origin_week": 5,
+                        "rolling_origin": True,
+                        "path": write(work / "rb.json", {"rows": rb_rows}),
+                    }
+                ],
+            },
+        ],
+    )
+    alone = views.rankings(store, "fixture_v1", horizon="remaining")
+    assert {r["position"] for r in alone["rankings"]} == {"RB", "WR"}
+    merged = views.rankings(store, ["fixture_v1", "fixture_te"], horizon="remaining")
+    assert {r["position"] for r in merged["rankings"]} == {"RB", "WR", "TE"}
+    assert "Other Back" not in {r["player_display_name"] for r in merged["rankings"]}
+    by_position = {m["position"]: m for m in merged["models"]}
+    assert by_position["TE"]["campaign_id"] == "fixture_te" and by_position["TE"]["rolling_origin"]
+    assert (
+        by_position["RB"]["campaign_id"] == "fixture_v1" and not by_position["RB"]["rolling_origin"]
+    )
+    assert [c["campaign_id"] for c in merged["campaigns"]] == ["fixture_v1", "fixture_te"]
+    explicit = views.rankings(store, ["fixture_te", "fixture_v1"], horizon="remaining")
+    assert explicit["campaign_id"] == "fixture_te"
+    assert "Other Back" in {r["player_display_name"] for r in explicit["rankings"]}
+    assert "Back One" not in {r["player_display_name"] for r in explicit["rankings"]}

@@ -1,7 +1,8 @@
 """Team diagnostics: observed results, campaign per-game points and legal depth.
 
 Concentration describes the allocation of points, not a calibrated floor or win
-probability. All current estimates come from the requested campaign, never ESPN.
+probability. Offensive estimates use the campaign; K/DST use ESPN weekly
+projections with prior-score fallbacks.
 """
 
 from collections import defaultdict
@@ -111,7 +112,7 @@ def team_strength(snapshot, forecasts=None):
     ]
     aligned = bool(
         forecasts
-        and forecasts.get("source") == "campaign_per_game"
+        and forecasts.get("source") in ("campaign_per_game", "campaign_weekly_distribution")
         and forecasts.get("season") == snapshot.season
         and forecasts.get("requested_week") == snapshot.week
         and forecasts.get("current_week") == snapshot.week
@@ -452,7 +453,7 @@ def team_strength(snapshot, forecasts=None):
         horizon=forecasts.get("horizon") if aligned else None,
         forecast_available=aligned,
         forecast_label=(
-            f"{forecasts['campaign_name']} per-game estimates"
+            f"{forecasts['campaign_name']} + ESPN K/DST estimates"
             if aligned
             else "No campaign forecast"
         ),

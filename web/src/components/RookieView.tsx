@@ -7,13 +7,14 @@ import { playerPath, type UrlPage } from '../navigation'
 import { CampaignSelect } from './CampaignSelect'
 import { PlayerLink } from './PlayerLink'
 import { Pager, QueryError } from './Controls'
-import { fixed, rank } from '../format'
+import { fixed } from '../format'
+import { forecastRank, rankingsPeriod } from '../forecastDisplay'
 
 export function RookieView({ search, position, page }: { search: string; position: string; page: UrlPage }) {
   const { token } = useDataRelease()
-  const choice = useCampaignChoice()
+  const choice = useCampaignChoice(['season', 'remaining', 'weekly'])
   const query = useQuery(rookiesQuery(token))
-  const rankings = useQuery(rankingsQuery(choice.campaignId, choice.horizon))
+  const rankings = useQuery(rankingsQuery(choice.campaignId, choice.horizon, {}, token))
   const byId = new Map(rankings.data?.rankings.map(r => [r.player_id, r]))
   const rows = (query.data?.rookies ?? []).filter(r => (position === 'ALL' || r.position === position) && r.player_display_name.toLowerCase().includes(search.toLowerCase()))
     .map(r => ({ ...r, forecast: byId.get(r.player_id) }))
@@ -25,8 +26,8 @@ export function RookieView({ search, position, page }: { search: string; positio
     { key: 'draft_round', label: 'Round', title: 'NFL draft round; unknown stays blank.', initial: 'asc' },
     { key: 'draft_pick', label: 'Pick', title: 'Overall NFL draft pick, not a model rank.', initial: 'asc' },
     { key: 'college_name', label: 'College career', title: 'Linked college identity; only accepted links join histories.', align: 'left', render: r => r.college_id ? <PlayerLink collegeId={r.college_id}>{r.college_name ?? r.college_id}</PlayerLink> : 'No accepted link' },
-    { key: 'forecast_rank', label: `${choice.campaign?.name ?? 'Campaign'} rank`, title: 'Overall rank in the chosen campaign and horizon, when the model forecast this rookie.', initial: 'asc', value: r => r.forecast?.overall_rank, render: r => rank(r.forecast?.overall_rank) },
-    { key: 'forecast_points', label: 'Forecast points', title: 'Predicted horizon points from the chosen campaign.', value: r => r.forecast?.prediction, render: r => fixed(r.forecast?.prediction) },
+    { key: 'forecast_rank', label: `${rankingsPeriod(rankings.data)} · overall`, title: 'Overall rank for the named forecast period, when the model forecast this rookie.', initial: 'asc', value: r => r.forecast?.overall_rank, render: r => forecastRank(r.forecast) },
+    { key: 'forecast_points', label: `${rankingsPeriod(rankings.data)} points`, title: 'Predicted points for the named forecast period.', value: r => r.forecast?.prediction, render: r => fixed(r.forecast?.prediction) },
   ]
   return <section aria-label="Rookie analysis"><h3>{query.data?.season ?? ''} rookie class</h3>
     <p>Draft capital and linked college histories from the observation tables, alongside the chosen campaign’s forecast. Open a player to follow their college-to-NFL progression.</p>

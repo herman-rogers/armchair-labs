@@ -267,6 +267,21 @@ tables:
     refresh_hours: 24
     parameters:
       role: observations
+  market_rankings:
+    description: FantasyPros expert consensus ranks by scrape date and page, linked to NFL identities.
+    grain: One row per scrape date, page and FantasyPros player id.
+    primary_key:
+    - scrape_date
+    - page_type
+    - fantasypros_id
+    kind: source
+    source: market_rankings
+    min_rows: 0
+    refresh_hours: 24
+    parameters:
+      role: observations
+    limitations:
+      - Consensus ranks are a market reference, not an outcome; only redraft and weekly pages are kept.
   nfl_schedule:
     description: Captured schedule context; scores, realized starters, weather and betting results excluded.
     grain: One row per game_id.

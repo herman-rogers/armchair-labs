@@ -4,7 +4,7 @@ import zipfile
 import polars as pl
 import pytest
 
-from engine.data.releases import load_gold
+from engine.data.releases import load_tables
 from engine.data.tracking import (
     build,
     capture,
@@ -107,7 +107,7 @@ def test_roundtrip_seals_dependencies_and_leaves_serving_catalog_untouched(tmp_p
     assert build(data, raw) == ref
     # Editing the original import cannot edit sealed provider evidence.
     (local / "tracking.csv").write_text("changed")
-    assert load_gold(data, "test_v1").read("tracking").height == 2
+    assert load_tables(data, "test_v1").read("tracking").height == 2
     manifest = json.loads((data / "raw/snapshots/test_v1/manifest.json").read_text())
     obj = data / manifest["assets"]["tracking.csv"]["object"]
     obj.write_text("tampered")
@@ -130,7 +130,7 @@ def test_ngs_season_summary_never_becomes_weekly_row(tmp_path):
     data = tmp_path / "data"
     raw = capture(data, SOURCES["nflverse_ngs"], "ngs_v1", local)
     build(data, raw)
-    release = load_gold(data, "ngs_v1")
+    release = load_tables(data, "ngs_v1")
     assert release.read("ngs_passing_weekly")["week"].to_list() == [1]
     assert release.read("ngs_passing_season")["week"].to_list() == [0]
 

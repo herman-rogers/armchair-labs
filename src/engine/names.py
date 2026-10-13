@@ -10,7 +10,7 @@ So this module exists to make matching deterministic, and every caller that uses
 expected to report what failed to match rather than dropping it.
 
 From Phase 2 onward the primary join is on IDs via the ffverse crosswalk
-(`engine.data.nflverse.load_id_crosswalk`), and this is the fallback. It is the
+(the published `nfl_identity_crosswalk` table), and this is the fallback. It is the
 primary path only for the manual override file, where entries are written by hand.
 """
 

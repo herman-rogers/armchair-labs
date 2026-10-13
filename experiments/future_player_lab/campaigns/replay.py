@@ -26,6 +26,10 @@ def replay_campaign(root, campaign_id):
     store = CampaignStore(root)
     verification = store.check(campaign_id)
     manifest = store.campaign(campaign_id)
+    if manifest.get("kind") == "weekly_distribution":
+        from .weekly_v3.replay import replay_campaign as replay_weekly
+
+        return replay_weekly(root, campaign_id)
     if manifest.get("bundle_replay_supported") is False:
         raise ValueError(manifest["replay_note"])
     receipts = []
@@ -60,7 +64,10 @@ def replay_campaign(root, campaign_id):
         ):
             if saved[key] != entry[key]:
                 raise ValueError(f"Saved model manifest differs from registry: {key}")
-        if saved["campaign_id"] != campaign_id or entry["scoring"] != SCORING[entry["position"]]:
+        if (
+            saved["campaign_id"] != entry.get("source_campaign_id", campaign_id)
+            or entry["scoring"] != SCORING[entry["position"]]
+        ):
             raise ValueError("Campaign or scoring contract differs from supported inference")
         # Matrix replay does not rebuild raw features, so historical source files can
         # be archived. Numerical library versions must still match the training run.

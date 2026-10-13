@@ -12,12 +12,19 @@ from ..gpu_lab.run import digest, json_write
 
 def capture(output, season, ngs_snapshot=None):
     import nflreadpy as nfl
+    from nflreadpy.config import update_config
 
-    from engine.data.nflverse import configure_cache
+    from engine.config.settings import get_settings
 
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
-    configure_cache()
+    settings = get_settings()
+    settings.ensure_dirs()
+    update_config(
+        cache_mode="filesystem",
+        cache_dir=settings.nflverse_cache_dir,
+        cache_duration=settings.nflverse_cache_duration,
+    )
     loaders = {
         "plays": lambda: nfl.load_pbp([season]),
         "team_box": lambda: nfl.load_team_stats([season], summary_level="week"),

@@ -5,7 +5,7 @@
       "id": "observations",
       "name": "Observed production and participation",
       "layer": "observations",
-      "method": "Aggregations, rates and exposure summaries",
+      "method": "DuckDB SQL recipes over the raw nflverse snapshot; served as observation tables",
       "targets": [
         "yards",
         "attempts",
@@ -18,10 +18,8 @@
         "observed"
       ],
       "sources": [
-        "src/engine/metrics/rates.py",
-        "src/engine/metrics/opportunity.py",
-        "src/engine/metrics/age.py",
-        "src/engine/metrics/availability.py"
+        "src/engine/data/enrich/__init__.py",
+        "src/engine/tables/observations.py"
       ],
       "assessment": "Retain measurements; remove unsupported interpretations.",
       "limits": "Observed production, age observations and appearance counts do not identify ability or medical injury risk.",
@@ -30,33 +28,10 @@
       ]
     },
     {
-      "id": "profiles",
-      "name": "Player profiles and similarity",
-      "layer": "description",
-      "method": "Historical summaries, tracking summaries and career similarity",
-      "targets": [
-        "player history",
-        "similarity",
-        "participation"
-      ],
-      "horizons": [
-        "historical"
-      ],
-      "sources": [
-        "src/engine/metrics/player_profile.py",
-        "src/engine/metrics/profile_tracking.py",
-        "src/engine/metrics/career_similarity.py",
-        "research/profile_history.py"
-      ],
-      "assessment": "Retain as descriptive evidence.",
-      "limits": "Similarity does not imply equal ability; participation proxies are not verified routes.",
-      "registry_prefixes": []
-    },
-    {
       "id": "college",
       "name": "College translation and rookie evidence",
       "layer": "development",
-      "method": "Chronological college-to-NFL prediction and rookie history",
+      "method": "Normalized college seasons and identity links published as observation tables",
       "targets": [
         "NFL production",
         "rookie development"
@@ -66,10 +41,8 @@
         "in-season"
       ],
       "sources": [
-        "src/engine/metrics/college_translation.py",
-        "src/engine/metrics/rookies.py",
-        "research/college_translation.py",
-        "research/rookie_watch.py"
+        "src/engine/data/college.py",
+        "src/engine/data/college_identity.py"
       ],
       "assessment": "Candidate foundation for development research.",
       "limits": "Draft selection, identity coverage and observed NFL entry limit generalization; not a validated general player-quality score.",
@@ -89,85 +62,12 @@
         "season"
       ],
       "sources": [
-        "research/individual_stat_engine.py",
-        "research/individual_stat_registry.py",
-        "research/nextgen_signal_audit.py",
         "docs/research/nextgen_signal_consolidation_2026-09-23.md"
       ],
       "assessment": "Retain inventory and negative findings, not blanket usefulness labels.",
       "limits": "A failed feature in one fantasy model is not proof it has no football information.",
       "registry_prefixes": [
         "stat:"
-      ]
-    },
-    {
-      "id": "legacy-boards",
-      "name": "Legacy V1 V2 and Adaptive boards",
-      "layer": "fantasy_application",
-      "method": "Legacy component projection, fitted and adaptive selectors",
-      "targets": [
-        "fantasy points",
-        "value over replacement"
-      ],
-      "horizons": [
-        "preseason"
-      ],
-      "sources": [
-        "src/engine/board/pipeline.py",
-        "src/engine/metrics/projection.py",
-        "src/engine/metrics/fit.py",
-        "src/engine/metrics/experimental.py",
-        "src/engine/metrics/vor.py"
-      ],
-      "assessment": "Compatibility and comparison layer. Named overrides, fixed age/depth multipliers and custom athletic scores retired; changed feature contracts require refitting.",
-      "limits": "League-dependent targets and heuristics. Do not infer quality from fantasy ranks.",
-      "registry_prefixes": [
-        "legacy:"
-      ]
-    },
-    {
-      "id": "preseason-models",
-      "name": "Preseason profile forecasts",
-      "layer": "production",
-      "method": "Usage/prior references, ridge and histogram boosting",
-      "targets": [
-        "season production",
-        "fantasy points"
-      ],
-      "horizons": [
-        "preseason"
-      ],
-      "sources": [
-        "src/engine/metrics/nextgen.py",
-        "research/nextgen_system.py",
-        "research/player_outlook.py"
-      ],
-      "assessment": "Keep as comparators; use release-scoped status.",
-      "limits": "Production mixes skill, opportunity, availability and team context.",
-      "registry_prefixes": [
-        "forecast:"
-      ]
-    },
-    {
-      "id": "horizon-rankings",
-      "name": "Current horizon rankings",
-      "layer": "fantasy_application",
-      "method": "Calibrated references, profile ridge and boosting, approved QB integration",
-      "targets": [
-        "league points"
-      ],
-      "horizons": [
-        "next four calendar weeks",
-        "remaining season"
-      ],
-      "sources": [
-        "src/engine/metrics/current_rankings.py",
-        "research/nextgen_rankings.py"
-      ],
-      "assessment": "Current application product; serving status is read from the selected release.",
-      "limits": "References and promoted policies differ by position/horizon; no automatic transfer of approval.",
-      "registry_prefixes": [
-        "ranking:"
       ]
     },
     {
@@ -182,8 +82,6 @@
         "next calendar week"
       ],
       "sources": [
-        "src/engine/metrics/weekly_points.py",
-        "research/build_weekly_points.py",
         "research/weekly_points_protocol.md"
       ],
       "assessment": "Keep baseline and candidate comparisons separate.",
@@ -205,38 +103,11 @@
         "next four team games",
         "remaining season"
       ],
-      "sources": [
-        "src/engine/metrics/qb_passing.py",
-        "src/engine/metrics/qb_variations.py",
-        "research/qb_variations.py"
-      ],
+      "sources": [],
       "assessment": "Useful efficiency/opportunity decomposition; check each current scope.",
       "limits": "YPA still reflects teammates, opponents and selection. Not context-independent QB talent.",
       "registry_prefixes": [
         "qb_passing:"
-      ]
-    },
-    {
-      "id": "qb-fantasy",
-      "name": "QB fantasy bridge",
-      "layer": "fantasy_application",
-      "method": "Cross-fitted passing forecasts plus point/residual models",
-      "targets": [
-        "league points"
-      ],
-      "horizons": [
-        "next four calendar weeks",
-        "remaining season"
-      ],
-      "sources": [
-        "src/engine/metrics/qb_variations.py",
-        "research/publish_qb_variations.py"
-      ],
-      "assessment": "Current scoped integration; keep separate from passing ability.",
-      "limits": "This target includes league rules, rushing and touchdown outcomes.",
-      "registry_prefixes": [
-        "ranking:next4:QB",
-        "ranking:rest_of_season:QB"
       ]
     },
     {
@@ -251,33 +122,10 @@
         "full season"
       ],
       "sources": [
-        "research/qb_boosting_sweep.py",
         "docs/research/qb_boosting_capacity_2026-09-24.md"
       ],
       "assessment": "No established broad replacement benefit in the tested capacity search.",
       "limits": "Do not convert isolated favorable outcomes into a general larger-model claim.",
-      "registry_prefixes": []
-    },
-    {
-      "id": "role-transition",
-      "name": "Role and workload transitions",
-      "layer": "opportunity",
-      "method": "Role probability and conditional workload; preseason role features",
-      "targets": [
-        "QB job opportunity",
-        "future usage"
-      ],
-      "horizons": [
-        "weekly",
-        "preseason"
-      ],
-      "sources": [
-        "research/qb_role_transition.py",
-        "research/preseason_role_workload.py",
-        "research/role_transition_pilot.py"
-      ],
-      "assessment": "Retain as opportunity research.",
-      "limits": "Role and workload are distinct from execution and medical availability.",
       "registry_prefixes": []
     },
     {
@@ -293,7 +141,6 @@
         "next four calendar weeks"
       ],
       "sources": [
-        "research/rb_residual_correction.py",
         "docs/research/rb_residual_correction_2026-09-23.md"
       ],
       "assessment": "Not advanced: uncertain selection gain and worse point MAE in the recorded experiment.",
@@ -514,7 +361,6 @@
         "season"
       ],
       "sources": [
-        "research/injury_position_comparison.py",
         "research/audit_injury_archive.py",
         "docs/research/injury_position_comparison_2026-09-24.md"
       ],
@@ -560,35 +406,10 @@
         "preseason"
       ],
       "sources": [
-        "src/engine/espn/forecast_log.py",
-        "src/engine/metrics/prospective.py",
-        "src/engine/metrics/weekly_replay.py"
+        "src/engine/espn/forecast_log.py"
       ],
       "assessment": "Retain dated benchmarks; distinguish market-informed models.",
       "limits": "No general market-edge claim; reconstructed comparisons are not prospective forecasts.",
-      "registry_prefixes": []
-    },
-    {
-      "id": "discovery",
-      "name": "Earlier metric discovery and rich weekly research",
-      "layer": "production",
-      "method": "Walk-forward feature discovery and weekly/route-history models",
-      "targets": [
-        "production",
-        "points",
-        "participation"
-      ],
-      "horizons": [
-        "preseason",
-        "weekly history"
-      ],
-      "sources": [
-        "src/engine/metrics/discovery.py",
-        "src/engine/metrics/rich_weekly.py",
-        "src/engine/metrics/research.py"
-      ],
-      "assessment": "Historical candidate library, not automatic serving approval.",
-      "limits": "Research-selected associations require new target-specific validation for ability use.",
       "registry_prefixes": []
     },
     {

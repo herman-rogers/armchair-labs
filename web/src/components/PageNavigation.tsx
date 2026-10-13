@@ -8,7 +8,7 @@ export function PageNavigation() {
   const currentPage = navigationPage(pathname)?.page
   const active = (path: string) => currentPage?.path === path
   return <aside className="page-sidebar">
-    <button className="button navigation-toggle" type="button" aria-expanded={open} aria-controls="page-navigation" onClick={() => setOpen(!open)}>Browse pages <span aria-hidden="true">{open ? '−' : '+'}</span></button>
+    <button className="button navigation-toggle" type="button" aria-expanded={open} aria-controls="page-navigation" onClick={() => setOpen(!open)}>Browse Pages <span aria-hidden="true">{open ? '−' : '+'}</span></button>
     <nav id="page-navigation" className={open ? 'page-navigation is-open' : 'page-navigation'} aria-label="Main navigation">
       {PAGE_GROUPS.map(group => <section key={group.label}>
         <h2>{group.label}</h2>

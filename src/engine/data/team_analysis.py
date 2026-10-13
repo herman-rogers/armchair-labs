@@ -5,7 +5,7 @@ from functools import lru_cache
 import polars as pl
 
 from engine.data.frames import read_frame
-from engine.data.releases import GoldRelease, load_manifest
+from engine.data.releases import TableRelease, load_manifest
 
 TABLES = (
     "nfl_player_weeks",
@@ -24,7 +24,7 @@ def normalize(frame: pl.DataFrame, column: str = "team") -> pl.DataFrame:
     return frame.with_columns(pl.col(column).replace(ALIASES))
 
 
-def load_panel(gold: GoldRelease) -> pl.DataFrame:
+def load_panel(gold: TableRelease) -> pl.DataFrame:
     # Revalidate paths before accessing decoded cached observations.
     # Gold schedules intentionally omit QB identities. Use their richer, pinned
     # enriched input, verified as part of the same immutable dependency closure.

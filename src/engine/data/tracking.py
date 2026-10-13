@@ -14,7 +14,6 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -27,8 +26,9 @@ from engine.data.releases import (
     digest,
     identifier,
     inside,
-    load_gold,
     load_manifest,
+    load_tables,
+    now,
     preserve_object,
     reference,
     write_json,
@@ -54,10 +54,6 @@ ALIASES = {
     "frame_type": ["frameType"],
     "time": ["time"],
 }
-
-
-def now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def http_session() -> requests.Session:
@@ -431,10 +427,10 @@ def build(data_dir: Path, raw_ref: dict) -> dict:
     source = Source(**raw["source"])
     legacy = data_dir / "gold/releases" / version
     if (legacy / "manifest.json").exists():
-        return load_gold(data_dir, version).ref
+        return load_tables(data_dir, version).ref
     gold_root = data_dir / "tables/batches" / version
     if (gold_root / "manifest.json").exists():
-        return load_gold(data_dir, version).ref
+        return load_tables(data_dir, version).ref
     enriched_root = data_dir / "enriched/releases" / version
     if enriched_root.exists() or gold_root.exists():
         raise ValueError("Partial build exists; use a new version (raw bytes deduplicate)")
@@ -556,12 +552,12 @@ def build(data_dir: Path, raw_ref: dict) -> dict:
             "environment": {"polars": pl.__version__},
         }
         atomic_json(root / "manifest.json", manifest)
-    return load_gold(data_dir, version).ref
+    return load_tables(data_dir, version).ref
 
 
 def register(data_dir: Path, source: Source, gold_ref: dict):
     """Select a source package independently of the application serving release."""
-    release = load_gold(data_dir, gold_ref["version"])
+    release = load_tables(data_dir, gold_ref["version"])
     if release.ref != gold_ref or release.manifest["source"]["id"] != source.id:
         raise ValueError("Source identity mismatch")
     path = data_dir / "source_catalog.json"
@@ -576,7 +572,7 @@ def register(data_dir: Path, source: Source, gold_ref: dict):
 def load_source(data_dir: Path, source_id: str):
     catalog = json.loads((data_dir / "source_catalog.json").read_text())
     ref = catalog["sources"][source_id]
-    release = load_gold(data_dir, ref["version"])
+    release = load_tables(data_dir, ref["version"])
     if release.ref != ref or release.manifest["source"]["id"] != source_id:
         raise ValueError("Source catalog identity mismatch")
     return release
@@ -603,7 +599,7 @@ def main():
         path = args.data_dir / "source_catalog.json"
         print(path.read_text() if path.exists() else '{"sources": {}}')
     elif args.command == "verify":
-        release = load_gold(args.data_dir, args.version)
+        release = load_tables(args.data_dir, args.version)
         print(json.dumps({"verified": release.ref, "tables": len(release.manifest["tables"])}))
     else:
         runtime = args.data_dir / ".runtime"

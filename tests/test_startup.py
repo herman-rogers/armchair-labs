@@ -8,6 +8,21 @@ import pytest
 from engine import startup
 
 
+def test_restart_refreshes_provider_data_before_loading_espn(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    events = []
+    monkeypatch.setattr(startup.shutil, "which", lambda name: name)
+    monkeypatch.setattr(startup, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(startup.shared, "lock", lambda path: nullcontext())
+    monkeypatch.setattr(startup, "prepare_frontend", lambda root: events.append("frontend"))
+    monkeypatch.setattr(startup.subprocess, "run", lambda *a, **kw: events.append("tables"))
+    monkeypatch.setattr(startup, "refresh_data", lambda **kw: events.append(("refresh", kw)))
+    monkeypatch.setattr(startup, "prepare_auth", lambda: events.append("espn"))
+    startup.prepare()
+    assert events == ["frontend", "tables", ("refresh", {"rescore": True}), "espn"]
+
+
 def test_verification_distinguishes_network_outage_from_invalid_credentials(monkeypatch):
     from espn_api import football
     from espn_api.requests.espn_requests import ESPNAccessDenied

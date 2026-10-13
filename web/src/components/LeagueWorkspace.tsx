@@ -2,14 +2,15 @@ import { weeklyForecastsQuery, leagueQuery, matchupsQuery, rankingsQuery } from 
 import { useCampaignChoice } from '../api/queries/hooks'
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from 'react-router'
 import { lazy, Suspense, useEffect } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { refreshObservations, type WeeklyForecastSide, type LeagueObservations, type MatchupSide, type ObservedLineup } from '../api/league'
-import { describeHorizon, type RankingsResponse } from '../api/chairstats'
+import { useQuery } from '@tanstack/react-query'
+import { type WeeklyForecastSide, type LeagueObservations, type MatchupSide, type ObservedLineup } from '../api/league'
+import { type RankingsResponse } from '../api/chairstats'
 import { useDataRelease } from '../dataRelease'
 import { DataTable, type Column } from './DataTable'
 import { LeagueAttention, PlayerStatus, PlayerNotes } from './LeagueAttention'
 import { leaguePath, matchupPath, playerPath, teamPath, useUrlFlag, useUrlState } from '../navigation'
-import { LeagueOverview } from './LeagueOverview'
+import { LeaguePredictions } from './LeaguePredictions'
+import { OverviewDisclosure } from './OverviewDisclosure'
 import { TeamSelect } from './TeamSelect'
 import { StickyFooter } from './StickyFooter'
 import { CampaignSelect } from './CampaignSelect'
@@ -19,6 +20,7 @@ import { PositionOptions, QueryError, SelectField } from './Controls'
 import { LEAGUE_POSITION_FILTERS } from '../positions'
 import { fixed, rank } from '../format'
 import { currentWeeklyForecasts } from '../weeklyForecasts'
+import { forecastRank, forecastPositionRank, rankingsPeriod } from '../forecastDisplay'
 
 const TeamStrength = lazy(() => import('./TeamStrength').then(m => ({ default: m.TeamStrength })))
 
@@ -35,12 +37,12 @@ const rosterColumns: Column<LeaguePlayer>[] = [
 
 function Roster({ rows, rankings, sortParam }: { rows: LeaguePlayer[]; rankings?: RankingsResponse; sortParam?: string }) {
   const byId = new Map(rankings?.rankings.map(r => [r.player_id, r]))
-  const label = rankings ? rankings.campaign_name : 'Campaign'
-  const ranked = rows.map(r => { const f = byId.get(r.player_id ?? ''); return { ...r, model_overall: f?.overall_rank, model_rank: f?.position_rank, model_points: f?.prediction, model_per_game: f?.points_per_game } })
+  const label = rankingsPeriod(rankings)
+  const ranked = rows.map(r => { const f = byId.get(r.player_id ?? ''); return { ...r, forecast: f, model_overall: f?.overall_rank, model_rank: f?.position_rank, model_points: f?.prediction, model_per_game: f?.points_per_game } })
   const columns: Column<typeof ranked[number]>[] = [...rosterColumns.slice(0, 2),
-    { key: 'model_overall', label: `${label} · overall`, title: 'Rank across every position in the chosen campaign and horizon, before ownership or search filters.', initial: 'asc', render: r => rank(r.model_overall) },
-    { key: 'model_rank', label: `${label} · position`, title: 'Rank within the model that forecast this position.', initial: 'asc', render: r => r.model_rank == null ? '—' : `${r.position}${r.model_rank}` },
-    { key: 'model_points', label: `${rankings ? describeHorizon(rankings.horizon) : 'Horizon'} points`, title: 'Predicted points over the horizon; not a weekly lineup estimate or bid.', render: r => fixed(r.model_points) },
+    { key: 'model_overall', label: `${label} · overall`, title: 'Rank across every position for this forecast period, before ownership or search filters. BYE means no scheduled game.', initial: 'asc', render: r => forecastRank(r.forecast) },
+    { key: 'model_rank', label: `${label} · position`, title: 'Rank within the position for this forecast period.', initial: 'asc', render: r => forecastPositionRank(r.forecast) },
+    { key: 'model_points', label: `${label} points`, title: 'Predicted points for the named forecast period.', render: r => fixed(r.model_points) },
     { key: 'model_per_game', label: 'Per game', title: 'Horizon points divided by scheduled games.', render: r => fixed(r.model_per_game) },
     ...rosterColumns.slice(2),
   ]
@@ -48,14 +50,14 @@ function Roster({ rows, rankings, sortParam }: { rows: LeaguePlayer[]; rankings?
     emptyMessage="No captured players match these filters." rowClass={r => r.attention?.some(f => f.severity === 'urgent') ? 'attention-row' : undefined} profileHref={r => r.player_id ? playerPath(r.player_id) : undefined} />
 }
 
-function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: MatchupSide; forecast?: WeeklyForecastSide; players?: LeaguePlayer[]; currentPlayers?: LeaguePlayer[]; rankings?: RankingsResponse }) {
+function Lineup({ side, forecast, players, currentPlayers, rankings, week }: { side: MatchupSide; forecast?: WeeklyForecastSide; players?: LeaguePlayer[]; currentPlayers?: LeaguePlayer[]; rankings?: RankingsResponse; week: number }) {
   const playersByEspnId = new Map(players?.map(p => [p.espn_id, p]))
-  const ranksByPlayerId = new Map(rankings?.rankings.map(r => [r.player_id, r.overall_rank]))
-  const modelRank = (row: ObservedLineup) => ranksByPlayerId.get(playersByEspnId.get(row.espn_id)?.player_id ?? '')
+  const ranksByPlayerId = new Map(rankings?.rankings.map(r => [r.player_id, r]))
+  const playerForecast = (row: ObservedLineup) => ranksByPlayerId.get(playersByEspnId.get(row.espn_id)?.player_id ?? '')
   const columns: Column<ObservedLineup>[] = [
     { key: 'slot', label: 'Slot', title: 'The lineup slot recorded for this week, colored by player position.', align: 'left', initial: 'asc', render: r => <span className={`pos ${r.position ?? ''}`} title={r.position ? `Position: ${r.position}` : undefined}>{r.slot}</span> },
     { key: 'player_display_name', label: 'Player', title: 'Recorded weekly lineup; includes kickers and defenses.', align: 'left', render: r => <PlayerLink playerId={currentPlayers?.find(p => p.espn_id === r.espn_id)?.player_id}>{r.player_display_name}</PlayerLink> },
-    { key: 'model_overall', label: `${rankings?.campaign_name ?? 'Campaign'} · overall`, title: 'Overall rank in the chosen campaign and horizon, not a rank for the selected week.', initial: 'asc', value: modelRank, render: r => rank(modelRank(r)) },
+    { key: 'model_overall', label: `Week ${week} · overall`, title: 'Player rank across all positions for this matchup week. Missing weekly forecasts stay unranked.', initial: 'asc', value: r => playerForecast(r)?.overall_rank, render: r => r.on_bye ? 'BYE' : forecastRank(playerForecast(r)) },
     ...(currentPlayers ? [
       { key: 'injury_status', label: 'Status', title: 'Captured ESPN status from the current snapshot only.', align: 'left' as const,
         value: (r: ObservedLineup) => currentPlayers.find(p => p.espn_id === r.espn_id)?.injury_status,
@@ -64,7 +66,8 @@ function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: M
         render: (r: ObservedLineup) => { const p = currentPlayers.find(p => p.espn_id === r.espn_id); return p ? <PlayerNotes player={p} /> : null } },
     ] : []),
     { key: 'points', label: 'Points', title: 'ESPN fantasy points recorded for this week.', render: r => fixed(r.points) },
-    { key: 'model_points', label: 'Per-game points', title: 'Campaign horizon points per scheduled game for this player. Missing forecasts remain unknown.', value: r => forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction, render: r => fixed(forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction) },
+    { key: 'model_points', label: 'Projected points', title: 'Selected campaign forecast for this week. Missing forecasts remain unknown.', value: r => forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction, render: r => fixed(forecast?.forecasts.find(p => p.espn_id === r.espn_id)?.prediction) },
+    { key: 'range', label: '80% range', title: 'Predicted weekly outcome range when available.', render: r => { const p = forecast?.forecasts.find(p => p.espn_id === r.espn_id); return p?.prediction_interval_80 ? `${fixed(p.prediction_interval_80[0])}–${fixed(p.prediction_interval_80[1])}` : '—' } },
     { key: 'pro_opponent', label: 'Opponent', title: 'NFL opponent recorded for the selected week.', align: 'left', render: r => r.on_bye ? 'Bye' : r.pro_opponent ?? '—' },
   ]
   const benchColumns: Column<ObservedLineup>[] = [
@@ -72,7 +75,7 @@ function Lineup({ side, forecast, players, currentPlayers, rankings }: { side: M
     ...columns.slice(1),
   ]
   return <section><h4>{side.team_name}</h4>
-    <p>{fixed(side.score)} recorded points · {fixed(forecast?.model_projection)} campaign per-game points</p>
+    <p>{fixed(side.score)} recorded points · {fixed(forecast?.model_projection)} projected points{forecast?.prediction_interval_80 ? ` · 80% range ${fixed(forecast.prediction_interval_80[0])}–${fixed(forecast.prediction_interval_80[1])}` : ''}</p>
     {side.lineup_available ? <><h5>Starters</h5><DataTable rows={side.lineup.filter(r => r.started)} columns={columns} defaultSort="slot" rowKey={r => r.espn_id} />
       <h5>Bench & reserve</h5><DataTable rows={side.lineup.filter(r => !r.started)} columns={benchColumns} defaultSort="points" rowKey={r => r.espn_id} emptyMessage="No recorded bench or reserve entries." /></>
       : <p>No lineup captured for this week. Current rosters are available under Team Strength.</p>}
@@ -86,6 +89,10 @@ function Matchups({ overview, rankings, campaignId, horizon }: { overview?: Leag
   const validPath = /^[1-9]\d*$/.test(matchupWeek ?? '') && Number(matchupWeek) <= 25 && /^\d+$/.test(homeId ?? '') && /^\d+$/.test(awayId ?? '')
   const week = validPath ? Number(matchupWeek) : null
   const query = useQuery({ ...matchupsQuery(week, token), enabled: validPath })
+  const weekRanks = useQuery({
+    ...rankingsQuery(campaignId, 'weekly', { season: String(overview?.season ?? ''), origin_week: String((week ?? 1) - 1), market: 'false' }, token),
+    enabled: validPath && !!overview && !!campaignId && horizon === 'weekly',
+  })
   if (!validPath) return <section className="notice"><h3>Matchup not found</h3></section>
   if (query.isError) return <section className="notice" role="alert"><h3>Matchups unavailable</h3><p>{query.error.message}</p></section>
   if (!query.data) return <p role="status">Loading matchup…</p>
@@ -103,15 +110,16 @@ function Matchups({ overview, rankings, campaignId, horizon }: { overview?: Leag
       <h3>{game.home.team_name} vs {game.away.team_name}</h3></div>{game.involves_me && <span className="badge mine">Your matchup</span>}</div>
     <div className="matchup-scoreboard">{[game.home, game.away].map(side => <section key={side.team_id}>
       <h4>{side.team_name}</h4><strong>{fixed(side.score)}</strong><p>Recorded points</p>
-      <p>{fixed(forecastForSide(side.team_id)?.model_projection)} campaign per-game points</p>
+      <p>{fixed(forecastForSide(side.team_id)?.model_projection)} campaign {horizon === 'weekly' ? 'weekly' : 'per-game'} points</p>
       <Link to={teamPath(side)}>View team strength →</Link>
     </section>)}</div>
     <QueryError query={modelQuery} label="Campaign forecasts unavailable" />
+    <QueryError query={weekRanks} label="Weekly player ranks unavailable" />
     <h3>Recorded lineups</h3>
-    <p className="legend">Ranks use the chosen campaign's horizon forecast. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
+    <p className="legend">Player ranks use Week {data.requested_week} forecasts; unavailable weekly ranks show —. {data.requested_week === data.current_week ? 'Current-week scores may be incomplete.' : 'Current injury tags are not applied to historical or future lineups.'}</p>
     {data.requested_week === data.current_week && !currentPlayers && <p className="notice">Current injury details are unavailable for this matchup snapshot. Review the roster alerts or refresh the league.</p>}
-    <div className="league-lineups matchup-detail-lineups">{[game.home, game.away].map(side => <Lineup key={side.team_id} side={side} forecast={forecastForSide(side.team_id)} players={overview?.players} currentPlayers={currentPlayers} rankings={rankings} />)}</div>
-    {data.requested_week === data.current_week && <p className="legend">Current roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.team_rank)} · ${fixed(t?.forecast_points)} horizon player points` }).join(' / ')}. These roster totals include the bench.</p>}
+    <div className="league-lineups matchup-detail-lineups">{[game.home, game.away].map(side => <Lineup key={side.team_id} side={side} forecast={forecastForSide(side.team_id)} players={overview?.players} currentPlayers={currentPlayers} rankings={weekRanks.data?.models.every(m => m.season === data.season && m.origin_week === data.requested_week - 1) ? weekRanks.data : undefined} week={data.requested_week} />)}</div>
+    {data.requested_week === data.current_week && <p className="legend">{rankingsPeriod(rankings)} roster forecasts: {[game.home, game.away].map(side => { const t = teamForecasts.find(t => t.team_id === side.team_id); return `${side.team_name}: ${rank(t?.team_rank)} · ${fixed(t?.forecast_points)} points` }).join(' / ')}. These roster totals include the bench.</p>}
     <nav className="page-links" aria-label="Other matchups">
       {gameIndex > 0 && <Link to={gamePath(data.matchups[gameIndex - 1])}>← Previous matchup</Link>}
       {gameIndex < data.matchups.length - 1 && <Link to={gamePath(data.matchups[gameIndex + 1])}>Next matchup →</Link>}
@@ -122,35 +130,56 @@ function Matchups({ overview, rankings, campaignId, horizon }: { overview?: Leag
 /** League observations plus the chosen campaign's rankings, shared by every league route through the query cache. */
 function useLeague() {
   const { token } = useDataRelease()
-  const choice = useCampaignChoice()
+  const { pathname } = useLocation()
+  const isDraft = pathname.startsWith('/league/draft')
+  const isWeekly = pathname.startsWith('/league/matchups') || pathname.startsWith('/league/predictions')
+  const choice = useCampaignChoice(isDraft ? ['season'] : isWeekly ? ['weekly', 'remaining'] : ['remaining', 'season', 'weekly'], !isDraft && !isWeekly)
+  const weeklyHorizon = choice.campaign?.horizons.includes('weekly') ? 'weekly' : 'remaining'
   const query = useQuery(leagueQuery(token))
-  const rankingQuery = useQuery(rankingsQuery(choice.campaignId, choice.horizon))
   const data = query.data
+  // Draft comparisons must never drift to a newer season or in-season cutoff.
+  const cutoff: Record<string, string> = isDraft ? { season: String(data?.season ?? ''), origin_week: '0' } : {}
+  const rankingQuery = useQuery({
+    ...rankingsQuery(choice.campaignId, choice.horizon, cutoff, token),
+    enabled: !!choice.campaignId && !!choice.horizon && (!isDraft || !!data),
+  })
   const rankings = data && rankingQuery.data?.rankings.every(r => r.season === data.season) ? rankingQuery.data : undefined
-  return { query, rankingQuery, data, rankings, choice }
+  return { query, rankingQuery, data, rankings, choice, weeklyHorizon }
 }
 
 /** Layout for `/league/*`: snapshot context, campaign choice, refresh and alerts. */
 export function LeagueWorkspace() {
-  const { token } = useDataRelease()
   const { pathname } = useLocation()
   const isMatchups = pathname.startsWith('/league/matchups')
+  const isPredictions = pathname.startsWith('/league/predictions')
   const { query, rankingQuery, data, rankings, choice } = useLeague()
-  const client = useQueryClient()
-  const refresh = useMutation({ mutationFn: () => refreshObservations(token), onSuccess: () => client.invalidateQueries({ queryKey: ['league-observations'] }) })
   const context = <>
-    <div className="section-heading"><div><h3>{data?.league_name ?? 'League'}</h3></div>
-      <button type="button" className="button" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isPending ? 'Refreshing…' : 'Refresh league'}</button></div>
+    <div className="section-heading"><h3>{data?.league_name ?? 'League'}</h3></div>
     {data && <p className="legend">{data.season}, Week {data.week} · Captured {new Date(data.captured_at).toLocaleString()}{data.stale ? ' · saved snapshot is stale' : ''}</p>}
-    <div className="analysis-controls"><CampaignSelect choice={choice} /></div>
+    <div className="analysis-controls"><CampaignSelect choice={choice} showHorizon={!isMatchups && !pathname.startsWith('/league/draft')} /></div>
     {data && <LeagueAttention data={data} />}
-    <QueryError query={query} /><QueryError query={refresh} />
+    <QueryError query={query} />
     <QueryError query={rankingQuery} label="Campaign forecasts unavailable">. League results remain available.</QueryError>
     {rankingQuery.isLoading && <p role="status">Loading campaign forecasts…</p>}
     {data && rankingQuery.data && !rankings && <p className="notice">The campaign's saved forecast is for another season; ranks are withheld.</p>}
-    {rankings && <p className="legend">{rankings.campaign_name} · {describeHorizon(rankings.horizon)} · saved {[...new Set(rankings.models.map(m => `${m.season} as of week ${m.origin_week}`))].join('; ')}. Forecasts do not update with news after their cutoff. Refresh league updates ESPN, not the campaign.</p>}
+    {rankings && <p className="legend">{rankings.campaign_name} · {rankingsPeriod(rankings)} · saved {[...new Set(rankings.models.map(m => `${m.season} as of week ${m.origin_week}`))].join('; ')}. Forecasts do not update with news after their cutoff. Refresh data updates ESPN, NFL observations and saved forecasts.</p>}
     {!data && !query.isError && <p role="status">Loading league observations…</p>}
   </>
+  if (isPredictions) return <section aria-label="League workspace">
+    <div className="prediction-controls">
+      <div className="overview-disclosures">
+        {data && <LeagueAttention data={data} compact />}
+        <OverviewDisclosure label={choice.campaign?.name ?? 'Opening Drive'} meta="Forecast model">
+          <CampaignSelect choice={choice} showHorizon={false} />
+          <p>Predictions and weekly ranks use the selected model, including K/DST estimates. Historical forecasts are reconstructed from saved model outputs and recorded lineups.</p>
+          {data && <p>Current ESPN snapshot: {new Date(data.captured_at).toLocaleString()}. Needs attention reflects the latest roster.</p>}
+        </OverviewDisclosure>
+      </div>
+    </div>
+    <QueryError query={query} />
+    {!data && !query.isError && <p role="status">Loading league…</p>}
+    <Outlet />
+  </section>
   return <section aria-label="League workspace">
     {(isMatchups || pathname.startsWith('/league/teams')) && data ? <>
       <Outlet />
@@ -171,10 +200,10 @@ function TeamNavigationFooter({ data }: { data: LeagueObservations }) {
   }} /><a className="button" href="#page-content">Back to top ↑</a></StickyFooter>
 }
 
-/** `/league/overview` */
-export function LeagueOverviewPage() {
-  const { data, rankings, choice } = useLeague()
-  return data ? <LeagueOverview data={data} rankings={rankings} campaignId={choice.campaignId} horizon={choice.horizon} /> : null
+/** `/league/predictions` */
+export function LeaguePredictionsPage() {
+  const { data, choice } = useLeague()
+  return data ? <LeaguePredictions data={data} campaignId={choice.campaignId} /> : null
 }
 
 /** Weekly schedule and dedicated game pages share the same cached observations. */
@@ -199,7 +228,7 @@ function usePlayerFilters() {
 
 /** Teams are routes, while roster filters remain optional URL search parameters. */
 export function LeagueTeams() {
-  const { data, rankings, choice } = useLeague()
+  const { data, rankings, choice, weeklyHorizon } = useLeague()
   const { rows, controls } = usePlayerFilters()
   const { teamId, teamSlug } = useParams()
   const location = useLocation()
@@ -235,7 +264,7 @@ export function LeagueTeams() {
     </div>
     {!team && (teamId ? <p className="notice" role="alert">Team not found. Choose a team above.</p> : <p className="legend">Choose a team to view its starting lineup, scoring balance, usable depth and results.</p>)}
     {team && <>
-    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id} campaignId={choice.campaignId} horizon={choice.horizon}>
+    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id} campaignId={choice.campaignId} horizon={weeklyHorizon}>
       <div className="analysis-controls">{controls}</div>
       <Roster rankings={rankings} rows={roster} sortParam="sort" />
     </TeamStrength></Suspense>
@@ -272,14 +301,14 @@ export function LeagueTransactions() {
 export function LeagueDraft() {
   const { data, rankings } = useLeague()
   if (!data) return null
-  const label = rankings?.campaign_name ?? 'Campaign'
+  const label = 'Full season'
   const draftRows = data.draft.map(p => { const playerId = p.player_id ?? data.players.find(r => r.espn_id === p.espn_id)?.player_id; const f = forecastFor(playerId, rankings); return {...p, player_id: playerId, model_overall: f?.overall_rank, model_position: f ? `${f.position}${f.position_rank ?? '—'}` : '—', model_points: f?.prediction} })
-  return <><h3>Draft recap</h3><p className="legend">Original draft order alongside the chosen campaign's current forecast ranks. These are saved forecasts, not the rankings available on draft day or retrospective draft grades. Uncovered players, kickers and defenses remain unranked.</p><DataTable rows={draftRows} columns={[
+  return <><h3>Draft recap</h3><p className="legend">{data.season} draft order alongside full-season forecasts using the preseason cutoff (week 0). Ranks compare projected total points across positions, without positional scarcity adjustments. Forecasts were reconstructed later from preseason inputs, not published before the draft. Players without a preseason forecast, kickers and defenses remain unranked.</p><DataTable rows={draftRows} columns={[
     {key:'overall',label:'Pick',title:'Actual overall selection.',initial:'asc'}, {key:'round',label:'Round',title:'Draft round.'},
     {key:'player_display_name',label:'Player',title:'Drafted player.',align:'left'}, {key:'team_name',label:'Team',title:'Drafting team.',align:'left'},
-    {key:'model_overall',label:`${label} · overall`,title:'Overall rank in the chosen campaign and horizon.',initial:'asc',render:r=>rank(r.model_overall)},
+    {key:'model_overall',label:`${label} · overall`,title:'Overall rank by projected full-season points.',initial:'asc',render:r=>rank(r.model_overall)},
     {key:'model_position',label:`${label} · position`,title:'Position rank in the chosen campaign.',align:'left'},
-    {key:'model_points',label:'Horizon points',title:'Saved campaign forecast, not the original draft-day projection.',render:r=>fixed(r.model_points)},
+    {key:'model_points',label:'Full-season points',title:'Saved preseason forecast of full-season points.',render:r=>fixed(r.model_points)},
     {key:'bid_amount',label:'Auction bid',title:'Recorded bid, when applicable.'}, {key:'keeper',label:'Keeper',title:'ESPN keeper designation.',render:r => r.keeper ? 'Yes' : '—'},
   ]} defaultSort="overall" sortParam="sort" rowKey={r => r.overall} rowClass={r => data.my_team_id != null && r.team_id === data.my_team_id ? 'mine-row' : undefined} profileHref={r => r.player_id ? playerPath(r.player_id) : undefined} rowLabel={r => r.player_display_name} emptyMessage="No draft captured." /></>
 }
