@@ -10,7 +10,8 @@
   "retraining": "isolated_in_season_residual_update_candidate",
   "promotion": "Manual review after historical and prospective release gates; never automatic",
   "tracker": {
-    "enabled": true,
+    "enabled": false,
+    "reason": "V4 shadow tracking retired 2026-10-30; v4.1 supersedes it (its sealed run also pins weekly_v32/capture.py, changed to stop injury-capture churn)",
     "parent": "opening_drive_v32",
     "result_key": "v4",
     "requires": [
