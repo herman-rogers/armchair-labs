@@ -58,6 +58,7 @@ export const teamPath = (team: { team_id: number; team_name: string }) => {
 export const matchupPath = (week: number, homeId: number, awayId: number) => `/league/matchups/${week}/${homeId}/${awayId}`
 export const leagueWeekPath = (week: number) => `/league/predictions?week=${week}`
 export const researchPath = (view: 'models') => `/research/${view}`
+export const trackingPath = (view: 'games') => `/tracking/${view}`
 
 export type NavigateOptions = { replace?: boolean }
 

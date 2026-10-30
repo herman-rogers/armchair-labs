@@ -9,6 +9,8 @@ import { PROFILE_SECTIONS, collegePath, playerPath, useUrlState, type ProfileSec
 import { PlayerLink } from './PlayerLink'
 import { DataTable, type Column } from './DataTable'
 import { PlayerPassing } from './QBPassing'
+import { CampaignSelect } from './CampaignSelect'
+import { useCampaignChoice } from '../api/queries/hooks'
 import { useDataRelease } from '../dataRelease'
 import { QueryError } from './Controls'
 import { fixed, grouped } from '../format'
@@ -65,9 +67,8 @@ const weekColumns: Column<WeekRow>[] = [
   { key: 'league_points', label: 'League pts', title: 'League-scored fantasy points for the game.', render: r => fixed(r.league_points) },
 ]
 const forecastColumns: Column<PlayerForecast>[] = [
-  { key: 'campaign_name', label: 'Campaign', title: 'Campaign bundle that produced the forecast.', align: 'left', initial: 'asc' },
   { key: 'model_id', label: 'Model', title: 'Model inside the campaign.', align: 'left' },
-  { key: 'horizon', label: 'Forecast period', title: 'Forecast period; weekly rows name the projected week.', align: 'left', render: forecastPeriod },
+  { key: 'horizon', label: 'Forecast period', title: 'Forecast period; weekly rows name the projected week.', align: 'left', initial: 'asc', render: forecastPeriod },
   { key: 'vintage', label: 'As of', title: 'Season and observation cutoff week of the saved forecast.', align: 'left', value: r => r.season * 100 + r.origin_week, render: r => `${r.season} · week ${r.origin_week}` },
   { key: 'overall_rank', label: 'Overall rank', title: 'Rank across every position for the period in this row.', initial: 'asc', render: forecastRank },
   { key: 'position_rank', label: 'Position rank', title: 'Rank within the position for the period in this row.', initial: 'asc', render: forecastPositionRank },
@@ -102,7 +103,9 @@ export function PlayerProfile({ playerId, collegeId, section }: { playerId?: str
   const location = useLocation()
   const [season, setSeason] = useUrlState('season', '')
   const player = useQuery({ ...playerQuery(playerId ?? '', season, token), enabled: !!playerId })
-  const forecasts = useQuery({ ...playerForecastsQuery(playerId ?? ''), enabled: !!playerId })
+  const choice = useCampaignChoice(undefined, false)
+  const forecastCampaigns = choice.campaignId && choice.campaignId !== choice.defaultId ? [choice.campaignId] : []
+  const forecasts = useQuery({ ...playerForecastsQuery(playerId ?? '', forecastCampaigns), enabled: !!playerId && !!choice.campaigns.data })
   const league = useQuery({ ...leagueQuery(token), enabled: !!playerId })
   const currentPlayer = league.data?.players.find(p => p.player_id === playerId)
   useScrollToSection(section, player.isSuccess || !!collegeId)
@@ -129,7 +132,7 @@ export function PlayerProfile({ playerId, collegeId, section }: { playerId?: str
       <p>{p.draft_year ? `Drafted ${p.draft_year}${p.draft_round ? ` · round ${p.draft_round}` : ''}${p.draft_pick ? ` · pick ${p.draft_pick}` : ''}${p.draft_team ? ` · ${p.draft_team}` : ''}` : p.rookie_season ? `NFL entry ${p.rookie_season}` : 'Draft history unknown'}{p.birth_date ? ` · born ${p.birth_date}` : ''}</p></div>
       <label>Game log season<select aria-label="Game log season" value={season} onChange={e => setSeason(e.target.value)}><option value="">All seasons</option>{seasons.map(y => <option key={y} value={y}>{y}</option>)}</select></label>
     </div>
-    <p className="legend">NFL observations through {data.observation_cutoff.season ?? '—'}, Week {data.observation_cutoff.through_week ?? '—'}. Forecasts come from every published campaign; none is selected over another.</p>
+    <p className="legend">NFL observations through {data.observation_cutoff.season ?? '—'}, Week {data.observation_cutoff.through_week ?? '—'}. Forecasts come from the selected model; switch models in the Forecasts section.</p>
     <nav className="profile-section-links" aria-label="Player profile sections">{PROFILE_SECTIONS.map(([id, label]) =>
       <NavLink key={id} to={sectionLink(id)} preventScrollReset>{label}</NavLink>)}</nav>
     <section id="profile-overview" className="profile-section" aria-labelledby="profile-overview-heading"><h3 id="profile-overview-heading">Overview</h3>
@@ -143,11 +146,12 @@ export function PlayerProfile({ playerId, collegeId, section }: { playerId?: str
       </dl>
     </section>
     <section id="profile-forecasts" className="profile-section" aria-labelledby="profile-forecasts-heading"><h3 id="profile-forecasts-heading">Forecasts</h3>
+      <div className="analysis-controls"><CampaignSelect choice={choice} showHorizon={false} /></div>
       <QueryError query={forecasts} label="Campaign forecasts unavailable" />
-      {forecasts.data && <DataTable rows={forecasts.data.forecasts} columns={forecastColumns} defaultSort="campaign_name" rowKey={r => `${r.campaign_id}-${r.model_id}`} emptyMessage="No campaign has a saved forecast for this player."
+      {forecasts.data && <DataTable rows={forecasts.data.forecasts} columns={forecastColumns} defaultSort="horizon" rowKey={r => `${r.campaign_id}-${r.model_id}`} emptyMessage="This model has no saved forecast for this player."
         renderDetails={r => <div className="player-details"><dl className="profile-facts">{Object.entries(r.predictions).map(([target, value]) => <div key={target}><dt>{target.replaceAll('_', ' ')}</dt><dd>{fixed(value)}</dd></div>)}</dl>
           <p className="legend">{r.candidate_basis ?? 'Candidate'} · status {r.availability_status ?? 'unknown'}{r.availability_as_of ? ` as of ${new Date(r.availability_as_of).toLocaleDateString()}` : ''}.</p></div>} />}
-      {playerId && <PlayerPassing playerId={playerId} />}
+      {playerId && <PlayerPassing playerId={playerId} campaigns={forecastCampaigns} />}
     </section>
     <section id="profile-history" className="profile-section" aria-labelledby="profile-history-heading"><h3 id="profile-history-heading">Season history</h3>
       <DataTable rows={data.seasons} columns={seasonColumns} defaultSort="season" rowKey={r => r.season} emptyMessage="No completed NFL seasons observed." />

@@ -5,7 +5,7 @@ import { describeHorizon, type Ranking } from '../api/chairstats'
 import { useDataRelease } from '../dataRelease'
 import { playerPath, useUrlPage, useUrlState } from '../navigation'
 import { DataTable, type Column } from './DataTable'
-import { CampaignSelect, VintageNote } from './CampaignSelect'
+import { CampaignNotice, CampaignSelect, VintageNote } from './CampaignSelect'
 import { PlayerStatus } from './LeagueAttention'
 import { Pager, PositionOptions, QueryError } from './Controls'
 import { toCsv, useDownload } from '../download'
@@ -30,13 +30,17 @@ export function ChairStatsRankings() {
     .filter(r => ownership === 'all' || (ownership === 'free' ? owners.get(r.player_id)?.availability === 'free_agent' : owners.get(r.player_id)?.is_mine))
   const targets = [...new Set(rows.flatMap(r => Object.keys(r.predictions)))].filter(t => t !== 'points')
   const period = query.data ? rankingsPeriod(query.data) : describeHorizon(horizon)
+  const projected = rows.some(r => r.projection)
+  const hasRanges = horizon === 'weekly' || rows.some(r => r.prediction_interval_80)
+  // Fading curves declare a half-life; learned curves are fitted to historical outcomes.
+  const learnedProjection = rows.some(r => r.projection && r.projection.half_life == null)
   const columns: Column<Ranking>[] = [
     { key: 'overall_rank', label: `${period} · overall`, title: 'Predicted points across every position for this forecast period; not scarcity-adjusted value. BYE means no scheduled game.', initial: 'asc', render: forecastRank },
     { key: 'player_display_name', label: 'Player', title: 'Open the player profile.', align: 'left' },
     { key: 'position_rank', label: `${period} · position`, title: 'Rank within the position for this forecast period.', initial: 'asc', render: forecastPositionRank },
     { key: 'team', label: 'Team', title: 'Team at the forecast cutoff.', align: 'left', render: r => r.team ?? '—' },
     { key: 'prediction', label: `${period} points`, title: 'Predicted fantasy points over the horizon under the campaign’s scoring contract.', render: r => fixed(r.prediction) },
-    ...(horizon === 'weekly' ? [{ key: 'prediction_interval_80', label: '80% range', title: 'The predicted 10th–90th percentile outcome range, not a confidence interval on mean ability.', render: (r: Ranking) => r.prediction_interval_80 ? `${fixed(r.prediction_interval_80[0])}–${fixed(r.prediction_interval_80[1])}` : '—' }, { key: 'prediction_std', label: 'Std dev', title: 'Predicted weekly outcome variability, in points.', render: (r: Ranking) => fixed(r.prediction_std) }] : []),
+    ...(hasRanges ? [{ key: 'prediction_interval_80', label: '80% range', title: 'The predicted 10th–90th percentile outcome range, not a confidence interval on mean ability.', render: (r: Ranking) => r.prediction_interval_80 ? `${fixed(r.prediction_interval_80[0])}–${fixed(r.prediction_interval_80[1])}` : '—' }, { key: 'prediction_std', label: 'Std dev', title: 'Predicted outcome variability over the selected horizon, in points.', render: (r: Ranking) => fixed(r.prediction_std) }] : []),
     { key: 'points_per_game', label: 'Per game', title: horizon === 'weekly' ? 'Expected points for the saved forecast week.' : 'Horizon points divided by scheduled games; not a weekly matchup forecast.', render: r => fixed(r.points_per_game) },
     { key: 'scheduled_games', label: 'Games', title: 'Scheduled games in the horizon at the cutoff.' },
     { key: 'ecr_overall', label: 'ECR · overall', title: 'Latest FantasyPros redraft consensus rank from the observation tables; lower is better.', initial: 'asc', render: r => r.ecr_overall == null ? '—' : <span className="consensus-rank">{r.ecr_overall.toFixed(1)}<small>{r.ecr_overall_date ?? ''}</small></span> },
@@ -59,14 +63,18 @@ export function ChairStatsRankings() {
     <QueryError query={query} label="Rankings unavailable" />
     {query.isLoading && <p role="status">Loading rankings…</p>}
     {query.data && <>
+      <CampaignNotice choice={choice} />
       <VintageNote models={query.data.models} />
       {horizon === 'weekly' && <p className="legend">BYE means no scheduled game for the forecast week. ECR columns are redraft consensus ranks, not weekly ranks.</p>}
-      {horizon === 'weekly' && <p className="legend">Ranges are provisional. Historical coverage of the nominal 80% range varied by position and workload; QB coverage was about 74%, and high-projection TE coverage about 65%.</p>}
+      {hasRanges && <p className="legend">Ranges are provisional. Historical coverage varies by model, position and workload; it does not guarantee future coverage.</p>}
+      {projected && <p className="legend">{horizon === 'season' ? 'Projected full-season points = points earned so far + remaining projected points.' : 'Remaining points = the sum of future weekly estimates, including the saved current-week forecast.'} Per game divides that total by scheduled games. {learnedProjection ? 'Later weeks use forecasts fitted to historical outcomes with information available at this cutoff.' : 'Later-week estimates fade toward a longer-term baseline.'} Current-week injury reports apply to this week.</p>}
       {query.data.market_issue && <p className="legend faint">{query.data.market_issue}</p>}
       {exporter.error && <p role="alert">{exporter.error}</p>}
       <DataTable rows={rows.slice(page.offset, page.offset + page.limit)} columns={columns} defaultSort="overall_rank" sortParam="sort" pagination={page} serverSide rowKey={r => `${r.model_id}-${r.player_id}`} rowLabel={r => r.player_display_name ?? r.player_id} profileHref={r => playerPath(r.player_id)} emptyMessage="No forecasts match these filters."
         renderDetails={r => <div className="player-details"><h4>{r.player_display_name} · {query.data?.campaign_name} {r.model_id}</h4>
           <dl className="profile-facts">{Object.entries(r.predictions).map(([target, value]) => <div key={target}><dt>{target.replaceAll('_', ' ')}</dt><dd>{fixed(value)}</dd></div>)}</dl>
+          {r.projection && <><p className="legend">Earned: {fixed(r.projection.actual_points_to_date)} · Remaining: {fixed(r.projection.remaining_points)} · Projected season: {fixed(r.projection.actual_points_to_date + r.projection.remaining_points)}</p>
+            <table aria-label="Future weekly point estimates"><thead><tr><th>Week</th><th>Points</th><th>Estimate</th></tr></thead><tbody>{r.projection.future_weeks.map(w => <tr key={w.week}><td>{w.week}</td><td>{fixed(w.points)}</td><td>{['saved_weekly_forecast', 'saved_v32_weekly', 'v41_weekly'].includes(w.basis) ? 'Current weekly model' : 'Longer-term estimate'}</td></tr>)}</tbody></table></>}
           <p className="legend">{r.candidate_basis ?? 'Candidate'} · status {r.availability_status ?? 'unknown'}{r.availability_as_of ? ` as of ${new Date(r.availability_as_of).toLocaleDateString()}` : ''} · {r.calendar_weeks ?? '—'} calendar weeks.</p>
         </div>} />
       <Pager page={page} total={rows.length} noun="players"><button type="button" className="button" onClick={() => void exportRows()}>Export CSV</button></Pager>

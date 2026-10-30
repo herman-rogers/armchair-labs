@@ -119,11 +119,78 @@ def test_espn_network_outage_does_not_trigger_browser_login(tmp_path, monkeypatc
     login = Mock(side_effect=AssertionError("Network failure is not an expired login"))
     monkeypatch.setattr(cli_auth, "login", login)
     snapshot = SimpleNamespace(season=2026, week=5)
+    fetch = Mock(side_effect=AssertionError("An outage must not repeat the network timeout"))
     monkeypatch.setattr(
         service,
         "LeagueService",
-        lambda **kwargs: SimpleNamespace(observations=lambda: (snapshot, True, 100)),
+        lambda **kwargs: SimpleNamespace(observations=fetch, cached=lambda: snapshot),
     )
-    monkeypatch.setattr(league, "query_snapshot", lambda *args: snapshot)
+    queried = Mock(return_value=snapshot)
+    monkeypatch.setattr(league, "query_snapshot", queried)
     startup.prepare_auth()
     login.assert_not_called()
+    fetch.assert_not_called()
+    queried.assert_called_once()
+
+
+def _outage(tmp_path, monkeypatch):
+    from engine import cli_auth
+    from engine.espn import credentials, discovery
+
+    monkeypatch.setattr(
+        startup,
+        "get_settings",
+        lambda: SimpleNamespace(env_path=tmp_path / ".env", data_dir=tmp_path),
+    )
+    monkeypatch.setattr(credentials, "read", lambda path: SimpleNamespace(league_id=1))
+    monkeypatch.setattr(
+        discovery, "verify", Mock(side_effect=discovery.DiscoveryError("DNS failed"))
+    )
+    login = Mock(side_effect=AssertionError("Network failure is not an expired login"))
+    monkeypatch.setattr(cli_auth, "login", login)
+    return login
+
+
+def test_espn_outage_without_a_snapshot_is_not_fatal(tmp_path, monkeypatch, capsys):
+    """Models and tables are local; a missing league snapshot must not stop the server."""
+    from engine.espn import service
+    from engine.tables import league
+
+    login = _outage(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        service,
+        "LeagueService",
+        lambda **kwargs: SimpleNamespace(observations=Mock(), cached=lambda: None),
+    )
+    queried = Mock()
+    monkeypatch.setattr(league, "query_snapshot", queried)
+    startup.prepare_auth()
+    login.assert_not_called()
+    queried.assert_not_called()
+    assert "No saved league snapshot" in capsys.readouterr().out
+
+
+def test_a_failed_fetch_after_verification_falls_back_to_the_snapshot(tmp_path, monkeypatch):
+    """ESPN can verify and then fail mid-fetch; the saved snapshot still loads."""
+    from engine.espn import credentials, discovery, service
+    from engine.tables import league
+
+    monkeypatch.setattr(
+        startup,
+        "get_settings",
+        lambda: SimpleNamespace(env_path=tmp_path / ".env", data_dir=tmp_path),
+    )
+    monkeypatch.setattr(credentials, "read", lambda path: SimpleNamespace(league_id=1))
+    monkeypatch.setattr(discovery, "verify", Mock(return_value=(True, "Connected")))
+    snapshot = SimpleNamespace(season=2026, week=5)
+    monkeypatch.setattr(
+        service,
+        "LeagueService",
+        lambda **kwargs: SimpleNamespace(
+            observations=Mock(side_effect=ConnectionError("reset")), cached=lambda: snapshot
+        ),
+    )
+    queried = Mock(return_value=snapshot)
+    monkeypatch.setattr(league, "query_snapshot", queried)
+    startup.prepare_auth()
+    queried.assert_called_once_with(snapshot, tmp_path)

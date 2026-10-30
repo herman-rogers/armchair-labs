@@ -27,6 +27,19 @@ def test_readiness_fails_for_data_errors_even_if_server_is_running(monkeypatch):
         dev.wait_ready([error.url], [process], Event())
 
 
+def test_optional_readiness_errors_are_reported_not_fatal(monkeypatch):
+    """League routes failing (ESPN outage, no sign-in) must not stop the servers."""
+    error = urllib.error.HTTPError(
+        "http://localhost/api/league/matchups", 503, "Unavailable", {}, io.BytesIO(b"ESPN down")
+    )
+    monkeypatch.setattr(dev.urllib.request, "urlopen", Mock(side_effect=error))
+    process = Mock()
+    process.poll.return_value = None
+    output = io.StringIO()
+    dev.wait_ready([], [process], Event(), optional=[error.url], output=output)
+    assert "ESPN down" in output.getvalue()
+
+
 def test_readiness_rejects_a_server_that_exited():
     process = Mock()
     process.poll.return_value = 1

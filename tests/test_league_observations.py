@@ -68,7 +68,9 @@ def test_observation_api_exposes_actuals_without_provider_predictions():
     assert game["home"]["lineup"][1]["points"] == 25.0
 
 
-def test_routes_use_observations_only_and_refresh_is_explicit():
+def test_routes_use_observations_only_and_refresh_is_explicit(monkeypatch):
+    # The route also refreshes NFL data and forecasts; never run that from a test.
+    monkeypatch.setattr("engine.data.refresh.refresh_local", lambda: None)
     calls = []
 
     def observations(**kwargs):

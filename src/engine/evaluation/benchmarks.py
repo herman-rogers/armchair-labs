@@ -192,21 +192,15 @@ def load_calendar(path: Path | None) -> dict:
 
 
 def campaign_rows(store: CampaignStore, campaign: dict, model: dict, calendar: dict):
-    """Known legacy adapters, or an explicit sealed benchmark_evaluation contract.
+    """Score a model's saved evaluation predictions under its declared recipe.
 
-    The adapter fixes the already selected recipe, never chooses the best result.
-    Unrecognized bundles are reported as unsupported instead of guessed.
+    A ``benchmark_evaluation`` contract names the artifact and recipe; without one the
+    ``evaluation_predictions`` artifact and ``primary_policy`` are used. The adapter
+    fixes the already selected recipe, never chooses the best result. Bundles whose
+    saved schema does not fit are reported as unsupported instead of guessed.
     """
     root = store.root / campaign["campaign_id"]
     contract = model.get("benchmark_evaluation")
-    legacy = campaign["campaign_id"] in {
-        "opening_drive_v1",
-        "opening_drive_v2",
-        "opening_drive_v2_te",
-        "scout_team_v1",
-    }
-    if contract is None and not legacy:
-        return [], "No benchmark_evaluation adapter declared", []
     artifact_key = (contract or {}).get("artifact", "evaluation_predictions")
     ref = model.get("artifacts", {}).get(artifact_key)
     if ref is None:
@@ -244,7 +238,7 @@ def campaign_rows(store: CampaignStore, campaign: dict, model: dict, calendar: d
         seen.add(evaluation_key)
         cutoff = cutoffs.get((row["year"], row["origin"]))
         scoring = (contract or {}).get("scoring")
-        if scoring is None and legacy:
+        if scoring is None:
             scoring = QB_SCORING if model["position"] == "QB" else SKILL_SCORING
         rows.append(
             {

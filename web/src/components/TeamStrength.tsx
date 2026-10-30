@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { LeagueObservations } from '../api/league'
 import type { RankingsResponse } from '../api/chairstats'
-import { teamStrengthQuery } from '../api/queries'
+import { powerRankingsQuery, teamStrengthQuery } from '../api/queries'
 import { useDataRelease } from '../dataRelease'
 import { fixed, rank } from '../format'
 import { leagueSummary } from '../leagueSummary'
@@ -11,6 +11,8 @@ import { DataTable } from './DataTable'
 import { QueryError } from './Controls'
 import { PlayerLink } from './PlayerLink'
 import { StatCard as Stat, StatCards, StatList } from './StatCards'
+import { PowerMethod } from './TeamStrengthBoard'
+import { weekRange } from '../espnStandings'
 import { AnalysisPanel } from './AnalysisPanel'
 import { CompositionChart, ContributionChart, PositionChart, ReplacementChart, ResultsChart } from './TeamStrengthCharts'
 import { Link } from 'react-router'
@@ -27,6 +29,9 @@ export function TeamStrength({ data, rankings, teamId, campaignId, horizon, chil
   const { token } = useDataRelease()
   const query = useQuery(teamStrengthQuery(campaignId, horizon, token))
   const summary = teamStrengthSummary(data, query.data)
+  const powerQuery = useQuery(powerRankingsQuery(campaignId, token))
+  const power = powerQuery.data?.status === 'ok' && powerQuery.data.season === data.season && powerQuery.data.week === data.week ? powerQuery.data : undefined
+  const outlook = power?.teams.find(t => t.team_id === teamId)
   const matching = summary != null
   const team = summary?.find(t => t.team_id === teamId)
   const roster = leagueSummary(data, rankings).find(t => t.team_id === teamId)
@@ -42,14 +47,30 @@ export function TeamStrength({ data, rankings, teamId, campaignId, horizon, chil
     {query.data && !matching && <p className="notice">Team strength is waiting for a matching league snapshot. Refresh data to align the data.</p>}
     {team && results && current && <>
       <nav className="page-links strength-sections" aria-label="Team strength sections">
-        <a href="#strength-lineup">Starting lineup</a><a href="#strength-balance">Scoring balance</a><a href="#strength-depth">Usable depth</a><a href="#strength-positions">Positions</a><a href="#strength-results">Results</a><a href="#strength-correlation">Correlation risk</a><a href="#strength-roster">Players</a>
+        {outlook && <a href="#strength-outlook">Model outlook</a>}<a href="#strength-lineup">Starting lineup</a><a href="#strength-balance">Scoring balance</a><a href="#strength-depth">Usable depth</a><a href="#strength-positions">Positions</a><a href="#strength-results">Results</a><a href="#strength-correlation">Correlation risk</a><a href="#strength-roster">Players</a>
       </nav>
       <StatCards columns={4} compact label="Team summary">
-        <Stat label="Actual scoring" value={<>{fixed(results.ppg)} <small>pts / week</small></>}><p>{rank(results.ppg_rank)} · {results.record} · {signed(results.ppg_change)} vs last week</p></Stat>
-        <Stat label={`Week ${data.week} · ${query.data?.campaign_name ?? 'campaign'}`} value={<>{fixed(current.weekly_total)} <small>points</small></>}><p>Includes K/DST · {current.covered}/{current.required} offensive starters covered</p></Stat>
-        <Stat label="Against every team" value={pct(results.all_play)}><p>{rank(results.all_play_rank)} · opponents beaten; ties count half</p></Stat>
-        <Stat label={`${rankingsPeriod(rankings)} roster rank`} value={rank(roster?.team_rank)}><p>{fixed(roster?.forecast_points)} points · includes bench/IR</p></Stat>
+        <Stat source="espn" label="Actual scoring" value={<>{fixed(results.ppg)} <small>pts / week</small></>}><p>{rank(results.ppg_rank)} · {results.record} · {signed(results.ppg_change)} vs last week</p></Stat>
+        <Stat source="model" label={`Week ${data.week} · ${query.data?.campaign_name ?? 'campaign'}`} value={<>{fixed(current.weekly_total)} <small>points</small></>}><p>Includes K/DST · {current.covered}/{current.required} offensive starters covered</p></Stat>
+        <Stat source="espn" label="Against every team" value={pct(results.all_play)}><p>{rank(results.all_play_rank)} · opponents beaten; ties count half</p></Stat>
+        <Stat source="model" label={`${rankingsPeriod(rankings)} roster rank`} value={rank(roster?.team_rank)}><p>{fixed(roster?.forecast_points)} points · includes bench/IR</p></Stat>
       </StatCards>
+      {power && outlook && <AnalysisPanel compact id="strength-outlook" aria-label="Model rest-of-season outlook" heading="Rest-of-season outlook" meta={`Model · ${power.campaign_name} · ${weekRange(power.weeks)}`}>
+        <StatList items={[
+          {label:'Lineup strength',value:fixed(outlook.rating),note:`pts / wk · ${rank(outlook.rating_rank)} in the league · QB/RB/WR/TE only`},
+          {label:'Playoff odds',value:power.playoff_teams ? pct(outlook.playoff_odds) : '—',note:`${power.playoff_teams ? `Top ${power.playoff_teams} of ${power.teams.length} qualify · ` : ''}avg seed ${fixed(outlook.average_seed)} · ${pct(outlook.first_seed_odds)} for the 1 seed`},
+          {label:'Projected record',value:outlook.projected_wins != null ? `${fixed(outlook.projected_wins)}–${fixed(outlook.projected_losses)}` : '—',note:`Currently ${outlook.wins}–${outlook.losses}${outlook.ties ? `–${outlook.ties}` : ''} (ESPN)`},
+        ]} />
+        {(outlook.unmatched_players.length > 0 || outlook.unfilled_weeks > 0) && <p className="notice">{outlook.unmatched_players.length > 0 && `No model forecast for ${outlook.unmatched_players.join(', ')}; they are left out of lineups. `}{outlook.unfilled_weeks > 0 && `${outlook.unfilled_weeks} week(s) cannot fill every starting slot.`}</p>}
+        <DataTable rows={outlook.weekly.map(w => { const opp = power.teams.find(t => t.team_id === w.opponent_team_id); return { ...w, opponent_name: opp?.team_name, opponent_points: opp?.weekly.find(o => o.week === w.week)?.points ?? null } })} columns={[
+          {key:'week',label:'Week',title:'Remaining regular-season week',initial:'asc'},
+          {key:'opponent_name',label:'Opponent',title:'ESPN schedule',align:'left',render:r=>{ const opp=data.teams.find(t=>t.team_id===r.opponent_team_id); return opp ? <Link to={teamPath(opp)}>{opp.team_name}</Link> : '—' }},
+          {key:'points',label:'Lineup projection',title:'Best legal QB/RB/WR/TE lineup from the model, excluding K/DST',render:r=>fixed(r.points)},
+          {key:'opponent_points',label:'Opponent projection',title:"Opponent's best legal lineup from the model",render:r=>fixed(r.opponent_points)},
+          {key:'win_probability',label:'Win chance',title:'Normal approximation using the league\'s observed weekly spread',render:r=>pct(r.win_probability)},
+        ]} defaultSort="week" rowKey={r=>r.week} emptyMessage="No remaining regular-season games." />
+        <PowerMethod power={power} />
+      </AnalysisPanel>}
       {(current.adjustments.length > 0 || current.omitted.length > 0) && <p className="notice" aria-label="Assumed lineup adjustments">Estimates use roster backups for unavailable starters. {current.omitted.map(p => `${p.name} (${p.reason ?? 'unavailable'})`).join('; ')}{current.omitted.length > 0 && '. '}{current.adjustments.join(' · ')}. {current.covered < current.required && 'Some offensive slots still lack an eligible player with a forecast. '}These are assumed substitutions for analysis.</p>}
       {!query.data?.forecast_available && <p className="notice">Weekly forecasts unavailable. Actual results remain available.{query.data?.forecast_issue && ` ${query.data.forecast_issue}`}</p>}
       <AnalysisPanel compact aria-label="Team strengths and weaknesses"><div className="strength-insights">

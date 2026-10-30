@@ -18,10 +18,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
 
 from engine.api.chairstats_routes import router as chairstats_router
+from engine.api.freshness_routes import router as freshness_router
 from engine.api.league_routes import router as league_router
 from engine.api.scoring_routes import router as scoring_router
 from engine.api.tables_routes import router as tables_router
 from engine.api.team_analysis_routes import router as team_analysis_router
+from engine.api.tracking_routes import router as tracking_router
 from engine.config.league import get_league
 from engine.config.settings import get_settings
 from engine.data.verification import VerificationChanged, verification_batch
@@ -82,10 +84,12 @@ app = FastAPI(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(chairstats_router)
+app.include_router(freshness_router)
 app.include_router(tables_router)
 app.include_router(team_analysis_router)
 app.include_router(league_router)
 app.include_router(scoring_router)
+app.include_router(tracking_router)
 
 
 @app.middleware("http")

@@ -45,21 +45,20 @@ export function QBPassing() {
   </section>
 }
 
-/** Profile section: a quarterback's forecasts from every campaign model. */
-export function PlayerPassing({ playerId }: { playerId: string }) {
-  const query = useQuery(playerForecastsQuery(playerId))
+/** Profile section: a quarterback's forecasts from the selected campaign. */
+export function PlayerPassing({ playerId, campaigns }: { playerId: string; campaigns: string[] }) {
+  const query = useQuery(playerForecastsQuery(playerId, campaigns))
   const rows = (query.data?.forecasts ?? []).filter(f => f.position === 'QB')
   if (query.isError) return <p className="notice">QB forecasts unavailable: {query.error.message}</p>
   if (!rows.length) return null
   return <section><h4>Quarterback production</h4>
     <DataTable rows={rows} columns={[
-      { key: 'campaign_name', label: 'Campaign', title: 'Campaign bundle.', align: 'left' },
       { key: 'horizon', label: 'Horizon', title: 'Forecast horizon.', align: 'left', render: r => describeHorizon(r.horizon) },
       { key: 'attempts', label: 'Attempts', title: 'Predicted pass attempts.', value: r => r.predictions.attempts, render: r => fixed(r.predictions.attempts, 0) },
       { key: 'passing_yards', label: 'Pass yards', title: 'Predicted passing yards.', value: r => r.predictions.passing_yards, render: r => grouped(r.predictions.passing_yards) },
       { key: 'passing_tds', label: 'Pass TD', title: 'Predicted passing touchdowns.', value: r => r.predictions.passing_tds, render: r => fixed(r.predictions.passing_tds) },
       { key: 'rushing_yards', label: 'Rush yards', title: 'Predicted rushing yards.', value: r => r.predictions.rushing_yards, render: r => grouped(r.predictions.rushing_yards) },
-    ]} defaultSort="campaign_name" rowKey={r => `${r.campaign_id}-${r.model_id}`} />
+    ]} defaultSort="horizon" rowKey={r => `${r.campaign_id}-${r.model_id}`} />
     <Link to={intelligencePath('qb-passing')}>Compare quarterbacks</Link>
   </section>
 }

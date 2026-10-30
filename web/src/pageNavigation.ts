@@ -11,13 +11,16 @@ export const PAGE_GROUPS = [
   ] },
   { label: 'League', pages: [
     { path: '/league/predictions', relatedPaths: ['/league/matchups'], title: 'Predictions', description: 'How the model’s weekly forecasts and picks have fared, game by game.' },
-    { path: '/league/teams', title: 'Team Strength', description: 'Explore each team’s starters, scoring balance, usable depth and results.' },
+    { path: '/league/teams', title: 'Team Strength', description: 'Model power rankings and playoff odds beside ESPN results; open a team for its outlook, starters, depth and results.' },
     { path: '/league/free-agents', title: 'Free Agents', description: 'Find available players and compare their remaining-season forecasts.' },
     { path: '/league/transactions', title: 'Transactions', description: 'Follow captured roster moves and acquisition bids.' },
     { path: '/league/draft', title: 'Draft Recap', description: 'Review draft selections alongside preseason full-season forecasts.' },
   ] },
   { label: 'Models', pages: [
     { path: '/research/models', title: 'Campaigns', description: 'Every published campaign bundle, its models and saved metrics.' },
+  ] },
+  { label: 'Tracking', pages: [
+    { path: '/tracking/games', title: 'Game Engine', description: 'Replay tracked games play by play and read every player’s movement numbers as they unfold.' },
   ] },
 ] as const
 

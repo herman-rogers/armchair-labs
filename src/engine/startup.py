@@ -69,9 +69,7 @@ def prepare_data(data: Path) -> None:
         f"observations through {season} week {week}."
     )
     from engine.chairstats import CampaignStore
-    from engine.chairstats.consolidate import consolidate_opening_drive
 
-    consolidate_opening_drive(data / "campaigns", data / "campaign_revisions")
     campaigns = CampaignStore(data / "campaigns").campaigns()
     if campaigns:
         say("Campaigns: " + ", ".join(c["campaign_id"] for c in campaigns))
@@ -112,6 +110,12 @@ def prepare_frontend(root: Path) -> None:
 
 
 def prepare_auth() -> None:
+    """Verify ESPN and load league observations; never a precondition for serving.
+
+    Campaign models and query tables live locally. When ESPN is unreachable the last
+    captured league snapshot is used, and when there is none the league pages simply
+    stay empty until a later refresh succeeds.
+    """
     from engine.cli_auth import login
     from engine.config.league import get_league
     from engine.espn import credentials, discovery
@@ -122,6 +126,7 @@ def prepare_auth() -> None:
     config = get_league()
     stored = credentials.read(settings.env_path)
     ok = False
+    reachable = True
     if stored and stored.league_id:
         say("Checking ESPN session…")
         try:
@@ -129,18 +134,34 @@ def prepare_auth() -> None:
                 stored, stored.league_id, config.draft_season, raise_unavailable=True
             )
             say(message)
-        except discovery.DiscoveryError:
-            # Network failures do not mean the cookies expired. The service may
-            # still be able to restore a captured snapshot or retry the request.
-            say("ESPN verification unavailable; keeping saved credentials and checking cache.")
+        except discovery.DiscoveryError as error:
+            # Network failures do not mean the cookies expired. Keep the credentials
+            # and skip the fetch: it would only repeat the same timeout.
+            say(f"ESPN unavailable; keeping credentials and using the saved snapshot: {error}")
             ok = True
+            reachable = False
     if not ok:
         say("Sign in to ESPN in the browser to enable league data.")
         login(timeout=600, fresh=False, verbose=False)
         get_settings.cache_clear()
         settings = get_settings()
-    say("Loading league observations…")
-    snapshot, stale, _ = LeagueService(settings=settings).observations()
+    service = LeagueService(settings=settings)
+    snapshot = None
+    stale = True
+    if reachable:
+        say("Loading league observations…")
+        try:
+            snapshot, stale, _ = service.observations()
+        except Exception as error:  # noqa: BLE001 - unofficial API, many failure modes
+            say(f"ESPN unavailable; using the saved snapshot: {error}")
+    if snapshot is None:
+        snapshot = service.cached()
+    if snapshot is None:
+        say(
+            "No saved league snapshot; league pages stay empty until ESPN is reachable. "
+            "Analysis and campaign views work without it."
+        )
+        return
     query_snapshot(snapshot, settings.data_dir)
     say(
         f"League ready: {snapshot.season}, week {snapshot.week}"

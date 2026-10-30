@@ -229,7 +229,7 @@ def test_campaign_artifact_corruption_fails(campaign, tmp_path):
         run(tmp_path, campaign, source())
 
 
-def test_unknown_campaign_does_not_infer_recipe(campaign, tmp_path):
+def test_campaign_without_contract_uses_its_declared_policy_only(campaign, tmp_path):
     manifest = campaign / "test_campaign/manifest.json"
     d = json.loads(manifest.read_text())
     del d["models"][0]["benchmark_evaluation"]
@@ -237,7 +237,8 @@ def test_unknown_campaign_does_not_infer_recipe(campaign, tmp_path):
     manifest.with_suffix(".sha256").write_text(digest(manifest.read_bytes()))
     result = run(tmp_path, campaign, source())
     assert result["status"] == "no_comparable_rows"
-    assert result["models"][0]["reason"] == "No benchmark_evaluation adapter declared"
+    # Falls back to the model's primary policy; it never searches for a better recipe.
+    assert result["models"][0]["reason"] == "Saved recipe ensemble is absent"
 
 
 def test_espn_projection_only_exact_ids_complete_scoring():

@@ -9,9 +9,11 @@ campaign scorers are asked to add rolling-origin forecasts for the new week.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import subprocess
 import sys
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -100,29 +102,53 @@ def run(args):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("An observation refresh is already running") from exc
-        previous = latest_snapshot(data)
-        source = load_tables(data)
-        published = source.manifest["current_observations"]
-        season = getattr(args, "season", None) or default_season()
-        college = getattr(args, "college_source", None) or (previous or {}).get("college_source")
-        if not college:
-            raise ValueError("A college source capture is required for the first build")
         version = identifier(args.version or datetime.now(UTC).strftime("weekly_%Y%m%d_%H%M%S"))
-        state = dict(version=version, status="checking", started_at=datetime.now(UTC).isoformat())
-        atomic_json(status_path, state)
+        # Write the running receipt before preflight so broken catalogs and missing
+        # inputs cannot leave an earlier success looking like the latest attempt.
+        previous_state = {}
+        if status_path.exists():
+            with suppress(OSError, ValueError):
+                previous_state = json.loads(status_path.read_text())
+        if not isinstance(previous_state, dict):
+            previous_state = {}
+        state = dict(
+            version=version,
+            status="checking",
+            stage="preflight",
+            started_at=datetime.now(UTC).isoformat(),
+            last_success_at=previous_state.get("last_success_at"),
+        )
         log_path = runtime / f"{version}.log"
         state["log"] = str(log_path)
+        atomic_json(status_path, state)
         try:
+            previous = latest_snapshot(data)
+            source = load_tables(data)
+            published = source.manifest["current_observations"]
+            season = getattr(args, "season", None) or default_season()
+            state["season"] = season
+            college = getattr(args, "college_source", None) or (previous or {}).get(
+                "college_source"
+            )
+            if not college:
+                raise ValueError("A college source capture is required for the first build")
             batch = data / "tables/batches" / version / "manifest.json"
             if batch.exists():
                 cutoff = load_tables(data, version).manifest["current_observations"]["through_week"]
             else:
                 cutoff = completed_week(season)
+                state.update(
+                    provider_checked_at=datetime.now(UTC).isoformat(), provider_through_week=cutoff
+                )
+                atomic_json(status_path, state)
                 if not needs_refresh(published, season, cutoff, force=args.force):
                     state["tables"] = finish_tables(data, args)
                     state.update(status="current", season=season, through_week=cutoff)
+                    state.update(stage="forecasts")
+                    atomic_json(status_path, state)
                     finish_forecasts(state, args, log_path)
                     state.update(completed_at=datetime.now(UTC).isoformat())
+                    state["last_success_at"] = state["completed_at"]
                     atomic_json(status_path, state)
                     return state
                 state.update(status="running", stage="capture", season=season, through_week=cutoff)
@@ -141,8 +167,11 @@ def run(args):
             state["tables"] = finish_tables(data, args)
             state.update(status="published", through_week=cutoff)
             atomic_json(status_path, state)
+            state.update(stage="forecasts")
+            atomic_json(status_path, state)
             finish_forecasts(state, args, log_path)
             state.update(completed_at=datetime.now(UTC).isoformat())
+            state["last_success_at"] = state["completed_at"]
             atomic_json(status_path, state)
             return state
         except Exception as exc:

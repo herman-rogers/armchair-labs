@@ -8,15 +8,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from engine.chairstats import CampaignStore, views
-from engine.chairstats.application import DEFAULT_CAMPAIGN, OpeningDriveStore
+from engine.chairstats import views
+from engine.chairstats.application import OpeningDriveStore
 from engine.chairstats.store import CampaignNotFound
 from engine.config.settings import get_settings
 
 router = APIRouter(prefix="/api/chairstats", tags=["ChairStats"])
 
 
-def store() -> CampaignStore:
+def store() -> OpeningDriveStore:
     return OpeningDriveStore(get_settings().data_dir / "campaigns")
 
 
@@ -47,7 +47,7 @@ def campaigns(response: Response):
     response.headers["Cache-Control"] = "no-cache"
     manifests = _read(lambda: store().campaigns())
     return {
-        "default_campaign_id": DEFAULT_CAMPAIGN,
+        "default_campaign_id": store().default_campaign(manifests),
         "campaigns": [views.summary(m) for m in manifests],
     }
 
@@ -200,7 +200,13 @@ def rankings(
 
 
 @router.get("/players/{player_id}")
-def player(player_id: str, response: Response):
-    """One player's latest forecast from every model of every campaign."""
+def player(player_id: str, response: Response, campaign: str = ""):
+    """One player's latest forecast from each named campaign (comma-separated).
+
+    Without ``campaign`` the default campaign is used; ``campaign=*`` reads every one.
+    """
     response.headers["Cache-Control"] = "no-cache"
-    return _read(lambda: views.player(store(), player_id))
+    ids = None if campaign == "*" else [c for c in campaign.split(",") if c]
+    if ids is not None and not ids:
+        ids = [c for c in [_read(lambda: store().default_campaign())] if c]
+    return _read(lambda: views.player(store(), player_id, ids))

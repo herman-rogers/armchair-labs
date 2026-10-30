@@ -170,7 +170,12 @@ def forecasts(service: ServiceDep, campaign: str, horizon: str = "remaining"):
             inputs = weekly_inputs(store(), campaign, snapshot.season, snapshot.week)
             players = inputs.pop("players")
             calibration = inputs.pop("calibration")
-            result = forecast_snapshot(snapshot, players, ids, schedule, calibration)
+            if calibration.get("range_reliability_note"):
+                from engine.metrics.weekly_preview import forecast_preview
+
+                result = forecast_preview(snapshot, players, ids, schedule, calibration)
+            else:
+                result = forecast_snapshot(snapshot, players, ids, schedule, calibration)
             limitations = result.get("limitations", []) + inputs.pop("limitations", [])
             result.update(inputs, limitations=list(dict.fromkeys(limitations)))
         except CampaignNotFound as exc:
@@ -205,6 +210,21 @@ def strength(service: ServiceDep, campaign: str, horizon: str = "remaining"):
         for team in result["teams"]:
             team["correlation_risk"] = dict(status="unavailable", issue=str(exc))
     return dict(result, stale=stale, age_seconds=round(age), forecast_issue=issue)
+
+
+@router.get("/power-rankings")
+def power(service: ServiceDep, campaign: str):
+    """Rest-of-season model strength and simulated standings from remaining-season curves."""
+    from engine.metrics.power_rankings import power_rankings
+
+    snapshot, stale, age = snapshot_observations(service)
+    ranks = _campaign_rankings(campaign, "remaining")
+    try:
+        with connect() as db:
+            ids = observations.espn_ids(db)
+    except (OSError, ValueError, KeyError, TypeError, duckdb.Error) as exc:
+        raise _tables(exc) from exc
+    return dict(power_rankings(snapshot, ranks, ids), stale=stale, age_seconds=round(age))
 
 
 @router.get("/forecast-accuracy")

@@ -80,6 +80,14 @@ export const router = createBrowserRouter([{
             { path: '*', loader: go('/research/models') },
           ],
         },
+        {
+          path: 'tracking',
+          children: [
+            { index: true, loader: go('/tracking/games') },
+            { path: 'games', lazy: () => import('./components/GameEngine').then(m => ({ Component: m.GameEngine })) },
+            { path: '*', loader: go('/tracking/games') },
+          ],
+        },
       ],
     },
     {

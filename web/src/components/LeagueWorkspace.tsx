@@ -23,6 +23,7 @@ import { currentWeeklyForecasts } from '../weeklyForecasts'
 import { forecastRank, forecastPositionRank, rankingsPeriod } from '../forecastDisplay'
 
 const TeamStrength = lazy(() => import('./TeamStrength').then(m => ({ default: m.TeamStrength })))
+const TeamStrengthBoard = lazy(() => import('./TeamStrengthBoard').then(m => ({ default: m.TeamStrengthBoard })))
 
 type LeaguePlayer = LeagueObservations['players'][number]
 const rosterColumns: Column<LeaguePlayer>[] = [
@@ -152,6 +153,7 @@ export function LeagueWorkspace() {
   const { pathname } = useLocation()
   const isMatchups = pathname.startsWith('/league/matchups')
   const isPredictions = pathname.startsWith('/league/predictions')
+  const isTeams = pathname.startsWith('/league/teams')
   const { query, rankingQuery, data, rankings, choice } = useLeague()
   const context = <>
     <div className="section-heading"><h3>{data?.league_name ?? 'League'}</h3></div>
@@ -165,26 +167,30 @@ export function LeagueWorkspace() {
     {rankings && <p className="legend">{rankings.campaign_name} · {rankingsPeriod(rankings)} · saved {[...new Set(rankings.models.map(m => `${m.season} as of week ${m.origin_week}`))].join('; ')}. Forecasts do not update with news after their cutoff. Refresh data updates ESPN, NFL observations and saved forecasts.</p>}
     {!data && !query.isError && <p role="status">Loading league observations…</p>}
   </>
-  if (isPredictions) return <section aria-label="League workspace">
+  if (isPredictions || isTeams) return <section aria-label="League workspace">
     <div className="prediction-controls">
       <div className="overview-disclosures">
         {data && <LeagueAttention data={data} compact />}
         <OverviewDisclosure label={choice.campaign?.name ?? 'Opening Drive'} meta="Forecast model">
-          <CampaignSelect choice={choice} showHorizon={false} />
-          <p>Predictions and weekly ranks use the selected model, including K/DST estimates. Historical forecasts are reconstructed from saved model outputs and recorded lineups.</p>
-          {data && <p>Current ESPN snapshot: {new Date(data.captured_at).toLocaleString()}. Needs attention reflects the latest roster.</p>}
+          <CampaignSelect choice={choice} showHorizon={isTeams} />
+          {isTeams
+            ? <p>Power rankings, playoff odds and projected records use this model's week-by-week rest-of-season forecasts. The roster table uses the selected horizon. Records, scores and all-play come from ESPN results, not the model.</p>
+            : <p>Predictions and weekly ranks use the selected model, including K/DST estimates. Historical forecasts are reconstructed from saved model outputs and recorded lineups.</p>}
+          {rankings && <p>{rankings.campaign_name} · saved {[...new Set(rankings.models.map(m => `${m.season} as of week ${m.origin_week}`))].join('; ')}. Forecasts do not update with news after their cutoff.</p>}
+          {data && <p>Current ESPN snapshot: {new Date(data.captured_at).toLocaleString()}{data.stale ? ' (stale)' : ''}. Needs attention reflects the latest roster.</p>}
         </OverviewDisclosure>
       </div>
     </div>
     <QueryError query={query} />
+    {isTeams && <QueryError query={rankingQuery} label="Campaign forecasts unavailable">. League results remain available.</QueryError>}
     {!data && !query.isError && <p role="status">Loading league…</p>}
     <Outlet />
+    {data && pathname.startsWith('/league/teams/') && <TeamNavigationFooter data={data} />}
   </section>
   return <section aria-label="League workspace">
-    {(isMatchups || pathname.startsWith('/league/teams')) && data ? <>
+    {isMatchups && data ? <>
       <Outlet />
       <details className="league-recent-activity"><summary>League snapshot & forecast context</summary>{context}</details>
-      {pathname.startsWith('/league/teams/') && <TeamNavigationFooter data={data} />}
     </> : <>{context}<Outlet /></>}
   </section>
 }
@@ -255,20 +261,22 @@ export function LeagueTeams() {
     const selected = data.teams.find(t => t.team_id === id)
     navigate(selected ? teamPath(selected) : leaguePath('teams'))
   }
+  if (!team) return <>
+    <div className="outlook-section-head team-heading"><div><h3>Week {data.week} power rankings</h3></div></div>
+    {teamId && <p className="notice" role="alert">Team not found. Choose a team below.</p>}
+    <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrengthBoard data={data} campaignId={choice.campaignId} /></Suspense>
+  </>
   return <>
     <div className="outlook-section-head team-heading">
-      {team && <div><h3>{team.team_name}</h3></div>}
+      <div><h3>{team.team_name}</h3></div>
       <div className="analysis-controls">
-      <TeamSelect teams={data.teams} value={team?.team_id} onChange={selectTeam} />
+      <TeamSelect teams={data.teams} value={team.team_id} onChange={selectTeam} />
       </div>
     </div>
-    {!team && (teamId ? <p className="notice" role="alert">Team not found. Choose a team above.</p> : <p className="legend">Choose a team to view its starting lineup, scoring balance, usable depth and results.</p>)}
-    {team && <>
     <Suspense fallback={<p role="status">Loading team strength…</p>}><TeamStrength key={team.team_id} data={data} rankings={rankings} teamId={team.team_id} campaignId={choice.campaignId} horizon={weeklyHorizon}>
       <div className="analysis-controls">{controls}</div>
       <Roster rankings={rankings} rows={roster} sortParam="sort" />
     </TeamStrength></Suspense>
-    </>}
   </>
 }
 

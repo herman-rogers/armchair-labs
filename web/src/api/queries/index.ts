@@ -4,8 +4,10 @@ import { fetchCampaigns, fetchMetrics, fetchPlayerForecasts, fetchRankings, fetc
 import { fetchForecastAccuracy, fetchLeague, fetchMatchups, fetchWeeklyForecasts } from '../league'
 import { fetchCollege, fetchPlayer, fetchPlayers, fetchRookies } from '../tables'
 import { fetchTeamStrength } from '../teamStrength'
+import { fetchPowerRankings } from '../powerRankings'
 import { fetchTeamAnalysis } from '../teamAnalysis'
 import { fetchLeagueScoring, fetchPlayerScoring } from '../scoring'
+import { fetchTrackingGames, fetchTrackingPlay, fetchTrackingPlays, fetchTrackingSources } from '../tracking'
 
 // The catalog provider polls and verifies the published table catalog; changing its
 // token selects new cache entries. Campaign responses carry their manifest checksum
@@ -36,8 +38,8 @@ export const rankingsQuery = (campaign: string, horizon: string, extra: Record<s
   const key = canonicalParams(params)
   return queryOptions({ ...published, queryKey: ['chairstats', 'rankings', token, key], queryFn: ({ signal }) => fetchRankings(new URLSearchParams(key), token, signal), enabled: !!campaign && !!horizon })
 }
-export const playerForecastsQuery = (playerId: string) =>
-  queryOptions({ ...published, staleTime: 60_000, queryKey: ['chairstats', 'player', playerId], queryFn: ({ signal }) => fetchPlayerForecasts(playerId, signal) })
+export const playerForecastsQuery = (playerId: string, campaigns: string[] = []) =>
+  queryOptions({ ...published, staleTime: 60_000, queryKey: ['chairstats', 'player', playerId, campaigns.join(',')], queryFn: ({ signal }) => fetchPlayerForecasts(playerId, campaigns, signal) })
 export const targetsQuery = (campaign: string, model: string) =>
   queryOptions({ ...published, queryKey: ['chairstats', 'targets', campaign, model], queryFn: ({ signal }) => fetchTargets(campaign, model, signal), enabled: !!campaign && !!model })
 export const metricsQuery = (campaign: string, model: string) =>
@@ -73,4 +75,15 @@ export const leagueQuery = (token?: string) => queryOptions({ queryKey: ['league
 export const matchupsQuery = (week: number | null, token?: string) => queryOptions({ queryKey: ['league-observations', token, 'matchups', week], queryFn: ({ signal }) => fetchMatchups(week, token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false })
 export const weeklyForecastsQuery = (campaign: string, horizon: string, token?: string) => queryOptions({ queryKey: ['league-observations', token, 'forecasts', campaign, horizon], queryFn: ({ signal }) => fetchWeeklyForecasts(campaign, horizon, token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false, enabled: !!campaign })
 export const teamStrengthQuery = (campaign: string, horizon: string, token?: string) => queryOptions({ queryKey: ['league-observations', token, 'team-strength', campaign, horizon], queryFn: ({ signal }) => fetchTeamStrength(campaign, horizon, token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false, enabled: !!campaign })
+export const powerRankingsQuery = (campaign: string, token?: string) => queryOptions({ queryKey: ['league-observations', token, 'power-rankings', campaign], queryFn: ({ signal }) => fetchPowerRankings(campaign, token, signal), staleTime: 30_000, refetchInterval: 60_000, retry: false, enabled: !!campaign })
 export const forecastAccuracyQuery = (token?: string) => queryOptions({ queryKey: ['league-observations', token, 'accuracy'], queryFn: ({ signal }) => fetchForecastAccuracy(token, signal), staleTime: 30_000, retry: false })
+
+// Tracking archives are immutable local releases; nothing here needs the table catalog token.
+const archive = { staleTime: Infinity, gcTime: 60 * 60_000, retry: false as const }
+export const trackingSourcesQuery = () => queryOptions({ ...archive, queryKey: ['tracking', 'sources'], queryFn: ({ signal }) => fetchTrackingSources(signal) })
+export const trackingGamesQuery = (source: string) =>
+  queryOptions({ ...archive, queryKey: ['tracking', 'games', source], queryFn: ({ signal }) => fetchTrackingGames(source, signal), enabled: !!source })
+export const trackingPlaysQuery = (source: string, game: string) =>
+  queryOptions({ ...archive, queryKey: ['tracking', 'plays', source, game], queryFn: ({ signal }) => fetchTrackingPlays(source, game, signal), enabled: !!source && !!game })
+export const trackingPlayQuery = (source: string, game: string, play: string) =>
+  queryOptions({ ...archive, queryKey: ['tracking', 'play', source, game, play], queryFn: ({ signal }) => fetchTrackingPlay(source, game, play, signal), enabled: !!source && !!game && !!play })

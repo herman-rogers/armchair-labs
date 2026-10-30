@@ -14,8 +14,9 @@ export function useCampaignChoice(preferred: string[] = ['remaining', 'season', 
   const list = campaigns.data?.campaigns ?? []
   const campaign: CampaignSummary | undefined = list.find(c => c.campaign_id === requestedCampaign)
     ?? list.find(c => c.campaign_id === campaigns.data?.default_campaign_id)
-    ?? list.find(c => c.campaign_id === 'opening_drive_v2')
+    ?? list[0]
   const horizons = campaign?.horizons ?? []
   const horizon = allowHorizonSelection && horizons.includes(requestedHorizon) ? requestedHorizon : preferred.find(h => horizons.includes(h)) ?? preferred[0] ?? ''
-  return { campaigns, list, campaign, campaignId: campaign?.campaign_id ?? '', horizon, horizons, setHorizon, setCampaign }
+  const defaultId = campaigns.data?.default_campaign_id ?? list[0]?.campaign_id ?? ''
+  return { campaigns, list, campaign, campaignId: campaign?.campaign_id ?? '', defaultId, horizon, horizons, setHorizon, setCampaign }
 }

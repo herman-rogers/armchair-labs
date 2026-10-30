@@ -8,6 +8,7 @@ export interface CampaignModel {
 }
 export interface CampaignSummary {
   campaign_id: string; name: string; description: string | null; kind: string | null
+  status: string | null; base_campaign: string | null
   disposition: string | null; generated_at: string | null; manifest_sha256: string
   positions: string[]; horizons: string[]; limitations: string[]; models: CampaignModel[]
 }
@@ -17,6 +18,11 @@ export interface Ranking {
   position: string | null; team: string | null; season: number; origin_week: number; horizon: string
   scheduled_games: number | null; calendar_weeks: number | null
   prediction: number | null; points_per_game: number | null
+  projection?: {
+    method: string; remaining_points: number; actual_points_to_date: number
+    future_weeks: { week: number; points: number; basis: string; signal_weight?: number; components?: Record<string, number> }[]
+    half_life?: number; anchor_points_per_game: number; anchor_basis: string
+  } | null
   position_rank: number | null; overall_rank: number | null
   predictions: Record<string, number>; candidate_basis: string | null
   availability_status: string | null; availability_as_of: string | null
@@ -48,8 +54,9 @@ export const fetchCampaigns = (signal?: AbortSignal) =>
   get<{ default_campaign_id: string; campaigns: CampaignSummary[] }>('/api/chairstats/campaigns', undefined, signal)
 export const fetchRankings = (params: URLSearchParams, token?: string, signal?: AbortSignal) =>
   get<RankingsResponse>(`/api/chairstats/rankings?${params}`, token, signal)
-export const fetchPlayerForecasts = (playerId: string, signal?: AbortSignal) =>
-  get<PlayerForecasts>(`/api/chairstats/players/${encodeURIComponent(playerId)}`, undefined, signal)
+/** `campaigns` empty means the server default. */
+export const fetchPlayerForecasts = (playerId: string, campaigns: string[], signal?: AbortSignal) =>
+  get<PlayerForecasts>(`/api/chairstats/players/${encodeURIComponent(playerId)}${campaigns.length ? `?${new URLSearchParams({ campaign: campaigns.join(',') })}` : ''}`, undefined, signal)
 export const fetchTargets = (campaign: string, model: string, signal?: AbortSignal) =>
   get<TargetsResponse>(`/api/chairstats/campaigns/${encodeURIComponent(campaign)}/models/${encodeURIComponent(model)}/targets`, undefined, signal)
 export const fetchMetrics = (campaign: string, model: string, signal?: AbortSignal) =>

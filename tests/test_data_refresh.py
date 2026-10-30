@@ -54,6 +54,30 @@ def test_no_rescore_option_is_preserved(current_refresh, monkeypatch):
     scorer.assert_not_called()
 
 
+def test_preflight_failure_replaces_previous_success(current_refresh, monkeypatch):
+    data, args = current_refresh
+    monkeypatch.setattr(refresh, "rescore_campaigns", lambda _: {"returncode": 0})
+    successful = refresh.run(args)
+    monkeypatch.setattr(refresh, "load_tables", Mock(side_effect=ValueError("Invalid catalog")))
+    with pytest.raises(ValueError, match="Invalid catalog"):
+        refresh.run(args)
+    failed = json.loads((data / ".runtime/observation_refresh.json").read_text())
+    assert failed["status"] == "failed"
+    assert failed["stage"] == "preflight"
+    assert failed["last_success_at"] == successful["completed_at"]
+
+
+def test_provider_check_is_recorded_even_when_rescore_fails(current_refresh, monkeypatch):
+    data, args = current_refresh
+    monkeypatch.setattr(refresh, "rescore_campaigns", lambda _: {"returncode": 1})
+    with pytest.raises(RuntimeError):
+        refresh.run(args)
+    state = json.loads((data / ".runtime/observation_refresh.json").read_text())
+    assert state["provider_through_week"] == 5
+    assert state["provider_checked_at"]
+    assert state["stage"] == "forecasts"
+
+
 @pytest.mark.parametrize("failure", [False, True])
 def test_league_refresh_updates_data_without_pinning_old_catalog(monkeypatch, failure):
     from engine.api import app as api

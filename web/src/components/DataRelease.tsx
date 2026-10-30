@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { dataCatalogQuery } from '../api/queries'
 import { ReleaseContext, useDataRelease } from '../dataRelease'
+import { DataFreshness } from './DataFreshness'
 
 export function DataReleaseProvider({ children, fallback = message => message }: { children: ReactNode; fallback?: (message: ReactNode) => ReactNode }) {
   const query = useQuery(dataCatalogQuery())
@@ -22,7 +23,7 @@ export function DataReleaseStatus() {
   const { catalog } = useDataRelease()
   if (!catalog) return <p className="legend">No table catalog has been published yet.</p>
   const cutoff = catalog.observation_cutoff
-  return <details className="data-release" aria-label="Published tables">
+  return <><DataFreshness /><details className="data-release" aria-label="Published tables">
     <summary><strong>Observations</strong><span>{catalog.published_at ? `Published ${new Date(catalog.published_at).toLocaleDateString()}` : 'Published'} · NFL observations through {cutoff.season ?? '—'}, Week {cutoff.through_week ?? '—'}</span><span className="data-coverage-tag">{catalog.tables.length} tables</span></summary>
     <p>Player stats, rookies, league identities and team analysis read these DuckDB tables. Forecasts come from ChairStats campaign bundles, chosen per page.</p>
     <details><summary>Included tables</summary>
@@ -31,5 +32,5 @@ export function DataReleaseStatus() {
         {catalog.tables.map(table => <tr key={table.name}><td title={table.description}>{table.name.replaceAll('_', ' ')}</td><td>{table.rows.toLocaleString()}</td><td>{new Date(table.built_at).toLocaleDateString()}</td></tr>)}
       </tbody></table></div>
     </details>
-  </details>
+  </details></>
 }

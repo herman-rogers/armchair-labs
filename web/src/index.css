@@ -1339,3 +1339,35 @@ header.masthead h1 a { color: inherit; text-decoration: none; }
 .team-heading { margin: 10px 0; }
 .team-heading .analysis-controls { padding: 4px 0; }
 @media (max-width: 600px) { .team-heading .analysis-controls { flex: 1; min-width: 175px; } .team-heading .analysis-controls label { width: 100%; } }
+
+/* Team strength index: one card per team, ordered by power ranking. */
+.strength-board { display: grid; gap: 12px; min-width: 0; }
+.strength-board .legend { margin: 0; }
+.strength-team-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.strength-team-card { display: grid; align-content: start; gap: 10px; height: 100%; box-sizing: border-box; padding: 10px 14px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; transition: border-color .12s, background .12s; }
+.strength-team-card:hover, .strength-team-card:focus-visible { border-color: var(--accent); background: var(--row-hover); }
+.strength-team-card.mine { box-shadow: inset 3px 0 var(--mine-edge); }
+.strength-team-head { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
+.strength-team-head > div { min-width: 0; }
+.strength-team-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.strength-team-name strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.strength-team-name .badge { flex: none; }
+.strength-team-head small { display: block; color: var(--text-dim); margin-top: 2px; }
+.strength-team-rank { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.source-metrics { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+.source-metrics-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: end; margin: 0; }
+.source-metrics-row > .source-tag { margin: 0 0 1px; justify-self: start; }
+.source-metrics-row > div { min-width: 0; }
+.source-metrics dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.3; color: var(--text-faint); text-transform: uppercase; letter-spacing: .04em; }
+.source-metrics dd { margin: 0; white-space: nowrap; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.strength-team-positions { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.badge.strong { background: color-mix(in srgb, var(--buy) 16%, transparent); color: var(--buy); }
+.strength-board-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 16px; }
+.strength-board-head .legend { flex: 1 1 420px; max-width: 760px; }
+.strength-board-head .analysis-controls { padding: 0; }
+
+/* Where a number comes from: model forecast versus observed ESPN result. */
+.source-tag { display: inline-block; margin-right: 6px; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 10px; font-weight: 600; line-height: 1.5; letter-spacing: .03em; text-transform: none; white-space: nowrap; vertical-align: 1px; }
+.source-tag.model { color: var(--sample); border-color: color-mix(in srgb, var(--sample) 35%, transparent); background: color-mix(in srgb, var(--sample) 8%, transparent); }
+.source-tag.espn { color: var(--text-dim); border-color: var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.legend .source-tag { margin-right: 2px; }

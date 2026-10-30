@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event
@@ -332,9 +332,26 @@ def status(output: TextIO = sys.stdout) -> bool:
     return True
 
 
-def wait_ready(urls: list[str], processes: list[subprocess.Popen], stop_requested: Event) -> None:
-    """Wait for the frontend and data-backed API before announcing readiness."""
-    pending = set(urls)
+#: Per-probe timeout. A data-backed route can legitimately take a while on its first
+#: call (table materialisation, or a league refresh timing out against ESPN); a short
+#: probe would abandon it and open another request behind it every retry.
+PROBE_TIMEOUT_SECONDS = 30
+
+
+def wait_ready(
+    urls: list[str],
+    processes: list[subprocess.Popen],
+    stop_requested: Event,
+    optional: Iterable[str] = (),
+    output: TextIO = sys.stdout,
+) -> None:
+    """Wait for the frontend and data-backed API before announcing readiness.
+
+    Optional URLs are probed so their first response is warm, but an error there
+    (league routes during an ESPN outage, or before sign-in) is reported, not fatal.
+    """
+    optional = set(optional)
+    pending = set(urls) | optional
     deadline = time.monotonic() + 120
     while pending and time.monotonic() < deadline:
         if stop_requested.is_set():
@@ -343,18 +360,34 @@ def wait_ready(urls: list[str], processes: list[subprocess.Popen], stop_requeste
             raise RuntimeError("A server exited during startup; see its output above.")
         for url in tuple(pending):
             try:
-                with urllib.request.urlopen(url, timeout=2) as response:
+                with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_SECONDS) as response:
                     if response.status == 200:
                         pending.remove(url)
             except urllib.error.HTTPError as error:
                 detail = error.read().decode(errors="replace")[:500]
+                if url in optional:
+                    print(
+                        f"League data unavailable ({error.code}) at {url}: {detail}",
+                        file=output,
+                        flush=True,
+                    )
+                    pending.remove(url)
+                    continue
                 raise RuntimeError(f"Readiness check failed at {url}: {detail}") from error
             except (urllib.error.URLError, TimeoutError):
                 pass
         if pending:
             stop_requested.wait(0.25)
+    required = pending - optional
+    if required:
+        raise RuntimeError(f"Servers did not become ready: {', '.join(sorted(required))}")
     if pending:
-        raise RuntimeError(f"Servers did not become ready: {', '.join(sorted(pending))}")
+        print(
+            "League routes did not answer in time; serving continues without them: "
+            + ", ".join(sorted(pending)),
+            file=output,
+            flush=True,
+        )
 
 
 def run(
@@ -453,10 +486,11 @@ def run(
                 [
                     f"http://{api_host}:{api_port}/api/status",
                     f"http://{api_host}:{api_port}/api/team-analysis/catalog",
-                ]
-                + ([f"http://{api_host}:{api_port}/api/league/matchups"] if auth else []),
+                ],
                 [api],
                 stop_requested,
+                optional=[f"http://{api_host}:{api_port}/api/league/matchups"] if auth else [],
+                output=output,
             )
         web = subprocess.Popen(
             web_command,
@@ -483,6 +517,7 @@ def run(
                 [f"http://{web_host}:{web_port}/"],
                 [process for _, process, _ in children],
                 stop_requested,
+                output=output,
             )
         print(
             f"Armchair Labs dev ready: API http://{api_host}:{api_port} · "

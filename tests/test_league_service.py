@@ -134,6 +134,77 @@ class TestResilience:
         assert snapshot.league_name == "Sweaty Plays"
         assert service.status()["stale"] is True
 
+    def test_a_failed_refresh_is_not_retried_on_every_request(self, service, monkeypatch):
+        """During an outage every attempt costs a full network timeout; do it once."""
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+        service.observations()
+        service._fetched_at = time.monotonic() - 10_000
+        calls: list[int] = []
+
+        def boom(*args, **kwargs):
+            calls.append(1)
+            raise RuntimeError("ESPN is down")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", boom)
+        for _ in range(3):
+            snapshot, stale, _ = service.observations()
+            assert stale is True
+            assert snapshot.league_name == "Sweaty Plays"
+        assert len(calls) == 1
+
+    def test_a_retry_happens_after_the_backoff_window(self, service, monkeypatch) -> None:
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+        service.observations()
+        service._fetched_at = time.monotonic() - 10_000
+        calls: list[int] = []
+
+        def boom(*args, **kwargs):
+            calls.append(1)
+            raise RuntimeError("ESPN is down")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", boom)
+        service.observations()
+        service._failed_at = time.monotonic() - service_module.FAILURE_RETRY_SECONDS - 1
+        service.observations()
+        assert len(calls) == 2
+
+    def test_a_force_retries_before_the_backoff_window(self, service, monkeypatch) -> None:
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+        service.observations()
+        service._fetched_at = time.monotonic() - 10_000
+        calls: list[int] = []
+
+        def boom(*args, **kwargs):
+            calls.append(1)
+            raise RuntimeError("ESPN is down")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", boom)
+        service.observations()
+        time.sleep(0.01)
+        service.observations(force=True)
+        assert len(calls) == 2
+
+    def test_concurrent_forced_refreshes_share_one_failure(self, service, monkeypatch) -> None:
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", lambda *a, **k: make_snapshot())
+        service.observations()
+        calls: list[int] = []
+
+        def boom(*args, **kwargs):
+            calls.append(1)
+            time.sleep(0.2)
+            raise RuntimeError("ESPN is down")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", boom)
+        threads = [
+            threading.Thread(target=lambda: service.observations(force=True)) for _ in range(10)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert len(calls) == 1, f"expected one shared failure, got {len(calls)} fetches"
+        assert service.status()["stale"] is True
+
     def test_a_failure_with_no_cache_raises(self, service, monkeypatch) -> None:
         def boom(*args, **kwargs):
             raise RuntimeError("ESPN is down")
@@ -170,6 +241,23 @@ class TestPersistence:
         restarted = LeagueService(settings=service._settings, ttl_seconds=600)
         assert restarted._restore_from_disk() is True
         assert time.monotonic() - restarted._fetched_at > 3000
+
+    def test_cached_restores_from_disk_without_fetching(self, service, monkeypatch) -> None:
+        calls: list[int] = []
+        counting_fetch(monkeypatch, calls)
+        service.observations()
+        restarted = LeagueService(settings=service._settings, ttl_seconds=600)
+        restarted._fetched_at = 0.0
+
+        def boom(*args, **kwargs):
+            raise AssertionError("cached() must not touch the network")
+
+        monkeypatch.setattr(service_module.sync, "fetch_snapshot", boom)
+        assert restarted.cached().league_name == "Sweaty Plays"
+        assert LeagueService(settings=service._settings).cached() is not None
+
+    def test_cached_is_none_without_a_snapshot(self, service) -> None:
+        assert service.cached() is None
 
 
 class TestStatus:

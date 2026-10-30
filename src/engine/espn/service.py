@@ -18,6 +18,12 @@ always better than the wire being unavailable.
 **Warm across restarts.** The snapshot persists to disk, so a server restart does not
 mean an immediate refetch.
 
+**Back off after a failure.** A failed fetch can take twenty seconds or more while DNS
+or ESPN times out. Retrying on every request during an outage would make every page
+load that slow, so after a failure the stale snapshot is served without a network
+attempt until the retry window passes. A forced refresh still tries immediately, but
+concurrent forced refreshes share one attempt rather than queueing one each.
+
 This is deliberately pull-driven: the server refreshes because someone asked for data
 that had gone stale, never on a timer of its own. The autonomous poll is Phase 3.
 """
@@ -47,6 +53,10 @@ DEFAULT_TTL_SECONDS = 600
 #: serving what we have.
 FETCH_WAIT_SECONDS = 45
 
+#: After a failed refresh, how long to serve the stale snapshot before an ordinary
+#: request is allowed to try ESPN again.
+FAILURE_RETRY_SECONDS = 300
+
 
 class NotAuthenticatedError(RuntimeError):
     """Raised when no ESPN credentials are stored."""
@@ -66,6 +76,7 @@ class LeagueService:
         self._ttl = ttl_seconds
         self._snapshot: sync.LeagueSnapshot | None = None
         self._fetched_at: float = 0.0
+        self._failed_at: float = 0.0
         self._stale = False
         self._lock = threading.Lock()
 
@@ -105,6 +116,21 @@ class LeagueService:
         logger.info("restored snapshot from disk, %.0fs old", file_age)
         return True
 
+    def cached(self) -> sync.LeagueSnapshot | None:
+        """The last good snapshot without any network attempt; None when there is none."""
+        if self._snapshot is None:
+            self._restore_from_disk()
+        return self._snapshot
+
+    def _can_serve_without_fetching(self, *, force: bool) -> bool:
+        """True when the held snapshot satisfies an ordinary (non-forced) request."""
+        if self._snapshot is None or force:
+            return False
+        now = time.monotonic()
+        if now - self._fetched_at < self._ttl:
+            return True
+        return self._stale and now - self._failed_at < FAILURE_RETRY_SECONDS
+
     def observations(self, *, force: bool = False) -> tuple[sync.LeagueSnapshot, bool, float]:
         """Current league observations without reading or calculating any model board."""
         self._refresh(force=force)
@@ -122,8 +148,7 @@ class LeagueService:
         if self._snapshot is None:
             self._restore_from_disk()
 
-        age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
-        if self._snapshot is not None and not force and age is not None and age < self._ttl:
+        if self._can_serve_without_fetching(force=force):
             return
 
         # Recorded before queueing on the lock. A refresh that completed after this
@@ -150,8 +175,13 @@ class LeagueService:
             if self._snapshot is not None and self._fetched_at >= requested_at:
                 logger.debug("a concurrent refresh already satisfied this request")
                 return
-            age = time.monotonic() - self._fetched_at if self._snapshot is not None else None
-            if self._snapshot is not None and not force and age is not None and age < self._ttl:
+            if self._snapshot is not None and self._failed_at >= requested_at:
+                # The attempt made on behalf of an earlier concurrent request failed
+                # after this one queued; a second attempt would almost certainly fail
+                # the same way and cost another full network timeout.
+                logger.debug("a concurrent refresh already failed for this request")
+                return
+            if self._can_serve_without_fetching(force=force):
                 return
 
             try:
@@ -170,6 +200,7 @@ class LeagueService:
             except NotAuthenticatedError:
                 raise
             except Exception as error:  # noqa: BLE001 - unofficial API, many failure modes
+                self._failed_at = time.monotonic()
                 if self._snapshot is None:
                     raise
                 # Stale-if-error: an old wire beats no wire.

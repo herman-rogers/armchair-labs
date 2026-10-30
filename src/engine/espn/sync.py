@@ -182,6 +182,8 @@ class LeagueSnapshot:
     my_team_id: int | None
     #: Weeks in the regular season, so the UI knows how far the schedule runs.
     regular_season_weeks: int = 0
+    #: Teams that make the playoffs; 0 when the capture predates this field.
+    playoff_teams: int = 0
     #: Starting lineup shape, e.g. {"QB": 1, "RB": 2, "WR": 3, "RB/WR/TE": 1}. Read
     #: from ESPN rather than configured: league settings are authoritative, and a
     #: commissioner adding a flex should not require a code change here.
@@ -651,6 +653,7 @@ def fetch_snapshot(
         week=current_week,
         my_team_id=credentials.team_id,
         regular_season_weeks=int(_attribute(league.settings, "reg_season_count", default=0) or 0),
+        playoff_teams=int(_attribute(league.settings, "playoff_team_count", default=0) or 0),
         roster_slots=_starting_slots(league),
         teams=teams,
         players=players,
