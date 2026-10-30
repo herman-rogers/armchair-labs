@@ -1,13 +1,23 @@
 # Opening Drive
 
-The application serves `opening_drive_v3` and the preserved `opening_drive_v2`
-comparison. V3 retains the eight original models and adds four weekly mean and
-distribution models; see [v3 research, results, and reproduction](weekly_v3/README.md).
-The separate [v3.1 interval challenger](weekly_v31/README.md) adds chronological
-recalibration and immutable pregame comparisons. Once its run is sealed, the normal
-refresh driver also captures and scores it; it does not replace the served v3 models.
-V2 has `te_season` and `te_remaining` integrated into its bundle. `just campaigns consolidate` performs
-the verified migration and archives v1, Scout Team and the separate TE bundle.
+**Version rule: improve the declared base and retain its functionality. V3.2 is
+v3 plus injury/workload improvements; it must not silently revert to v2 with a
+new adjustment.** All current views, variance/distribution outputs, component
+forecasts and APIs belong in the functionality comparison. See the
+[version-lineage contract and current gaps](../../../docs/operations/model-campaigns.md#version-lineage-and-retained-functionality)
+and [agent instructions](AGENTS.md).
+
+The application defaults to `opening_drive_v32`, with `opening_drive_v3` and
+`opening_drive_v2` available for comparison. V3 retains the eight original horizon
+models and adds four weekly mean/distribution models; see
+[v3 research, results, and reproduction](weekly_v3/README.md). The current v3.2
+season bridge is still anchored to v2 and does not fulfill the intended v3-based
+extension; its arithmetic coherence must not be mistaken for correct model lineage.
+The separate [v3.1 interval challenger](weekly_v31/README.md) remains paused, with
+all research and immutable pregame comparisons preserved.
+V2 has `te_season` and `te_remaining` integrated into its bundle. The one-time
+consolidation migration has run; v1, Scout Team and the separate TE bundle are archived
+under `data/campaign_revisions/`.
 The commands below document historical training runs; their original campaign IDs
 remain research provenance, not additional application choices. See the
 [current application workflow](../../../docs/operations/model-campaigns.md).
@@ -366,3 +376,18 @@ an appearance/conditional-points mixture using chronological fits and selection.
 The interactive report is `data/outputs/opening_drive_v31_points_2026/index.html`.
 This extends v3.1 research while preserving the earlier interval-only run and
 its captured prospective forecasts. Research results do not change API serving.
+
+V3.1 was paused on 2026-10-13 at the user's request. Its local configuration
+now disables automatic challenger tracking during normal refresh; all saved
+research results and pregame captures are retained. Explicit isolated research
+runs remain usable for replay and testing.
+
+## Opening Drive v3.2 injury and workload research
+
+[V3.2](weekly_v32/README.md) starts from v3 and investigates dated injury reports,
+offensive participation, workload when playing and teammate redistribution.
+It compares original early-week timing with a separately labeled pregame update,
+audits missing timestamps, and saves historical component and point forecasts.
+The report is `data/outputs/opening_drive_v32_2026/index.html`. An immutable
+all-team provider-status collector starts a separate going-forward archive;
+provider tags are not relabeled as official game-day active/inactive evidence.

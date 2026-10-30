@@ -337,6 +337,9 @@ def publish_campaign(root: Path, metadata: dict, models: list[dict]) -> Path:
                 ):
                     raise ValueError("Forecast receipt belongs to another campaign")
                 _forecast_rows(payload, entry, ref["season"], ref["origin_week"])
+        from engine.chairstats.horizons import validate_opening_drive_release
+
+        validate_opening_drive_release(staging, manifest)
         if destination.exists():
             raise FileExistsError(f"Campaign already exists: {campaign_id}")
         staging.rename(destination)
@@ -450,6 +453,9 @@ def replace_campaign(
         fcntl.flock(lock, fcntl.LOCK_EX)
         _verify_bundle(active, campaign_id, expected_manifest_sha256)
         candidate_check = _verify_bundle(candidate, campaign_id)
+        from engine.chairstats.horizons import validate_opening_drive_release
+
+        validate_opening_drive_release(candidate, _json((candidate / "manifest.json").read_bytes()))
         new_sha = candidate_check["manifest_sha256"]
         if new_sha == expected_manifest_sha256:
             raise ValueError("Replacement candidate is identical to the active revision")

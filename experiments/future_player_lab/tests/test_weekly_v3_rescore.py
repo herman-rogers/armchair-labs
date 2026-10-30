@@ -246,7 +246,7 @@ def test_driver_refreshes_v3_when_v2_is_already_current(sealed, monkeypatch):
     )
     publish_campaign(
         registry,
-        dict(campaign_id=driver.LATEST, name="V2 current"),
+        dict(campaign_id="opening_drive_v2", name="V2 current"),
         [
             dict(
                 model_id="qb_remaining",
@@ -261,7 +261,6 @@ def test_driver_refreshes_v3_when_v2_is_already_current(sealed, monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(driver, "consolidate_opening_drive", lambda *a: None)
     monkeypatch.setattr(driver, "latest_supplements", lambda *a: Path("supplements"))
     monkeypatch.setattr(driver, "refresh_availability_sources", lambda *a: Path("sources"))
     monkeypatch.setattr(

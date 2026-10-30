@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Armchair Labs observations and forecasts hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+Unit=armchair-refresh.service
+
+[Install]
+WantedBy=timers.target

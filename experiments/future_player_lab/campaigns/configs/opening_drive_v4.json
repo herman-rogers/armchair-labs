@@ -1,0 +1,66 @@
+{
+  "campaign_id": "opening_drive_v4",
+  "status": "prospective_candidate",
+  "baseline_campaign": "opening_drive_v32",
+  "default_changed": false,
+  "forecast_season": 2026,
+  "weekly_mean": "frozen_v32",
+  "horizons": "evaluated_v3_residual_extension_with_components",
+  "uncertainty": "chronologically_selected_mean_preserving_distribution",
+  "retraining": "isolated_in_season_residual_update_candidate",
+  "promotion": "Manual review after historical and prospective release gates; never automatic",
+  "tracker": {
+    "enabled": true,
+    "parent": "opening_drive_v32",
+    "result_key": "v4",
+    "requires": [
+      "weekly_v4.artifacts:DEFAULT_INTEGRATION"
+    ],
+    "refresh": {
+      "steps": [
+        {
+          "call": "weekly_v4.prospective:track",
+          "args": [
+            "snapshot",
+            "registry"
+          ]
+        },
+        {
+          "call": "weekly_v4.evaluation:evaluate",
+          "args": [
+            "snapshot",
+            "registry"
+          ],
+          "key": "evaluation"
+        },
+        {
+          "call": "weekly_v4.report:report",
+          "key": "report"
+        }
+      ]
+    },
+    "pregame": {
+      "steps": [
+        {
+          "call": "weekly_v4.prospective:track",
+          "args": [
+            "snapshot",
+            "registry"
+          ]
+        },
+        {
+          "call": "weekly_v4.evaluation:evaluate",
+          "args": [
+            "snapshot",
+            "registry"
+          ],
+          "key": "evaluation"
+        },
+        {
+          "call": "weekly_v4.report:report",
+          "key": "report"
+        }
+      ]
+    }
+  }
+}

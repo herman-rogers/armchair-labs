@@ -41,5 +41,13 @@
     {"title": "Quantile Regression Forests", "url": "https://jmlr.org/papers/v7/meinshausen06a.html", "use": "Conditional distributions and quantiles with trees"},
     {"title": "Gaussian Process Boosting", "url": "https://jmlr.org/papers/v23/20-322.html", "use": "Grouped dependence can be combined with boosting; no requirement to fit this particular method"},
     {"title": "Hierarchical Partial Pooling", "url": "https://mc-stan.org/learn-stan/case-studies/pool-binary-trials-rstanarm.html", "use": "Share evidence across entities while retaining individual estimates"}
-  ]
+  ],
+  "rescore": {
+    "method": "weekly",
+    "selected_by": [
+      "opening_drive_v31",
+      "opening_drive_v32",
+      "opening_drive_v4"
+    ]
+  }
 }

@@ -109,5 +109,13 @@
     "population": "V1 candidate universe; no outcome-conditioned player additions or deletions",
     "features": "V1 frozen numeric matrix plus availability__ fields; fixed vocabulary",
     "source_vintage": "Retrospective reconstructed cutoffs; no pristine prospective claim"
+  },
+  "rescore": {
+    "method": "rolling_origin",
+    "selected_by": [
+      "opening_drive_v31",
+      "opening_drive_v32",
+      "opening_drive_v4"
+    ]
   }
 }

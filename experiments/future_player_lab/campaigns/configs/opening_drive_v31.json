@@ -3,7 +3,8 @@
   "name": "Opening Drive v3.1 interval challenger",
   "baseline_campaign": "opening_drive_v3",
   "forecast_season": 2026,
-  "status": "research_challenger",
+  "status": "paused",
+  "pause_reason": "User paused v3.1 on 2026-10-13; retain all results and captures while exploring v3.2 from v3",
   "point_models_refit": false,
   "designated_policy": "position_workload",
   "calibration_window_seasons": 5,
@@ -20,5 +21,33 @@
     "Adjusted interval bounds are not replacement distribution quantiles",
     "Synthetic-to-actual-lineup interval transfer is provisional",
     "K/DST uncertainty, availability mixtures and shrinkage sensitivity are deferred"
-  ]
+  ],
+  "tracker": {
+    "enabled": false,
+    "reason": "V3.1 research and automatic tracking paused",
+    "selected_by": [
+      "opening_drive_v3"
+    ],
+    "inputs": {
+      "run": "weekly_v31.run:DEFAULT_RUN",
+      "log": "weekly_v31.run:DEFAULT_LOG"
+    },
+    "requires": [
+      "run"
+    ],
+    "refresh": {
+      "order": 10,
+      "steps": [
+        {
+          "call": "weekly_v31.prospective:track",
+          "args": [
+            "snapshot",
+            "registry",
+            "run",
+            "log"
+          ]
+        }
+      ]
+    }
+  }
 }

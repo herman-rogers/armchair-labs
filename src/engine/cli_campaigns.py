@@ -17,19 +17,6 @@ def _store(data_dir: Path | None) -> CampaignStore:
     return OpeningDriveStore((data_dir or get_settings().data_dir) / "campaigns")
 
 
-@app.command("consolidate")
-def consolidate_campaigns(data_dir: Path | None = None):
-    """Merge TE into Opening Drive v2 and archive retired application campaigns."""
-    from engine.chairstats.consolidate import consolidate_opening_drive
-
-    data = data_dir or get_settings().data_dir
-    typer.echo(
-        json.dumps(
-            consolidate_opening_drive(data / "campaigns", data / "campaign_revisions"), indent=2
-        )
-    )
-
-
 @app.command("list")
 def list_campaigns(data_dir: Path | None = None):
     """List available immutable campaign bundles."""

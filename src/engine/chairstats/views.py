@@ -56,6 +56,8 @@ def summary(manifest: dict) -> dict:
         "name": manifest["name"],
         "description": manifest.get("description"),
         "kind": manifest.get("kind"),
+        "status": manifest.get("status"),
+        "base_campaign": manifest.get("base_campaign"),
         "disposition": manifest.get("disposition"),
         "generated_at": manifest.get("generated_at"),
         "manifest_sha256": manifest["manifest_sha256"],
@@ -96,6 +98,7 @@ def _row(model: dict, forecast: dict, row: dict, manifest: dict) -> dict:
         "calendar_weeks": row.get("calendar_weeks"),
         "prediction": points,
         "points_per_game": per_game,
+        "projection": row.get("projection"),
         "position_rank": row.get("rank"),
         "overall_rank": None,
         "predictions": predictions,
@@ -214,10 +217,16 @@ def rankings(
     }
 
 
-def player(store: CampaignStore, player_id: str) -> dict:
-    """One player's latest saved forecast from every model of every campaign."""
+def player(store: CampaignStore, player_id: str, campaign_ids: list[str] | None = None) -> dict:
+    """One player's latest saved forecast from every model of the named campaigns.
+
+    ``None`` reads every campaign; callers should name the few they display.
+    """
     forecasts = []
-    for manifest in store.campaigns():
+    manifests = (
+        store.campaigns() if campaign_ids is None else [store.campaign(c) for c in campaign_ids]
+    )
+    for manifest in manifests:
         for model in manifest["models"]:
             latest = latest_forecast(model)
             if latest is None:

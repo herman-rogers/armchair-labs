@@ -42,7 +42,8 @@ def weekly_inputs(store: CampaignStore, campaign_id: str, season: int, week: int
                 }
             )
         receipts.append(saved["metadata"])
-        ref = model.get("artifacts", {}).get("lineup_calibration")
+        calibration_key = saved["metadata"].get("lineup_calibration_artifact", "lineup_calibration")
+        ref = model.get("artifacts", {}).get(calibration_key)
         if ref is not None:
             calibrations.append((ref["sha256"], store.artifact(campaign_id, ref)))
     if len({p["player_id"] for p in players}) != len(players):

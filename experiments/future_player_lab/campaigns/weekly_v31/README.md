@@ -66,7 +66,8 @@ The existing campaign refresh command now tracks v3.1 once the default run exist
 
 Tracking also runs when v3 already has the current origin. Requesting
 `--campaign opening_drive_v31` refreshes its v2/v3 dependencies first. Alternate
-registries require an explicit `--v31-run`; use `--v31-log` for an isolated log.
+registries require an explicit `--tracker-input opening_drive_v31.run=PATH`; add
+`--tracker-input opening_drive_v31.log=PATH` for an isolated log.
 This is integrated into refresh, not a separately installed timer. Run refresh
 before the weekly deadline; late missed weeks are never backfilled as prospective.
 

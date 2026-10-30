@@ -1,0 +1,54 @@
+{
+  "campaign_id": "opening_drive_v32",
+  "status": "shadow_preview",
+  "baseline_campaign": "opening_drive_v3",
+  "default_changed": false,
+  "default_selection": "User selected v3.2 as the default on 2026-10-13; superseded by opening_drive_v41 on 2026-10-27. Prospective tracking continues",
+  "forecast_season": 2026,
+  "horizon_contract": "Weekly, remaining and projected full season share one cutoff and future-week curve",
+  "horizon_policy_run": "opening_drive_v32_horizons_20261014_002",
+  "early_policy": "First paired capture before the first kickoff; immutable",
+  "pregame_policy": "First usable paired per-game capture 90–60 minutes before kickoff",
+  "official_report_max_age_hours": 36,
+  "fallback": "Retain the locked early-week forecast when game-week evidence is missing",
+  "promotion": "Manual review of prospective player and lineup results; never automatic",
+  "tracker": {
+    "enabled": true,
+    "selected_by": [
+      "opening_drive_v3"
+    ],
+    "requires": [
+      "weekly_v32.integration:DEFAULT_INTEGRATION"
+    ],
+    "refresh": {
+      "order": 30,
+      "steps": [
+        {
+          "call": "weekly_v32.shadow:track",
+          "args": [
+            "snapshot",
+            "registry"
+          ],
+          "kwargs": {
+            "allow_network": "allow_network"
+          }
+        }
+      ]
+    },
+    "pregame": {
+      "order": 10,
+      "steps": [
+        {
+          "call": "weekly_v32.shadow:track",
+          "args": [
+            "snapshot",
+            "registry"
+          ],
+          "kwargs": {
+            "allow_network": "allow_network"
+          }
+        }
+      ]
+    }
+  }
+}

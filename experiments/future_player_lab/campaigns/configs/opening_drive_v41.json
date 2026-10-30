@@ -1,0 +1,64 @@
+{
+  "campaign_id": "opening_drive_v41",
+  "name": "Opening Drive v4.1",
+  "status": "active",
+  "baseline_campaign": "opening_drive_v32",
+  "forecast_season": 2026,
+  "training_through_season": 2025,
+  "research_run": "experiments/future_player_lab/runs/opening_drive_v41_20261027_001",
+  "weekly_mean": "v41_full_retrain_v3_method_market_lines_v32_injury_workload",
+  "horizons": "v41_learned_residual_components",
+  "uncertainty": "v41_prior_year_empirical_errors",
+  "tracking": "weekly_v41.track: early_week on refresh, pregame_60m from the 15-minute monitor",
+  "promotion": "None; dev model, no promotion gates",
+  "default_selection": "User made v4.1 the application default on 2026-10-27; the app computes the default (engine.chairstats.application)",
+  "tracker": {
+    "enabled": true,
+    "selected_by": [
+      "opening_drive_v3",
+      "opening_drive_v32",
+      "opening_drive_v4"
+    ],
+    "refresh": {
+      "order": 20,
+      "steps": [
+        {
+          "call": "weekly_v41.track:track",
+          "args": [
+            "snapshot"
+          ],
+          "kwargs": {
+            "registry": "registry"
+          }
+        }
+      ]
+    },
+    "pregame": {
+      "order": 20,
+      "steps": [
+        {
+          "call": "weekly_v41.track:track",
+          "kwargs": {
+            "pregame_updates": true,
+            "registry": "registry"
+          }
+        }
+      ]
+    },
+    "backfill": {
+      "order": 20,
+      "steps": [
+        {
+          "call": "weekly_v41.track:backfill",
+          "args": [
+            "snapshot"
+          ],
+          "kwargs": {
+            "registry": "registry",
+            "limit": "limit"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -99,3 +99,47 @@ def test_scoring_timeline_uses_weekly_only_for_its_target_week():
     assert timeline.cell("QB", 4)["model_id"] == "original"
     assert timeline.cell("QB", 5)["model_id"] == "weekly"
     assert timeline.cell("QB", 6)["model_id"] == "rescored"
+
+
+def test_any_published_directory_is_discovered_without_an_allowlist(weekly_registry, tmp_path):
+    from engine.chairstats import views
+    from engine.chairstats.application import DEFAULT_CAMPAIGN
+
+    source = CampaignStore(weekly_registry).campaign("opening_drive_v3")
+    root = weekly_registry / "opening_drive_v3"
+
+    def retag(ref):
+        path = tmp_path / f"experiment_{ref['path'].replace('/', '_')}"
+        payload = json.loads((root / ref["path"]).read_text())
+        path.write_text(json.dumps({**payload, "campaign_id": "my_experiment"}))
+        return {**ref, "path": path}
+
+    models = [
+        {
+            **{k: m[k] for k in ("model_id", "position", "horizon", "origin_week", "targets")},
+            "training_through_season": m["training_through_season"],
+            "metrics": root / m["metrics"]["path"],
+            "artifacts": {k: root / r["path"] for k, r in m["artifacts"].items()},
+            "forecasts": [retag(f) for f in m["forecasts"]],
+        }
+        for m in source["models"]
+    ]
+    publish_campaign(
+        weekly_registry,
+        dict(campaign_id="my_experiment", name="Anything", generated_at="2099-01-01T00:00:00Z"),
+        models,
+    )
+    (weekly_registry / "empty_folder").mkdir()
+    broken = weekly_registry / "broken"
+    broken.mkdir()
+    (broken / "manifest.json").write_text("{}")
+
+    store = OpeningDriveStore(weekly_registry)
+    with pytest.warns(UserWarning, match="broken"):
+        ids = [m["campaign_id"] for m in store.campaigns()]
+    assert ids == ["my_experiment", "opening_drive_v3"]  # newest first; broken skipped
+    assert DEFAULT_CAMPAIGN not in ids
+    with pytest.warns(UserWarning):
+        assert store.default_campaign() == "my_experiment"
+    one = views.player(store, "QB", ["opening_drive_v3"])
+    assert {f["campaign_id"] for f in one["forecasts"]} == {"opening_drive_v3"}

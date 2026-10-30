@@ -302,7 +302,6 @@ def test_capture_cannot_backfill_or_replace_frozen_run(paired, monkeypatch):
 
 def test_driver_tracks_when_no_models_are_due(paired, monkeypatch):
     run, registry, snapshot, log, _ = paired
-    monkeypatch.setattr(driver, "consolidate_opening_drive", lambda *args: None)
     calls = []
     monkeypatch.setattr(prospective, "track", lambda *args: calls.append(args) or {"status": "ok"})
     monkeypatch.setattr(
@@ -316,10 +315,10 @@ def test_driver_tracks_when_no_models_are_due(paired, monkeypatch):
                 "--snapshot",
                 str(snapshot),
                 "--due",
-                "--v31-run",
-                str(run),
-                "--v31-log",
-                str(log),
+                "--tracker-input",
+                f"opening_drive_v31.run={run}",
+                "--tracker-input",
+                f"opening_drive_v31.log={log}",
             ]
         )
         == 0
@@ -391,7 +390,6 @@ def test_driver_scores_final_week_without_requesting_week_nineteen(paired, monke
     document = json.loads(snapshot.read_text())
     document["current_observations"]["through_week"] = 18
     write(snapshot, document)
-    monkeypatch.setattr(driver, "consolidate_opening_drive", lambda *args: None)
     calls = []
     monkeypatch.setattr(prospective, "track", lambda *args: calls.append(args) or {"status": "ok"})
     monkeypatch.setattr(driver, "capture_supplements", lambda *args: pytest.fail("Season over"))
@@ -403,10 +401,10 @@ def test_driver_scores_final_week_without_requesting_week_nineteen(paired, monke
                 "--snapshot",
                 str(snapshot),
                 "--due",
-                "--v31-run",
-                str(run),
-                "--v31-log",
-                str(log),
+                "--tracker-input",
+                f"opening_drive_v31.run={run}",
+                "--tracker-input",
+                f"opening_drive_v31.log={log}",
             ]
         )
         == 0

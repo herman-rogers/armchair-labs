@@ -16,6 +16,7 @@ is relaxed here, on purpose.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import shutil
 import subprocess
@@ -30,7 +31,6 @@ import polars as pl
 from threadpoolctl import threadpool_limits
 
 from engine.chairstats import CampaignStore, replace_campaign
-from engine.chairstats.consolidate import LATEST, consolidate_opening_drive
 
 from ..forecasting.data import add_supplements, history_inputs, snapshot_inputs
 from ..gpu_lab.run import digest, json_write
@@ -43,6 +43,7 @@ from .run import clamp, matrix
 from .runtime import verify_environment
 
 REGISTRY = ROOT / "data/campaigns"
+CONFIGS = Path(__file__).with_name("configs")
 ARCHIVE = ROOT / "data/campaign_revisions"
 RUNS = ROOT / "experiments/future_player_lab/runs"
 HISTORY_CACHE = availability_data.V1_RUN / "inputs/history"
@@ -346,25 +347,175 @@ def rescore_campaign(
     return {"campaign_id": campaign_id, "status": "rescored", "models": added, "receipt": receipt}
 
 
+# ----------------------------------------------------------------- campaign configs
+
+
+def campaign_configs(directory: Path = CONFIGS) -> dict[str, dict]:
+    """Every ``configs/*.json`` keyed by campaign id; unreadable files are skipped."""
+    configs = {}
+    for path in sorted(Path(directory).glob("*.json")):
+        try:
+            document = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            print(f"Skipping campaign config {path.name}: {error}", file=sys.stderr)
+            continue
+        if isinstance(document, dict):
+            configs[document.get("campaign_id", path.stem)] = document
+    return configs
+
+
+def _selected(campaign_id: str, block: dict, filters, extra=()) -> bool:
+    """``--campaign`` matches the id itself, its declared ``selected_by`` ids or ``extra``."""
+    return not filters or bool({campaign_id, *block.get("selected_by", []), *extra} & set(filters))
+
+
+def rescore_targets(configs: dict[str, dict], method: str, filters) -> set[str]:
+    """Campaigns whose config declares ``"rescore": {"method": method}`` and match the filter."""
+    return {
+        campaign_id
+        for campaign_id, config in configs.items()
+        if isinstance(config.get("rescore"), dict)
+        and config["rescore"].get("method") == method
+        and _selected(campaign_id, config["rescore"], filters)
+    }
+
+
+# ----------------------------------------------------------------- trackers
+#
+# A config's ``tracker`` block declares how a campaign follows refreshes:
+#
+#   enabled      false reports the campaign as paused/not tracking without running it
+#   reason       optional text reported while disabled
+#   selected_by  extra ``--campaign`` ids that select this tracker (its own id always does)
+#   parent       run only after this campaign's tracker ran; result nests under result_key
+#   inputs       named values (``module:ATTR`` refs), overridable with ``--tracker-input``
+#   requires     values that must be existing paths, otherwise the tracker is skipped
+#   refresh / pregame   arms: {"order": n, "steps": [{"call", "args", "kwargs", "key"}]}
+#
+# Step values are context names (snapshot, registry, allow_network, inputs), ``module:ATTR``
+# references relative to this package, or JSON literals. The first step without a ``key``
+# produces the result; keyed steps add fields to it. Every tracker is isolated: a failure is
+# reported and never blocks another tracker or the refresh.
+
+
+def _resolve(spec, context: dict):
+    if not isinstance(spec, str):
+        return spec
+    if spec in context:
+        value = context[spec]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+    if ":" in spec:
+        module, attribute = spec.split(":", 1)
+        return getattr(importlib.import_module(f".{module}", __package__), attribute)
+    raise ValueError(f"Unknown tracker value {spec!r}")
+
+
+def _run_tracker(campaign_id, configs, children, arm, context, filters, inputs, isolated):
+    config = configs[campaign_id]
+    block = config["tracker"]
+    supplied = inputs.get(campaign_id, {})
+    if filters is not None and not _selected(
+        campaign_id, block, filters, _descendants(campaign_id, children)
+    ):
+        return None
+    # Explicit inputs force a tracker; otherwise alternate registries stay isolated.
+    if not supplied and isolated:
+        return None
+    if not supplied and not block.get("enabled", True):
+        status = "paused" if config.get("status") == "paused" else "not_tracking"
+        return {"status": status, **({"reason": block["reason"]} if block.get("reason") else {})}
+    try:
+        local = dict(context)
+        for name, spec in block.get("inputs", {}).items():
+            local[name] = Path(supplied[name]) if name in supplied else _resolve(spec, context)
+        for name in supplied:
+            if name not in local:
+                raise ValueError(f"{campaign_id} has no tracker input {name!r}")
+        for spec in block.get("requires", []):
+            if not Path(_resolve(spec, local)).exists():
+                if spec in supplied:
+                    raise FileNotFoundError(f"{campaign_id} {spec} not found: {local[spec]}")
+                return None
+        result = None
+        for step in block[arm]["steps"]:
+            function = _resolve(step["call"], local)
+            args = [_resolve(value, local) for value in step.get("args", [])]
+            kwargs = {key: _resolve(value, local) for key, value in step.get("kwargs", {}).items()}
+            value = function(*args, **kwargs)
+            if "key" in step:
+                result[step["key"]] = str(value) if isinstance(value, Path) else value
+            else:
+                result = value
+    except Exception as error:  # noqa: BLE001 - one tracker must not break the refresh
+        print(f"{campaign_id} tracking failed: {error!r}", file=sys.stderr)
+        return {"status": "failed", "error": repr(error)}
+    for child in children.get(campaign_id, []):
+        outcome = _run_tracker(child, configs, children, arm, context, None, inputs, isolated)
+        if outcome is not None and isinstance(result, dict):
+            result[configs[child]["tracker"].get("result_key", child)] = outcome
+    return result
+
+
+def _descendants(campaign_id, children) -> set[str]:
+    found = set()
+    for child in children.get(campaign_id, []):
+        found |= {child, *_descendants(child, children)}
+    return found
+
+
+def run_trackers(
+    arm: str,
+    context: dict,
+    *,
+    configs: dict[str, dict] | None = None,
+    filters=None,
+    inputs: dict[str, dict] | None = None,
+    isolated: bool = False,
+) -> dict[str, object]:
+    """Run every config's ``arm`` tracker in declared order; results keyed by campaign id."""
+    configs = campaign_configs() if configs is None else configs
+    trackers = {
+        campaign_id: config["tracker"]
+        for campaign_id, config in configs.items()
+        if isinstance(config.get("tracker"), dict) and arm in config["tracker"]
+    }
+    children: dict[str, list[str]] = {}
+    roots = []
+    for campaign_id, block in trackers.items():
+        if block.get("parent") in trackers:
+            children.setdefault(block["parent"], []).append(campaign_id)
+        else:
+            roots.append(campaign_id)
+
+    def order(campaign_id):
+        return (trackers[campaign_id][arm].get("order", 100), campaign_id)
+
+    for siblings in children.values():
+        siblings.sort(key=order)
+    results = {}
+    for campaign_id in sorted(roots, key=order):
+        outcome = _run_tracker(
+            campaign_id, configs, children, arm, context, filters, inputs or {}, isolated
+        )
+        if outcome is not None:
+            results[campaign_id] = outcome
+    return results
+
+
+def _tracker_inputs(values) -> dict[str, dict]:
+    inputs: dict[str, dict] = {}
+    for value in values or []:
+        key, _, path = value.partition("=")
+        campaign_id, _, name = key.rpartition(".")
+        if not campaign_id or not name or not path:
+            raise SystemExit(f"--tracker-input expects CAMPAIGN.NAME=PATH, got {value!r}")
+        inputs.setdefault(campaign_id, {})[name] = path
+    return inputs
+
+
 # ----------------------------------------------------------------- driver
-
-
-def _track_v31(args, snapshot):
-    """The separately sealed challenger follows refreshes, including no-op v3 refreshes."""
-    from .weekly_v31.prospective import track
-    from .weekly_v31.run import DEFAULT_LOG, DEFAULT_RUN
-
-    if args.campaign and not {"opening_drive_v3", "opening_drive_v31"}.intersection(args.campaign):
-        return None
-    # Alternate registries are isolated unless the caller explicitly supplies a challenger.
-    if args.v31_run is None and args.registry.resolve() != REGISTRY.resolve():
-        return None
-    run = args.v31_run or DEFAULT_RUN
-    if args.v31_run and not run.exists():
-        raise FileNotFoundError(f"V3.1 challenger run not found: {run}")
-    if not run.exists():
-        return None
-    return track(snapshot, args.registry, run, args.v31_log or DEFAULT_LOG)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -373,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=REGISTRY)
     parser.add_argument("--archive", type=Path, default=ARCHIVE)
+    parser.add_argument("--configs", type=Path, default=CONFIGS, help="Campaign config directory")
     parser.add_argument("--snapshot", type=Path, help="Raw snapshot manifest; default: latest")
     parser.add_argument("--origin-week", type=int, help="Default: the snapshot's completed week")
     parser.add_argument("--campaign", action="append", help="Limit to these campaign ids")
@@ -381,30 +533,44 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-capture", action="store_true", help="Reuse existing supplements")
     parser.add_argument(
-        "--v31-run", type=Path, help="Sealed interval challenger; default: local v3.1"
+        "--tracker-input",
+        action="append",
+        metavar="CAMPAIGN.NAME=PATH",
+        help="Override a tracker input (e.g. opening_drive_v31.run=...); forces that tracker",
     )
-    parser.add_argument("--v31-log", type=Path, help="Prospective archive destination")
     args = parser.parse_args(argv)
-    consolidate_opening_drive(args.registry, args.archive)
+    configs = campaign_configs(args.configs)
     snapshot = args.snapshot or latest_raw_snapshot()
     current = json.loads(snapshot.read_text())["current_observations"]
     season = current["season"]
     origin = current["through_week"] if args.origin_week is None else args.origin_week
     store = CampaignStore(args.registry)
     campaigns = store.campaigns()
+
+    def track():
+        return run_trackers(
+            "refresh",
+            dict(snapshot=snapshot, registry=args.registry, allow_network=not args.no_capture),
+            configs=configs,
+            filters=args.campaign,
+            inputs=_tracker_inputs(args.tracker_input),
+            isolated=args.registry.resolve() != REGISTRY.resolve(),
+        )
+
     if origin == 18:
-        tracked = _track_v31(args, snapshot)
-        print(json.dumps({"status": "regular_season_complete", "v31": tracked}, indent=2))
+        tracked = track()
+        print(
+            json.dumps(
+                {"status": "regular_season_complete", "trackers": tracked}, indent=2, default=str
+            )
+        )
         return 0
+    rolling = rescore_targets(configs, "rolling_origin", args.campaign)
+    weekly = rescore_targets(configs, "weekly", args.campaign)
     manifests = [
         m
         for m in campaigns
-        if m["campaign_id"] == LATEST
-        and (
-            not args.campaign
-            or m["campaign_id"] in args.campaign
-            or "opening_drive_v31" in args.campaign
-        )
+        if m["campaign_id"] in rolling
         and any(
             x["horizon"] == "remaining" and "weights" in x.get("artifacts", {}) for x in m["models"]
         )
@@ -422,29 +588,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     ]
     weekly_due = [
-        m
-        for m in campaigns
-        if m["campaign_id"] == "opening_drive_v3"
-        and (
-            not args.campaign
-            or m["campaign_id"] in args.campaign
-            or "opening_drive_v31" in args.campaign
-        )
-        and due_models(m, season, origin)
+        m for m in campaigns if m["campaign_id"] in weekly and due_models(m, season, origin)
     ]
     if weekly_due:
         validate_snapshot(snapshot, season, origin)
-    if args.due and not due and not weekly_due:
-        tracked = _track_v31(args, snapshot)
-        if tracked:
-            print(json.dumps({"v31": tracked}, indent=2))
-        print(f"Campaign forecasts already cover {season} week {origin}.")
-        return 0
     if not due and not weekly_due:
-        tracked = _track_v31(args, snapshot)
+        tracked = track()
         if tracked:
-            print(json.dumps({"v31": tracked}, indent=2))
-        print("Nothing to re-score.")
+            print(json.dumps({"trackers": tracked}, indent=2, default=str))
+        if args.due:
+            print(f"Campaign forecasts already cover {season} week {origin}.")
+        else:
+            print("Nothing to re-score.")
         return 0
     supplements = None if args.no_capture else latest_supplements(season, current["saved_at"])
     if supplements is None:
@@ -485,9 +640,11 @@ def main(argv: list[str] | None = None) -> int:
                     archive=args.archive,
                 )
             )
-    tracked = _track_v31(args, snapshot)
-    if tracked:
-        results.append(dict(campaign_id="opening_drive_v31", **tracked))
+    for campaign_id, outcome in track().items():
+        if isinstance(outcome, dict):
+            results.append({"campaign_id": campaign_id, **outcome})
+        else:
+            results.append({"campaign_id": campaign_id, "result": outcome})
     print(
         json.dumps(
             {"season": season, "origin_week": origin, "campaigns": results}, indent=2, default=str

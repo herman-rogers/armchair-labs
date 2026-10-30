@@ -1,0 +1,15 @@
+[Unit]
+Description=Opening Drive monitor: run every campaign config's pregame tracker
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dev/armchair-labs
+Environment=OMP_NUM_THREADS=4
+Environment=OPENBLAS_NUM_THREADS=4
+Environment=POLARS_MAX_THREADS=4
+ExecStart=%h/dev/armchair-labs/.venv/bin/python -m experiments.future_player_lab.campaigns.monitor
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=default.target
