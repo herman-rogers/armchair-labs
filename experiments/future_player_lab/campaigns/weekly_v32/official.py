@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -12,8 +14,42 @@ import requests
 
 from engine.names import normalize
 
-from ..weekly_v31.artifacts import now, publish_directory, seal, write
+from ..weekly_v31.artifacts import now, publish_directory, seal, timestamp, write
 from .data import DATA, TEAM_ALIASES
+
+CAPTURES = DATA / "research/opening_drive_v32_official_captures"
+# An unchanged page is re-captured at most this often: often enough to stay well inside
+# the 36h admission window of ``live.usable_reports``, without a copy every monitor pass.
+UNCHANGED_REFRESH = pd.Timedelta(hours=2)
+
+
+def content_digest(frame):
+    """Digest of report rows, ignoring when they were observed (``usable_at``)."""
+    rows = frame.drop(columns=["usable_at"], errors="ignore").astype("string")
+    lines = sorted(
+        json.dumps(r, sort_keys=True, default=lambda _: None) for r in rows.to_dict("records")
+    )
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def _content(summary, frame):
+    keys = ("status", "reason", "season", "week", "teams")
+    return dict({k: summary.get(k) for k in keys}, reports=content_digest(frame))
+
+
+def unchanged_capture(root, content, observed):
+    """Latest capture of the same season/week if its content matches and it is recent."""
+    for directory in sorted(Path(root).glob("[!.]*"), reverse=True):
+        try:
+            summary = json.loads((directory / "summary.json").read_text())
+        except (OSError, ValueError):
+            continue
+        if (summary.get("season"), summary.get("week")) != (content["season"], content["week"]):
+            continue
+        recent = observed - timestamp(summary["observed_at"]) < UNCHANGED_REFRESH
+        frame = pd.read_parquet(directory / "reports.parquet")
+        return directory if recent and _content(summary, frame) == content else None
+    return None
 
 
 def plain(value):
@@ -84,15 +120,13 @@ def capture(season, week, identity, directory=None):
         status, reason = "usable_weekly_report", None
     except ValueError as error:
         status, reason = "unusable_weekly_report", str(error)
-    directory = (
-        Path(directory)
-        if directory
-        else (
-            DATA
-            / "research/opening_drive_v32_official_captures"
-            / observed.strftime("%Y%m%dT%H%M%S%fZ")
-        )
-    )
+    if directory is None:
+        content = dict(status=status, reason=reason, season=season, week=week, teams=teams)
+        previous = unchanged_capture(CAPTURES, _content(content, frame), observed)
+        if previous is not None:
+            return previous
+        directory = CAPTURES / observed.strftime("%Y%m%dT%H%M%S%fZ")
+    directory = Path(directory)
     directory.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=directory.parent, prefix=".official-") as tmp:
         staging = Path(tmp) / "capture"

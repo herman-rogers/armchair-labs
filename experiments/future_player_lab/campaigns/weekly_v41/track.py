@@ -22,6 +22,7 @@ import pandas as pd
 
 from ..weekly_v3.data import ROOT, TEAM_ALIASES
 from ..weekly_v31.artifacts import digest, now
+from ..weekly_v32.official import content_digest
 from . import live
 from .publisher import CAMPAIGN, OUTPUTS, _write, publish, save_outputs
 
@@ -88,6 +89,26 @@ def merge_rows(base, update):
     return merged.set_index("player_id").loc[base.player_id].reset_index()
 
 
+def report_content(reports):
+    """Latest admitted row per player/team, ignoring observation times.
+
+    Every monitor pass seals a fresh capture with new timestamps, so capture manifests
+    always change; this changes only when the official report content does.
+    """
+    keys = ["player_id", "season", "week", "team"]
+    return content_digest(reports.sort_values("usable_at").drop_duplicates(keys, keep="last"))
+
+
+def current(state, fingerprint):
+    """Same inputs, and no newly eligible games (kicked-off games just drop out)."""
+    if not state.exists():
+        return False
+    previous = dict(json.loads(state.read_text()).get("fingerprint") or {})
+    games = set(previous.pop("games", []))
+    rest = {k: v for k, v in fingerprint.items() if k != "games"}
+    return previous == rest and set(fingerprint["games"]) <= games
+
+
 def pregame(snapshot, run, registry, outputs=OUTPUTS, captured_at=None, archive=None):
     document = json.loads(Path(snapshot).read_text())
     season, origin = (document["current_observations"][c] for c in ("season", "through_week"))
@@ -126,10 +147,11 @@ def pregame(snapshot, run, registry, outputs=OUTPUTS, captured_at=None, archive=
         research_manifest_sha256=digest(Path(run) / "manifest.json"),
         early_sha256=digest(early / "players.parquet"),
         games=sorted(g["game_id"] for g in eligible),
-        reports=sorted(i["manifest_sha256"] for i in audit if i["admitted"]),
+        teams=sorted(covered),
+        reports_sha256=report_content(reports),
     )
     state = late / "state.json"
-    if state.exists() and json.loads(state.read_text()).get("fingerprint") == fingerprint:
+    if current(state, fingerprint):
         return dict(status="current", games=fingerprint["games"])
     base = pd.read_parquet(
         (late if (late / "players.parquet").exists() else early) / "players.parquet"
