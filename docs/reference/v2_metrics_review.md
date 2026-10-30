@@ -1,4 +1,4 @@
-> Archived system reference. This describes the earlier metric/board system, not the current NextGen serving path.
+> Archived system reference. This describes the removed metric/board system; the current serving path is ChairStats campaigns (see [model campaigns](../operations/model-campaigns.md)).
 
 > Evidence status (2026-09-22): the numerical results below are historical records.
 > Earlier rankers were evaluated on different player populations and do not establish

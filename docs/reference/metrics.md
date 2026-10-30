@@ -1,4 +1,4 @@
-> Archived system reference. This describes the earlier metric/board system, not the current NextGen serving path.
+> Archived system reference. This describes the removed metric/board system; the current serving path is ChairStats campaigns (see [model campaigns](../operations/model-campaigns.md)).
 
 > 2026-09-22 contract update: see [implementation notes](../history/stat_system_implementation_2026-09-22.md).
 > Forecast tables now use fitted PPG/games; waiver replacement is the best free agent;

@@ -89,3 +89,27 @@ The [2024 rules](https://www.kaggle.com/competitions/nfl-big-data-bowl-2024/rule
 2020 access was subsequently unlocked by user rules acceptance and its archive ingested successfully. The remaining rules-gated competitions still require their own acceptance. Current 2020 training includes 2017–19 and uses legacy player IDs; see the capture report for measured coverage.
 
 Latest retry: 2026 analytics also unlocked and was ingested. Its 36 tracking CSVs exactly duplicate prediction-track training files, while supplementary context adds 18,009 rows. BDB 2021–2025 still explicitly require rules acceptance; if the website does not allow it, use the support route above.
+
+## Replay games in the dashboard
+
+The **Tracking → Game Engine** page (`/tracking/games`) replays ingested tracking archives
+play by play: a field canvas animates every tracked entity at the archive's 10 Hz with
+interpolation between frames, and a table underneath reads each player's speed,
+acceleration, yards covered, peak speed, distance to the ball and to the nearest
+opponent at the current frame. Click a marker or row to follow one player's path.
+Nothing on the page is modeled or predicted; it shows observed frames and the play
+context the archive supplies.
+
+The page reads `/api/tracking/sources`, `/api/tracking/{source}/games`,
+`/api/tracking/{source}/games/{game}/plays` and
+`/api/tracking/{source}/games/{game}/plays/{play}` (`engine.api.tracking_routes`), served
+from `engine.data.tracking_viewer`. Two archives are adapted:
+
+| Source | What is on the field |
+|---|---|
+| `bdb_2024_sumersports` | 2022 weeks 1–9. All 22 players and the ball, snap to tackle. Completions and runs only. |
+| `bdb_2026_prediction` | 2023 regular season pass plays. Passer, route runners and coverage defenders to the throw, then the targeted receiver and nearby defenders in flight. No linemen, no ball; the landing spot is marked. |
+
+Both use the verified releases selected in `data/source_catalog.json`; a source that is
+not ingested is listed as unavailable with its reason. Per-play payloads are built on
+demand from the week partition and cached in process.

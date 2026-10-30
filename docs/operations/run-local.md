@@ -17,6 +17,14 @@ bucket through ADC or `gcloud`; startup opens `gcloud auth login` when credentia
 are unavailable. ESPN sign-in opens a browser only when the saved session cannot
 be verified. Complete sign-in there and select your league if prompted.
 
+ESPN is never a precondition for serving. Campaign models and query tables are
+local; the league snapshot persists to `data/outputs/league_snapshot.json` and to
+DuckDB captures under `data/league/<league>/<season>/`. When ESPN is unreachable,
+startup and the league routes serve that saved snapshot flagged as stale, and the
+server does not retry ESPN on every request: after a failed refresh it waits five
+minutes before trying again (Refresh in the UI forces an attempt). With no saved
+snapshot at all, the league pages stay empty until a later refresh succeeds.
+
 Startup reuses valid local releases. Missing application artifacts are restored
 through the verified archive/cache transport; missing query tables use the pinned
 table release. It reconciles tables against the restored application selection,
@@ -31,10 +39,11 @@ uv run engine dev --no-auth  # analysis only; skip ESPN login/sync
 uv run engine dev --no-setup # services only, for an already prepared workspace
 ```
 
-Startup fetches the published table catalog when it is missing and lists the campaign
-bundles under `data/campaigns/`; it does not capture a newer NFL week or train
-models. Use the publisher refresh workflow for new observations and the campaign
-commands for new models.
+Startup restores missing query tables, then checks the NFL providers for the latest
+completed week, refreshes observations, and adds missing campaign forecasts before
+loading ESPN. It reuses saved model weights. `--no-rescore` skips forecast generation;
+`--no-setup` skips preparation entirely. A refresh failure is reported and startup
+continues with saved data. Use campaign commands to train new models.
 
 Open <http://localhost:5173>. The frontend proxies `/api` to FastAPI. To run each
 service in a separate terminal, use `just api` and `just web`.
@@ -78,7 +87,8 @@ a browser, supply `ESPN_S2` and `ESPN_SWID` as environment variables; these take
 precedence over the file. League configuration lives in `src/engine/config/`.
 
 ESPN supplies league ownership, results, and recorded statuses. The app's **Refresh
-league** action is separate from the football observation and forecast refresh.
+data** action also runs the NFL observation and forecast refresh. A newly completed
+week can take several minutes; the button remains busy until the work completes.
 
 ## Validate changes
 

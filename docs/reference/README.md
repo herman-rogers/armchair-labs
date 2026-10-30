@@ -1,8 +1,8 @@
 # Reference
 
 Archived metric and board contracts, retained to interpret older outputs and
-source comments. These do not describe the current NextGen serving system; see
-[architecture](../architecture/README.md) for that path.
+source comments. These do not describe the current ChairStats campaign serving
+path; see [architecture](../architecture/README.md) for that.
 
 - [V2 metric report and rolling backtest](metric_report.md)
 - [Armchair Labs metrics: the goal, the surviving catalog, and the graveyard](metrics.md)

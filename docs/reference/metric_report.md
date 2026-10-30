@@ -1,6 +1,6 @@
 # V2 metric report and rolling backtest
 
-> Archived system reference. This describes the earlier metric/board system, not the current NextGen serving path.
+> Archived system reference. This describes the removed metric/board system; the current serving path is ChairStats campaigns (see [model campaigns](../operations/model-campaigns.md)).
 
 The metric report answers two different questions for each configured v2 field:
 

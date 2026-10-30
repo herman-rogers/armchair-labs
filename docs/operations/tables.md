@@ -111,11 +111,17 @@ just data-refresh --status
 just data-refresh --version weekly_unique_id --upload  # resume this run after failure
 ```
 
-This captures the next completed regular-season week, builds a validated observation
-batch, then builds all refreshable registered tables and uploads the resulting query
-catalog. An unchanged week still checks recipes and retries any unfinished upload.
-Frozen research imports remain manual. `--force` incorporates reviewed same-week
-source corrections. The weekly cadence is explained in [refresh data](refresh-data.md).
+This downloads the current season's provider files (player stats, play-by-play,
+weekly rosters, snap counts, injuries, identities, schedules, the ffverse ID crosswalk
+and the FantasyPros ECR archive) straight from nflverse and dynastyprocess, carries
+completed seasons forward from the previous snapshot by content hash, scores the
+completed weeks with the DuckDB recipes, builds a validated observation batch, then
+builds all refreshable registered tables and uploads the resulting query catalog.
+History tables (`nfl_player_weeks`, `nfl_snap_counts`, `nfl_injuries`, …) hold completed
+seasons only; the capture season lives in the `current_*` tables so a week is never
+counted twice. No accepted history archive is involved. An unchanged week still checks recipes
+and retries any unfinished upload. `--force` incorporates reviewed same-week source
+corrections. The weekly cadence is explained in [refresh data](refresh-data.md).
 
 For table development using already captured sources, without source acquisition
 or forecast/model rebuilds:
@@ -137,7 +143,8 @@ to the objects and manifests; uploading does not make private data public.
 | Stage | Implementation | Result |
 |---|---|---|
 | Production orchestration | `engine.data.pipeline`, `engine.data.refresh` | Capture, register, enrich, build the observation batch, refresh/upload tables |
-| Enrichment | `engine.data.enrich` (`sql/*.sql`) | DuckDB recipes over preserved nflverse files: positions, league scoring, identities, college |
+| Capture | `engine.data.capture` | Provider downloads, carry-forward by hash, completed-week detection, scored current weeks |
+| Enrichment | `engine.data.enrich` (`sql/*.sql`) | DuckDB recipes over preserved provider files: positions, league scoring, identities, college, market ranks |
 | Source contracts | `engine.tables.contracts` | Keys, finite quantities, per-table specs |
 | Table recipes | `engine.tables.registry`, `registry.yaml`, `builders.py` | Declared keys, dependencies, cadence, code |
 | Application reads | `engine.tables.application`, `engine.tables.observations` | Request-scoped pinned catalog and the observation SQL the API uses |
@@ -177,8 +184,9 @@ data refresh --upload`. No scheduler is installed automatically. Equivalent cron
 ```
 
 Advanced bootstrap/staged builds use `engine data build`, `enrich`, `tables`, and
-`verify`; inspect each command's `--help`. `build` stages an immutable observation
-batch; the latest accepted batch is the source for registered `kind: source` tables.
+`verify`; inspect each command's `--help`. `build --version V --college-source C`
+captures a raw snapshot, enriches it and stages an immutable observation batch; the
+latest accepted batch is the source for registered `kind: source` tables.
 After a manual build, run the table refresh/upload command above. The normal
 `data refresh` command performs these steps in order.
 

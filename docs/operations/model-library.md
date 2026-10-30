@@ -2,39 +2,23 @@
 
 Use the library to find current application methods, reusable research models and historical experiments. It separates ability research, opportunity, team context, production and fantasy applications. It is an inventory, not an alternative model-serving registry.
 
-Named campaigns have a separate [training and API workflow](model-campaigns.md).
-The **Campaign provenance** section distinguishes these campaigns:
+The application defaults to **Opening Drive v3.2 preview** (`opening_drive_v32`),
+with v4 candidate, v3 and v2 available for comparison. The
+[v4 candidate workflow](../../experiments/future_player_lab/campaigns/weekly_v4/README.md)
+records its restored components, v3-based horizons, uncertainty evaluation and
+isolated retraining experiment. Its mixed historical results and pending prospective
+outcomes do not justify default promotion. See the [campaign workflow](model-campaigns.md)
+for current serving behavior and the
+[version-lineage requirement](model-campaigns.md#version-lineage-and-retained-functionality):
+new versions must improve their declared base and retain functionality, without
+silently reverting to an older model. The current v2-anchored v3.2 season bridge
+is a documented gap against that requirement.
 
-- **Scout Team v1** (`scout_team_v1`) groups the original RB models and preserved
-  QB forecasts. Its RB records retain fitted estimators; the QB export contains
-  saved passing forecasts, without claiming reusable QB estimator weights.
-- **Opening Drive v1** (`opening_drive_v1`) contains the newly trained RB/QB/WR
-  weights under the shared tree campaign protocol.
-- **Opening Drive v2** (`opening_drive_v2`) tests the same methods with dated
-  availability features and formal retirement eligibility. Its comparison pairs
-  forecasts on the same eligible players and separately measures v1 selection
-  with the eligibility rule alone.
-
-**Opening Drive v2 — Tight End** (`opening_drive_v2_te`) extends the v2 protocol
-with separately fitted TE preseason and after-Week-2 models, a fixed receiving/usage
-feature mask, and the same dated availability policy. The sealed original v2
-bundle remains preserved. [TE results](../research/opening_drive_v2_te_2026-10-10.md).
-
-**RB Exploratory Research** (`rb_exploratory_research`) retains its historical
-identity as a source study within Scout Team v1. It is not an independent
-campaign. Parent labels appear beside the source study and on associated runs and
-saved-model contracts. Campaign availability does not change the application's
-selected models.
-
-Scout Team's QB provenance identifies the exact preserved passing/variation runs
-and the earlier capacity study. The capacity study is evidence, not a source of
-saved fitted estimators. A mixed application release can supply a referenced QB
-artifact without assigning every other model in that release to Scout Team. The
-initial QB export concerns attempts, passing yards, and yards per attempt; it does
-not import the separate fantasy bridge or assert that all source methods use GPUs.
-The Week 4 QB record preserves the published availability-constrained passing-yard
-forecast; unconstrained attempts and efficiency remain separate diagnostics.
-Earlier cutoff records retain the saved attempts, yards, and efficiency forecasts.
+The provenance catalog currently describes v2; it is not the authority for the
+application's selected default or the completeness of newer versions. Its `archived_campaigns`
+records retain Scout Team, Opening Drive v1 and the original TE extension for
+historical reference. Those bundles live outside the application registry under
+`data/campaign_revisions/` and are not frontend choices or application API campaigns.
 
 ```sh
 uv run engine models list
@@ -50,18 +34,15 @@ uv run engine models check
 
 ## Source of truth
 
-- Campaign provenance: `src/engine/models/campaigns.json` associates descriptive
-  labels, original manifest references, configurations, and run paths. It neither
-  edits historical artifacts nor makes a campaign queryable. Only actual sealed
-  bundles under `data/campaigns` appear in `/api/campaigns`. Scout Team's exported
-  original forecasts are queried through its campaign ID once its local bundle is
-  available; the historical RB source-study ID remains provenance, not an extra
-  API bundle. Original saved-model tools and frozen forecasts remain intact.
+- Campaign provenance: `src/engine/models/campaigns.json` describes the v2 campaign
+  and retains historical records separately. Actual sealed artifacts under
+  `data/campaigns/<campaign_id>` supply the application API; its default is declared
+  in `src/engine/chairstats/application.py` and returned by `/api/chairstats/campaigns`.
 - Method descriptions: `src/engine/models/families.json`. Use scoped assessments and linked evidence; do not put approval flags or benchmark numbers here.
 - Current serving decisions: `data/current.json` → selected analysis registry. The library verifies hashes of the selected manifest and displayed registry/reports. Weekly decisions additionally require the selected analysis identity to match.
 - Reusable model contracts: JSON definitions under experiment labs, including the existing saved-model registry. Supported positions, origins, scoring and artifact references stay visible.
 - Local runs: direct children of `data/research`, `data/campaigns`, and `experiments/*/runs`. Hidden campaign staging directories are excluded. Missing manifests remain explicitly unindexed; a completed run is not an approved model.
-- Source inventory: Python modules in metrics, board, research runners, and the experiment/deep/GPU/saved-forecast directories. `source_groups.json` assigns module ownership and shared infrastructure separately from curated entrypoints. Ownership is not a claim that every file implements a model. Unassigned sources are a review backlog, not a count of unvalidated models.
+- Source inventory: Python modules in metrics, chairstats, research runners, and the experiment/deep/GPU/saved-forecast directories. `source_groups.json` assigns module ownership and shared infrastructure separately from curated entrypoints. Ownership is not a claim that every file implements a model. Unassigned sources are a review backlog, not a count of unvalidated models.
 - Removed or narrowed claims: `src/engine/models/claims.json`. Retain evidence for negative findings instead of deleting the record of what failed.
 
 The catalog embeds all selected release registry entries, including measurement and archived entries. Counts of entries, run directories, recipes and fitted estimators are different quantities. The catalog deliberately does not collapse them into a misleading “number of models.”
