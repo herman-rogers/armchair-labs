@@ -336,8 +336,16 @@ def plan_captures(injury_hours: float, official_hours: float) -> Area:
     if dated:
         newest = max(t for t, _ in dated)
         cutoff = newest - timedelta(hours=injury_hours)
+        # "Unchanged" captures are summaries pointing at the full capture they repeat.
+        referenced = {
+            (read_json(p / "summary.json", {}) or {}).get("observations_from")
+            for t, p in dated
+            if t >= cutoff
+        }
         for t, p in sorted(dated):
-            if t >= cutoff:
+            if p.name in referenced:
+                area.keep(p, "full provider injury capture repeated by a newer unchanged one")
+            elif t >= cutoff:
                 area.keep(p, f"provider injury capture within {injury_hours:g} h of newest")
             else:
                 area.move(p, "older provider injury capture (only the newest is read)")

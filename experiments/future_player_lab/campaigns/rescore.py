@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -97,8 +98,9 @@ def refresh_availability_sources(season: int, supplements: Path, snapshot: Path)
 
     Mirrors ``availability.data.prepare_sources`` but with a fresh ESPN transaction
     capture for the current year and current-season rosters/injuries from the
-    newest supplement run. Earlier years' pages and receipts are copied, so only the
-    current year is downloaded again.
+    newest supplement run. Earlier years' pages and receipts are hard-linked (copied
+    across filesystems); ``espn.capture`` only reads and digest-checks pages that have
+    receipts, so only the current year is downloaded again and nothing is duplicated.
     """
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     directory = SOURCES_ROOT / f"opening_drive_v2_sources_rolling_{stamp}"
@@ -108,7 +110,10 @@ def refresh_availability_sources(season: int, supplements: Path, snapshot: Path)
     for path in previous.glob("*.json"):
         year = int(path.name.split("_")[0]) if path.name[:4].isdigit() else None
         if year is not None and year < season:
-            shutil.copyfile(path, pages / path.name)
+            try:
+                os.link(path, pages / path.name)
+            except OSError:
+                shutil.copyfile(path, pages / path.name)
     espn.capture(pages, 2002, season)
     manifest = json.loads((pages / "manifest.json").read_text())
     roster = raw.read_family("rosters")
