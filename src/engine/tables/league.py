@@ -16,7 +16,7 @@ import polars as pl
 import yaml
 
 from engine.data.releases import digest
-from engine.data.shared import json_bytes, lock, write_new
+from engine.data.shared import json_bytes, lock, sha256, write_new
 from engine.tables.build import refresh
 from engine.tables.query import connect
 from engine.tables.storage import PAYLOAD, ROW, content_hash, load_catalog
@@ -66,11 +66,18 @@ def capture(
         specs = {}
         for name, records in groups.items():
             frame = records_frame(records, (schemas or {}).get(name))
-            path = source / f"{name}.parquet"
             # No receipt exists yet; recover safely from an interrupted capture.
-            temporary = path.with_suffix(".tmp")
+            temporary = source / f"{name}.tmp"
             frame.write_parquet(temporary, compression="zstd")
-            temporary.replace(path)
+            # Content-addressed sources keep each table's recipe and input identity
+            # stable across captures, so only tables whose bytes changed rebuild.
+            checksum = sha256(temporary)
+            path = data / "captures/sources" / name / f"{checksum}.parquet"
+            if path.exists() and sha256(path) == checksum:
+                temporary.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary.replace(path)
             specs[name] = {
                 "description": f"Captured league data: {name}.",
                 "grain": "One record within the pinned capture.",
@@ -114,7 +121,10 @@ def query_snapshot(snapshot, data_dir: Path):
     raw = asdict(snapshot)
     lists = ("teams", "players", "transactions", "draft", "week_lineups")
     groups = {"league_" + name: raw[name] for name in lists}
-    groups["league_snapshot"] = [{k: v for k, v in raw.items() if k not in lists}]
+    # The poll time is metadata, not league content: keeping it out of the capture
+    # lets an unchanged poll reuse the pinned catalog, releases and native cache.
+    volatile = (*lists, "captured_at")
+    groups["league_snapshot"] = [{k: v for k, v in raw.items() if k not in volatile}]
     groups["league_schedule"] = [
         {"team_id": team["team_id"], **game} for team in raw["teams"] for game in team["schedule"]
     ]
@@ -150,7 +160,9 @@ def query_snapshot(snapshot, data_dir: Path):
                 f'SELECT "{PAYLOAD}" FROM analytics."league_{name}" ORDER BY "{ROW}"'
             ).fetchall()
             queried[name] = [json.loads(row[0]) for row in rows]
-    return LeagueSnapshot.from_dict({**queried.pop("snapshot")[0], **queried})
+    return LeagueSnapshot.from_dict(
+        {**queried.pop("snapshot")[0], **queried, "captured_at": snapshot.captured_at}
+    )
 
 
 def query_documents(directory: Path, name: str, records: list[dict]) -> list[dict]:
