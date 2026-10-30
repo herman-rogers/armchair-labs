@@ -24,6 +24,7 @@ from engine.api.scoring_routes import router as scoring_router
 from engine.api.tables_routes import router as tables_router
 from engine.api.team_analysis_routes import router as team_analysis_router
 from engine.api.tracking_routes import router as tracking_router
+from engine.api.web import mount_web
 from engine.config.league import get_league
 from engine.config.settings import get_settings
 from engine.data.verification import VerificationChanged, verification_batch
@@ -201,3 +202,7 @@ def status() -> dict[str, Any]:
             "seasons": config.seasons,
         },
     }
+
+
+# Deployed builds serve the frontend too (see engine.api.web); must stay after every route.
+mount_web(app)

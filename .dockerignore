@@ -1,0 +1,20 @@
+# Source only: state and secrets are mounted or injected at run time.
+.git
+.env
+.env.*
+.secrets
+service-account*.json
+.venv
+.notebook-venv
+.packages
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/node_modules
+data
+artifacts
+web/dist
+experiments/**/runs
+experiments/**/.test-tmp
+**/__marimo__
